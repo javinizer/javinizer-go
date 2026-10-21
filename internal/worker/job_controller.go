@@ -175,6 +175,7 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		cancel()
 		return err // CAS loser: duplicate launch rejected up-front
 	}
+	cfg.OrganizeOptions.VideoCollisionGeneration = applyGeneration - 1
 	// Roll back only this claim. A pre-claim snapshot can already be stale,
 	// and another lifecycle must never inherit this failed launch's rollback.
 	rollbackApplyGeneration := func() {

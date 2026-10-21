@@ -233,7 +233,9 @@ javinizer sort ~/Videos --extrafanart
 javinizer sort ~/Videos --force-refresh
 ```
 
-**Force update existing files (overwrite conflicts):**
+**Force update existing files (legacy overwrite authorization):**
+
+This CLI flag is separate from Web Review's snapshot-bound `video_collision_policy`. The web API does not enable `--force-update`; see [Existing Video Destinations](video-collision-policy.md).
 ```bash
 javinizer sort ~/Videos --force-update
 ```

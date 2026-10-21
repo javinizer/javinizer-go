@@ -183,7 +183,8 @@ Batch scraping workflow with job tracking and WebSocket progress updates.
 | `GET` | `/api/v1/batch/:id` | Get batch job status and results |
 | `DELETE` | `/api/v1/batch/:id` | Delete a batch job |
 | `POST` | `/api/v1/batch/:id/cancel` | Cancel a running batch job |
-| `POST` | `/api/v1/batch/:id/organize` | Organize files from a completed batch job |
+| `POST` | `/api/v1/batch/:id/video-collisions` | Review video destinations and issue snapshot-bound decision receipts |
+| `POST` | `/api/v1/batch/:id/organize` | Organize files from a completed batch job; unresolved video collisions return 409 |
 | `POST` | `/api/v1/batch/:id/update` | Update batch job files (write NFO + media in place) |
 | `PATCH` | `/api/v1/batch/:id/results/:resultId` | Update movie metadata in a batch job |
 | `POST` | `/api/v1/batch/:id/results/:resultId/poster-crop` | Update poster crop settings for a result |
@@ -193,6 +194,8 @@ Batch scraping workflow with job tracking and WebSocket progress updates.
 | `POST` | `/api/v1/batch/:id/results/:resultId/rescrape` | Re-scrape a specific movie in the batch |
 | `POST` | `/api/v1/batch/:id/movies/batch-exclude` | Bulk exclude movies from organization |
 | `POST` | `/api/v1/batch/:id/movies/batch-rescrape` | Bulk re-scrape movies with merge strategies |
+
+Video collision policy defaults to `fail`, independently of NFO/artwork overwrite. See [Existing Video Destinations](video-collision-policy.md) for `skip`/`replace`, exact per-endpoint review receipts, and stale-decision/recovery contracts.
 
 **Example - Start batch scrape:**
 ```bash

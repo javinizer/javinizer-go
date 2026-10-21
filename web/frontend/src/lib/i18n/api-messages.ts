@@ -21,7 +21,10 @@ const ERROR_CODE_MAP: Record<string, (p: Params) => string> = {
 	PATH_INVALID: (p) => m.error_path_invalid({ path: str(p, 'path') }),
 	CONFIG_INVALID: (p) => m.error_config_invalid({ field: str(p, 'field') }),
 	JOB_NOT_FOUND: (p) => m.error_job_not_found({ job_id: str(p, 'job_id') }),
-	REQUEST_TIMEOUT: () => m.review_load_timeout()
+	REQUEST_TIMEOUT: () => m.review_load_timeout(),
+	VIDEO_COLLISION_UNRESOLVED: () => m.review_video_blocked(),
+	VIDEO_COLLISION_STALE: () => m.review_video_blocked(),
+	VIDEO_COLLISION_REFRESHED: () => m.review_video_blocked(),
 };
 
 const PROGRESS_CODE_MAP: Record<string, (p: Params) => string> = {
@@ -29,14 +32,17 @@ const PROGRESS_CODE_MAP: Record<string, (p: Params) => string> = {
 	SCRAPE_SUCCEEDED: (p) => m.progress_scrape_succeeded({ movie_id: str(p, 'movie_id') }),
 	SCRAPE_FAILED: (p) =>
 		m.progress_scrape_failed({ movie_id: str(p, 'movie_id'), error: str(p, 'error') }),
-	BATCH_COMPLETED: (p) => m.progress_batch_completed({ count: num(p, 'count'), failed: num(p, 'failed') })
+	BATCH_COMPLETED: (p) =>
+		m.progress_batch_completed({ count: num(p, 'count'), failed: num(p, 'failed') }),
+	BATCH_COMPLETED_WITH_SKIPS: (p) =>
+		m.progress_batch_completed_with_skips({
+			count: num(p, 'count'),
+			skipped: num(p, 'skipped'),
+			failed: num(p, 'failed'),
+		}),
 };
 
-export function translateErrorCode(
-	code: string,
-	params: Params,
-	fallback: string
-): string {
+export function translateErrorCode(code: string, params: Params, fallback: string): string {
 	const fn = ERROR_CODE_MAP[code];
 	if (!fn) return fallback;
 	try {
@@ -47,11 +53,7 @@ export function translateErrorCode(
 	}
 }
 
-export function translateProgressMessage(
-	code: string,
-	args: Params,
-	fallback: string
-): string {
+export function translateProgressMessage(code: string, args: Params, fallback: string): string {
 	const fn = PROGRESS_CODE_MAP[code];
 	if (!fn) return fallback;
 	try {

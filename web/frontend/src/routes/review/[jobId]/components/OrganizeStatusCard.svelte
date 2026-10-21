@@ -36,9 +36,10 @@
 	}: Props = $props();
 
 	const failures = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'failed'));
-	const successes = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'success'));
+	const skippedCount = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'skipped').length);
+	const successes = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'success' || s.status === 'replaced'));
 	const successCount = $derived(
-		successes.length > 0 ? successes.length : expectedOrganizeFilePaths.length
+		fileStatuses.size > 0 ? successes.length : expectedOrganizeFilePaths.length
 	);
 </script>
 
@@ -72,7 +73,7 @@
 							<Check class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
 						{/if}
 						<div class="flex-1 min-w-0">
-							<div class="font-medium truncate">{filePath.split(/[\\/]/).pop()}</div>
+							<div class="font-medium truncate">{filePath.split(/[\\/]/).pop()} · {status.status}</div>
 							{#if status.error}
 								<div class="text-red-700 dark:text-red-400 text-xs mt-1">{status.error}</div>
 							{/if}
@@ -95,6 +96,7 @@
 					</h3>
 					<p class="text-sm text-green-800 dark:text-green-300 mb-3">
 						{isUpdateMode ? m.review_all_files_updated({ count: successCount }) : m.review_all_files_organized({ count: successCount })}
+						{#if skippedCount > 0}{m.review_video_skipped_count({count:skippedCount})}{/if}
 					</p>
 					<p class="text-xs text-green-700 dark:text-green-400">{m.review_redirecting_browse()}</p>
 					<div class="mt-4">

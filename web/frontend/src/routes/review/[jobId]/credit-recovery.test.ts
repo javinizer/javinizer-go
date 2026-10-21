@@ -92,9 +92,19 @@ beforeEach(async () => {
 		configurable: true,
 		value: () => [],
 	});
+	vi.spyOn(apiClient, 'reviewVideoCollisions').mockResolvedValue({
+		items: [],
+		new: 1,
+		replaced: 0,
+		skipped: 0,
+		unresolved: 0,
+		same_file: 0,
+	});
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
-	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({ display_title: 'Synthetic display title' });
+	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({
+		display_title: 'Synthetic display title',
+	});
 	vi.spyOn(apiClient, 'getScrapers').mockResolvedValue([
 		{ name: 'synthetic', enabled: true },
 	] as never);
@@ -120,6 +130,25 @@ afterEach(() => {
 	clients.splice(0).forEach((c) => c.clear());
 	vi.restoreAllMocks();
 });
+it('keeps unsaved metadata drafts out of automatic destination review', async () => {
+	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(original());
+	const writes = vi.spyOn(apiClient, 'updateBatchMovie');
+	mount();
+	await waitFor(() => expect(observedReview.state?.job).toBeTruthy());
+	const state = observedReview.state!;
+	state.editedMovies.set(filePath, {
+		...original().results[filePath].movie!,
+		title: 'Unsaved title',
+	});
+	vi.mocked(apiClient.reviewVideoCollisions).mockClear();
+	await state.reviewVideoCollisions();
+	expect(writes).not.toHaveBeenCalled();
+	expect(apiClient.reviewVideoCollisions).not.toHaveBeenCalled();
+	expect(state.editedMovies.get(filePath)?.title).toBe('Unsaved title');
+	expect(state.videoCollisionError).toMatch(/Save metadata changes/);
+	expect(state.videoCollisionBlocked).toBe(true);
+});
+
 function mount() {
 	const client = new QueryClient({
 		defaultOptions: {
@@ -153,7 +182,7 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		await waitFor(() => expect(view.getByRole('button', { name: /Keep catalog/ })).toBeTruthy());
 		const organize = view.getAllByRole('button', { name: /Organize.*1.*file/i });
 		expect(organize.length).toBeGreaterThan(0);
-		expect((organize[0] as HTMLButtonElement).disabled).toBe(false);
+		await waitFor(() => expect((organize[0] as HTMLButtonElement).disabled).toBe(false));
 		await fireEvent.click(organize[0]);
 		await waitFor(() => expect(apply).toHaveBeenCalledOnce());
 		await waitFor(() => expect(view.getByRole('button', { name: /Retry Failed/i })).toBeTruthy());
@@ -203,7 +232,9 @@ it('blocks an expanded movie-specific editor during Organize', async () => {
 	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(original());
 	vi.mocked(apiClient.listCollisions).mockResolvedValue({ collisions: [] });
 	const override = vi.spyOn(apiClient, 'updateCreditOverride').mockResolvedValue();
-	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({ apply_generation: 1 } as never);
+	const apply = vi
+		.spyOn(apiClient, 'organizeBatchJob')
+		.mockResolvedValue({ apply_generation: 1 } as never);
 	const view = mount();
 	await fireEvent.click(await view.findByRole('button', { name: 'This movie only' }));
 	await fireEvent.input(view.getByLabelText('Name for this movie'), {
@@ -332,8 +363,12 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		await fireEvent.click(await view.findByRole('button', { name: /Keep catalog/ }));
 		await waitFor(() => expect(resolve).toHaveBeenCalledOnce());
 		await waitFor(() => expect(observedReview.state?.isSavingEdits).toBe(false));
-		expect((view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled).toBe(true);
-		expect(view.getByText(/original apply attempt or settings could not be verified/i)).toBeTruthy();
+		expect(
+			(view.getByRole('button', { name: /Retry Failed/i }) as HTMLButtonElement).disabled,
+		).toBe(true);
+		expect(
+			view.getByText(/original apply attempt or settings could not be verified/i),
+		).toBeTruthy();
 		await fireEvent.click(view.getByRole('tab', { name: /Failed/ }));
 		expect(view.getAllByRole('button', { name: /Search Manually/i })).toHaveLength(1);
 		expect(view.getByText('unidentified.mp4')).toBeTruthy();
@@ -397,7 +432,9 @@ it('keeps the expected-file success summary and Continue action wired outside th
 	// The status card supports a terminal notification without individual file
 	// outcomes. Exercise that fallback using the real page's captured state.
 	observedReview.state!.fileStatuses.clear();
-	await waitFor(() => expect(view.getByText(/All 1 file\(s\) organized successfully/)).toBeTruthy());
+	await waitFor(() =>
+		expect(view.getByText(/All 1 file\(s\) organized successfully/)).toBeTruthy(),
+	);
 	const { goto } = await import('$app/navigation');
 	vi.mocked(goto).mockClear();
 	await fireEvent.click(view.getByRole('button', { name: /Return to Browse now/i }));

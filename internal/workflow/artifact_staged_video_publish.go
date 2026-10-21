@@ -79,6 +79,9 @@ func (s *artifactStage) stagedVideoResident(staged, target string, primary bool)
 		source, admitted = sibling.sourcePath, sibling.identity
 	}
 	if admitted.known && filepath.Clean(target) == filepath.Clean(source) {
+		if err := s.reviewedResidentError(target, primary); err != nil {
+			return false, err
+		}
 		return true, s.revalidateAdmittedSource(target, admitted)
 	}
 	// A distinct hardlink or case-only alias can already name the admitted
@@ -98,6 +101,9 @@ func (s *artifactStage) stagedVideoResident(staged, target string, primary bool)
 				return true, err
 			}
 			if artifactSameRegularFile(s.fs, source, target) {
+				if err := s.reviewedResidentError(target, primary); err != nil {
+					return false, err
+				}
 				return true, s.revalidateAdmittedSource(source, admitted)
 			}
 		}
@@ -122,7 +128,15 @@ func (s *artifactStage) publishStagedVideo(source, target string, allowReplace b
 		return fmt.Errorf("staged video is not a regular file: %s", source)
 	}
 	admitted := captureArtifactSourceIdentity(s.fs, source, info)
-	replaced, err := stagedVideoBeforePublish(s.publishBatch, s.publishCtx, target, allowReplace)
+	var replaced bool
+	if s.reviewedPrimaryTarget(target) {
+		decision := s.original.Organize.VideoCollisionDecisions[filepath.Clean(s.sourcePath)]
+		replaced, err = s.publishBatch.BeforePublishChecked(s.publishCtx, target, true, func(path string) error {
+			return verifyVideoReview(s.publishCtx, s.fs, decision, s.sourcePath, target, s.original.Organize.videoReviewScope, path)
+		})
+	} else {
+		replaced, err = stagedVideoBeforePublish(s.publishBatch, s.publishCtx, target, allowReplace)
+	}
 	if err != nil {
 		return err
 	}
@@ -149,6 +163,9 @@ func (s *artifactStage) publishStagedVideo(source, target string, allowReplace b
 	proof := func(path string, current os.FileInfo) error {
 		if !admitted.matches(s.fs, path, current) {
 			return fmt.Errorf("%w: staged video %s", errArtifactSourceChanged, path)
+		}
+		if s.reviewedPrimaryTarget(target) {
+			return s.verifyReviewedPayload(path, current)
 		}
 		return nil
 	}

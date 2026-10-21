@@ -24,6 +24,9 @@ import type {
 	ScalarMergeStrategy,
 	ArrayMergeStrategy,
 	ReviewApplyOverrides,
+	VideoCollision,
+	VideoCollisionDecision,
+	VideoCollisionReport,
 } from '$lib/api/types';
 import { toastStore } from '$lib/stores/toast';
 import { confirmDialog } from '$lib/stores/dialog.svelte';
@@ -183,7 +186,10 @@ export function shouldClearUnstartedApplyRecovery(
 
 export function isCreditBlockedResult(result: FileResult): boolean {
 	if (result.status !== 'failed' || !result.movie) return false;
-	if (result.error_code === 'credit_conflict' || result.error_code === 'credit_status_unavailable') {
+	if (
+		result.error_code === 'credit_conflict' ||
+		result.error_code === 'credit_status_unavailable'
+	) {
 		return true;
 	}
 	// v1.6.2 persisted these exact terminal Apply-gate diagnostics as generic
@@ -213,6 +219,7 @@ function validRecoveryOptions(value: unknown): boolean {
 		if (options[key] !== undefined && typeof options[key] !== 'boolean') return false;
 	}
 	const choices: Record<string, string[]> = {
+		video_collision_policy: ['fail', 'skip', 'replace'],
 		preset: ['conservative', 'gap-fill', 'aggressive'],
 		scalar_strategy: [
 			'prefer-nfo',
@@ -240,6 +247,25 @@ function validRecoveryOptions(value: unknown): boolean {
 			options.retry_file_paths.some((path) => typeof path !== 'string'))
 	)
 		return false;
+	if (options.video_collision_decisions !== undefined) {
+		if (
+			!options.video_collision_decisions ||
+			typeof options.video_collision_decisions !== 'object' ||
+			Array.isArray(options.video_collision_decisions)
+		)
+			return false;
+		for (const [path, raw] of Object.entries(options.video_collision_decisions)) {
+			if (!raw || typeof raw !== 'object') return false;
+			const decision = raw as Record<string, unknown>;
+			if (
+				decision.source !== path ||
+				typeof decision.destination !== 'string' ||
+				typeof decision.review_token !== 'string' ||
+				!['fail', 'skip', 'replace'].includes(decision.policy as string)
+			)
+				return false;
+		}
+	}
 	return options.overrides === undefined || validRecoveryOptions(options.overrides);
 }
 
@@ -547,6 +573,167 @@ export function createReviewState(getJobId: () => string) {
 	let showAllSidebarScreenshots = $state(false);
 	let showFullSourcePath = $state(false);
 
+	let videoCollisionDecisions = $state<Record<string, VideoCollisionDecision>>({});
+	let videoCollisionReport = $state<VideoCollisionReport | null>(null);
+	let videoCollisionPending = $state(false);
+	let videoCollisionPendingJob = $state('');
+	let videoCollisionEpoch = 0;
+	let videoCollisionError = $state<string | null>(null);
+	let videoCollisionSignature = $state('');
+	let videoCollisionAttemptSignature = $state('');
+	$effect(() => {
+		const signature = currentVideoCollisionSignature();
+		if (
+			!canOrganize ||
+			editedMovies.size > 0 ||
+			isUpdateMode ||
+			organizing ||
+			(videoCollisionPending && videoCollisionPendingJob === jobId) ||
+			getEffectiveOperationMode() === 'metadata-artwork' ||
+			(!destinationPath && getEffectiveOperationMode() === 'organize') ||
+			videoCollisionAttemptSignature === signature
+		)
+			return;
+		const timer = setTimeout(() => void reviewVideoCollisions(), 250);
+		return () => clearTimeout(timer);
+	});
+	let videoDecisionsJobId = $state('');
+	function failedApplyPaths(recovery?: ApplyRecoveryState | null) {
+		const paths = new Set(Object.keys(recovery?.failed ?? {}));
+		for (const [path, status] of fileStatuses) {
+			if (status.status === 'failed') paths.add(path);
+		}
+		for (const [path, result] of Object.entries(job?.results ?? {})) {
+			if (result.status === 'failed' && result.movie) paths.add(path);
+		}
+		return Array.from(paths).filter((path) => !job?.excluded?.[path]);
+	}
+	function videoCollisionRequest() {
+		const options =
+			organizeController.retryOptions ??
+			(organizeController.hasApplyContext ? null : readApplyRecovery(jobId));
+		if (options?.operation === 'organize') {
+			const paths = failedApplyPaths('failed' in options ? options : null);
+			const current = buildReviewOverrides();
+			return {
+				destination: options.destination,
+				operation_mode: options.operationMode as ReviewApplyOverrides['operation_mode'],
+				copy_only: options.organizeOperation !== 'move',
+				link_mode:
+					options.organizeOperation === 'hardlink'
+						? ('hard' as const)
+						: options.organizeOperation === 'softlink'
+							? ('soft' as const)
+							: undefined,
+				retry_file_paths: paths,
+				overrides: {
+					...options.overrides,
+					video_collision_policy: current.video_collision_policy,
+					video_collision_decisions: Object.fromEntries(
+						Object.entries(current.video_collision_decisions ?? {}).filter(([path]) =>
+							paths.includes(path),
+						),
+					),
+				},
+			};
+		}
+		return {
+			destination: destinationPath,
+			operation_mode: getEffectiveOperationMode() as ReviewApplyOverrides['operation_mode'],
+			copy_only: organizeOperation !== 'move',
+			link_mode:
+				organizeOperation === 'hardlink'
+					? ('hard' as const)
+					: organizeOperation === 'softlink'
+						? ('soft' as const)
+						: undefined,
+			overrides: buildReviewOverrides(),
+		};
+	}
+	function currentVideoCollisionSignature() {
+		return JSON.stringify([
+			jobId,
+			job?.apply_generation,
+			videoCollisionRequest(),
+			job?.excluded,
+			Object.values(job?.results ?? {}).map((result) => [result.file_path, result.revision]),
+			config?.output,
+		]);
+	}
+	function videoCollisionBlocked() {
+		return (
+			!isUpdateMode &&
+			canOrganize &&
+			getEffectiveOperationMode() !== 'metadata-artwork' &&
+			(editedMovies.size > 0 ||
+				!videoCollisionReport ||
+				(videoCollisionPending && videoCollisionPendingJob === jobId) ||
+				!!videoCollisionError ||
+				videoCollisionReport.unresolved > 0 ||
+				videoCollisionSignature !== currentVideoCollisionSignature())
+		);
+	}
+	async function reviewVideoCollisions() {
+		if (editedMovies.size > 0) return;
+		const targetJobId = jobId;
+		const epoch = ++videoCollisionEpoch;
+		videoCollisionPendingJob = targetJobId;
+		videoCollisionAttemptSignature = currentVideoCollisionSignature();
+		videoCollisionPending = true;
+		videoCollisionError = null;
+		try {
+			if (videoDecisionsJobId !== targetJobId) {
+				videoDecisionsJobId = targetJobId;
+				videoCollisionDecisions = {};
+				if (browser) {
+					const saved = sessionStorage.getItem(`javinizer.review.videoCollisions.${targetJobId}`);
+					if (saved) {
+						const parsed = JSON.parse(saved);
+						if (validRecoveryOptions({ video_collision_decisions: parsed }))
+							videoCollisionDecisions = parsed;
+					}
+				}
+			}
+			const signature = currentVideoCollisionSignature();
+			videoCollisionAttemptSignature = signature;
+			const report = await apiClient.reviewVideoCollisions(targetJobId, videoCollisionRequest());
+			if (jobId !== targetJobId || epoch !== videoCollisionEpoch) return;
+			videoCollisionReport = report;
+			videoCollisionSignature = signature;
+		} catch (error) {
+			if (jobId === targetJobId && epoch === videoCollisionEpoch)
+				videoCollisionError =
+					error instanceof Error ? error.message : m.review_video_review_failed();
+		} finally {
+			if (epoch === videoCollisionEpoch) videoCollisionPending = false;
+		}
+	}
+	async function decideVideoCollision(item: VideoCollision, policy: 'fail' | 'skip' | 'replace') {
+		const selected = item.selected_source
+			? videoCollisionReport?.items.find(
+					(candidate) => candidate.source === item.selected_source && !candidate.selected_source,
+				)
+			: item;
+		if (!selected) return;
+		const next = { ...videoCollisionDecisions };
+		if (policy === 'fail') delete next[selected.source];
+		else
+			next[selected.source] = {
+				source: selected.source,
+				destination: selected.destination,
+				policy,
+				review_token: selected.review_token ?? '',
+			};
+		videoCollisionDecisions = next;
+		try {
+			if (browser)
+				sessionStorage.setItem(`javinizer.review.videoCollisions.${jobId}`, JSON.stringify(next));
+		} catch {
+			videoCollisionError = m.review_retry_storage_unavailable();
+			return;
+		}
+		await reviewVideoCollisions();
+	}
 	let forceOverwrite = $state(false);
 	let preserveNfo = $state(false);
 	let skipNfo = $state(false);
@@ -719,9 +906,8 @@ export function createReviewState(getJobId: () => string) {
 				previousSelectionJobId === selectionJobId && index === previousMovieIndex
 					? groups.findIndex((group) => group.movieId === priorSelection)
 					: -1;
-			currentMovieIndex = retainedIndex >= 0
-				? retainedIndex
-				: Math.max(0, Math.min(index, groups.length - 1));
+			currentMovieIndex =
+				retainedIndex >= 0 ? retainedIndex : Math.max(0, Math.min(index, groups.length - 1));
 			previousMovieGroups = groups;
 			previousMovieIndex = currentMovieIndex;
 			previousSelectionJobId = selectionJobId;
@@ -1347,6 +1533,10 @@ export function createReviewState(getJobId: () => string) {
 				writeOwnedApplyRecovery(recovery);
 			}
 		},
+		onApplyRejected: () => {
+			videoCollisionSignature = '';
+			videoCollisionAttemptSignature = '';
+		},
 		clearApplyRecovery: () => {
 			currentApplyRecovery = null;
 			failedRecoveryWrites.add(jobId);
@@ -1613,7 +1803,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	function buildReviewOverrides(): ReviewApplyOverrides {
-		return buildReviewApplyOverrides(
+		const overrides = buildReviewApplyOverrides(
 			{
 				destinationPath,
 				forceOverwrite,
@@ -1628,6 +1818,11 @@ export function createReviewState(getJobId: () => string) {
 			isUpdateMode,
 			getEffectiveOperationMode() as ReviewApplyOverrides['operation_mode'],
 		);
+		if (!isUpdateMode) {
+			overrides.video_collision_policy = job?.apply_plan?.video_collision_policy ?? 'fail';
+			overrides.video_collision_decisions = JSON.parse(JSON.stringify(videoCollisionDecisions));
+		}
+		return overrides;
 	}
 
 	function defaultApplyPaths(): string[] {
@@ -1736,24 +1931,25 @@ export function createReviewState(getJobId: () => string) {
 		// A failed row or apply_plan does not contain the original copy/link mode.
 		// Only an exact accepted-generation receipt and its original options authorize retry.
 		if (!options) return;
-		const retryPaths = new Set(Object.keys(recovery?.failed ?? {}));
-		for (const [filePath, status] of fileStatuses) {
-			if (status.status === 'failed') retryPaths.add(filePath);
-		}
-		for (const [filePath, result] of Object.entries(job?.results ?? {})) {
-			if (result.status === 'failed' && result.movie) retryPaths.add(filePath);
-		}
-		const paths = Array.from(retryPaths).filter((filePath) => !job?.excluded?.[filePath]);
+		const paths = failedApplyPaths(recovery);
 		if (paths.length === 0) return;
 		if (options?.operation === 'update') {
 			await updateAll(options.updateOptions, paths, options.acceptedApplyGeneration);
 			return;
 		}
 		if (options?.operation === 'organize') {
+			if (videoCollisionBlocked()) await reviewVideoCollisions();
+			if (
+				jobId !== targetJobId ||
+				job?.apply_generation !== options.acceptedApplyGeneration ||
+				videoCollisionBlocked()
+			)
+				return;
+			const overrides = videoCollisionRequest().overrides;
 			await organizeAll(
 				options.skipNfo,
 				options.skipDownload,
-				options.overrides ?? null,
+				overrides,
 				paths,
 				options.organizeOperation,
 				options.destination,
@@ -2230,6 +2426,23 @@ export function createReviewState(getJobId: () => string) {
 		}
 	}
 	return {
+		get videoCollisionReport() {
+			return videoDecisionsJobId === jobId ? videoCollisionReport : null;
+		},
+		get videoCollisionPending() {
+			return videoCollisionPending && videoCollisionPendingJob === jobId;
+		},
+		get videoCollisionError() {
+			return editedMovies.size > 0 ? m.review_video_save_first() : videoCollisionError;
+		},
+		get videoCollisionBlocked() {
+			return videoCollisionBlocked();
+		},
+		get videoCollisionDecisions() {
+			return videoCollisionDecisions;
+		},
+		reviewVideoCollisions,
+		decideVideoCollision,
 		get job() {
 			return job;
 		},

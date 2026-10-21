@@ -263,6 +263,10 @@ definitions:
           TranslationWarningCode is the machine-readable classification of
           TranslationWarning (rate_limited, unavailable, degraded, ...).
         type: string
+      video_collision:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.ConflictError'
+      video_outcome:
+        type: string
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobListResponse:
     properties:
@@ -529,6 +533,8 @@ definitions:
         additionalProperties: {}
         description: Structured arguments for translating Code into a localized message
         type: object
+      video_collision_review:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse'
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ExistingNFOResponse:
     properties:
@@ -1185,6 +1191,10 @@ definitions:
       trailer_path:
         example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-trailer.mp4
         type: string
+      video_collisions:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision'
+        type: array
       video_files:
         description: 'For multi-part files: all video file paths'
         items:
@@ -1220,6 +1230,12 @@ definitions:
         type: boolean
       skip_nfo:
         type: boolean
+      video_collision_decisions:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Decision'
+        type: object
+      video_collision_policy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy'
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.OverlapInfo:
     properties:
@@ -1523,6 +1539,12 @@ definitions:
         type: boolean
       skip_nfo:
         type: boolean
+      video_collision_decisions:
+        additionalProperties:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Decision'
+        type: object
+      video_collision_policy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy'
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest:
     properties:
@@ -1735,6 +1757,23 @@ definitions:
       skip_nfo:
         type: boolean
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision'
+        type: array
+      new:
+        type: integer
+      replaced:
+        type: integer
+      same_file:
+        type: integer
+      skipped:
+        type: integer
+      unresolved:
+        type: integer
+    type: object
   github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy:
     enum:
     - merge
@@ -1792,6 +1831,8 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput'
       version:
         type: integer
+      video_collision_policy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy'
       video_operation:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation'
     type: object
@@ -2810,11 +2851,13 @@ definitions:
     - HistoryOpNFO
   github_com_javinizer_javinizer-go_internal_models.HistoryStatus:
     enum:
+    - skipped
     - success
     - failed
     - reverted
     type: string
     x-enum-varnames:
+    - HistoryStatusSkipped
     - HistoryStatusSuccess
     - HistoryStatusFailed
     - HistoryStatusReverted
@@ -3118,6 +3161,51 @@ definitions:
       version:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_videocollision.Collision:
+    properties:
+      destination:
+        type: string
+      destination_size:
+        type: integer
+      kind:
+        type: string
+      review_token:
+        type: string
+      selected_source:
+        type: string
+      source:
+        type: string
+      source_size:
+        type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_videocollision.ConflictError:
+    properties:
+      code:
+        type: string
+      collision:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision'
+    type: object
+  github_com_javinizer_javinizer-go_internal_videocollision.Decision:
+    properties:
+      destination:
+        type: string
+      policy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy'
+      review_token:
+        type: string
+      source:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_videocollision.Policy:
+    enum:
+    - fail
+    - skip
+    - replace
+    type: string
+    x-enum-varnames:
+    - Fail
+    - Skip
+    - Replace
   internal_api_actress.CandidatePromotionRequest:
     properties:
       first_name:
@@ -5051,6 +5139,46 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update batch job files
+      tags:
+      - web
+  /api/v1/batch/{id}/video-collisions:
+    post:
+      consumes:
+      - application/json
+      description: Read-only collision preflight with source/destination sizes and
+        server-issued snapshot-bound review receipts.
+      parameters:
+      - description: Job ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Organization settings and existing review decisions
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OrganizeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Review planned video destinations
       tags:
       - web
   /api/v1/batch/scrape:

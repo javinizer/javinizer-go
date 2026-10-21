@@ -21,6 +21,7 @@
 	import ReviewActionBar from './components/ReviewActionBar.svelte';
 	import ReviewGridCard from './components/ReviewGridCard.svelte';
 	import ReviewHeader from './components/ReviewHeader.svelte';
+	import VideoCollisionPanel from './components/VideoCollisionPanel.svelte';
 	import ReviewMediaSidebar from './components/ReviewMediaSidebar.svelte';
 	import RescrapeModal from './components/RescrapeModal.svelte';
 	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
@@ -235,6 +236,9 @@
 				class={activeTab === 'movies' ? 'space-y-6' : ''}
 			>
 				{#if activeTab === 'movies' && s.currentMovie && s.currentResult}
+					{#if !s.isUpdateMode && s.canOrganize && s.getEffectiveOperationMode() !== 'metadata-artwork'}
+						<VideoCollisionPanel report={s.videoCollisionReport} pending={s.videoCollisionPending} error={s.videoCollisionError} blocked={s.videoCollisionBlocked} decisions={s.videoCollisionDecisions} onReview={s.reviewVideoCollisions} onDecide={s.decideVideoCollision} />
+					{/if}
 					<ReviewHeader
 						isUpdateMode={s.isUpdateMode}
 						canOrganize={s.canOrganize}
@@ -242,7 +246,7 @@
 						movieResultsLength={s.movieResults.length}
 						destinationPath={s.destinationPath}
 						operationMode={s.getEffectiveOperationMode()}
-						applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits}
+						applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits || s.videoCollisionBlocked}
 						bind:viewMode={s.viewMode}
 						bind:forceOverwrite={s.forceOverwrite}
 						bind:preserveNfo={s.preserveNfo}
@@ -406,7 +410,7 @@
 									organizing={s.organizing}
 									destinationPath={s.destinationPath}
 									operationMode={s.getEffectiveOperationMode()}
-									applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits}
+									applyInvalid={s.applyInvalid || s.creditWritesBlocked || s.isSavingEdits || s.videoCollisionBlocked}
 									movieResultsLength={s.movieResults.length}
 									onCancel={() => goto('/browse')}
 									onOrganizeAll={() => s.organizeAll()}

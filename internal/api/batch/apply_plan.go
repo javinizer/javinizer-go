@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/nfo"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
 
@@ -130,9 +131,27 @@ func mergeBoolOverride(field string, target **bool, present bool, value bool) er
 	return nil
 }
 
+func validateVideoCollisionOverrides(overrides *contracts.ReviewApplyOverrides) error {
+	if overrides == nil {
+		return nil
+	}
+	if overrides.VideoCollisionPolicy != nil {
+		if _, err := videocollision.Normalize(*overrides.VideoCollisionPolicy); err != nil {
+			return err
+		}
+	}
+	for _, decision := range overrides.VideoCollisionDecisions {
+		if _, err := videocollision.Normalize(decision.Policy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func reviewOverridesForUpdate(req contracts.UpdateRequest) (*contracts.ReviewApplyOverrides, error) {
 	result := cloneReviewOverrides(req.Overrides)
 	checks := []error{
+		validateVideoCollisionOverrides(result),
 		mergeBoolOverride("force_overwrite", &result.ForceOverwrite, req.Has("force_overwrite"), req.ForceOverwrite),
 		mergeBoolOverride("overwrite_existing_media", &result.OverwriteExistingMedia, req.Has("overwrite_existing_media"), req.OverwriteExistingMedia),
 		mergeBoolOverride("preserve_nfo", &result.PreserveNFO, req.Has("preserve_nfo"), req.PreserveNFO),
@@ -153,6 +172,7 @@ func reviewOverridesForUpdate(req contracts.UpdateRequest) (*contracts.ReviewApp
 func reviewOverridesForOrganize(req contracts.OrganizeRequest) (*contracts.ReviewApplyOverrides, error) {
 	result := cloneReviewOverrides(req.Overrides)
 	checks := []error{
+		validateVideoCollisionOverrides(result),
 		mergeStringOverride("operation_mode", &result.OperationMode, req.Has("operation_mode"), req.OperationMode),
 		mergeStringOverride("destination", &result.Destination, req.Has("destination"), req.Destination),
 		mergeBoolOverride("skip_nfo", &result.SkipNFO, req.Has("skip_nfo"), req.SkipNFO),
@@ -169,6 +189,7 @@ func reviewOverridesForOrganize(req contracts.OrganizeRequest) (*contracts.Revie
 func reviewOverridesForPreview(req contracts.OrganizePreviewRequest) (*contracts.ReviewApplyOverrides, error) {
 	result := cloneReviewOverrides(req.Overrides)
 	checks := []error{
+		validateVideoCollisionOverrides(result),
 		mergeStringOverride("operation_mode", &result.OperationMode, req.Has("operation_mode"), req.OperationMode),
 		mergeStringOverride("destination", &result.Destination, req.Has("destination"), req.Destination),
 		mergeBoolOverride("skip_nfo", &result.SkipNFO, req.Has("skip_nfo"), req.SkipNFO),
@@ -216,6 +237,9 @@ func effectiveFromOverrides(base *applyplan.Plan, overrides *contracts.ReviewApp
 		} else {
 			plan.Destination = ""
 		}
+	}
+	if overrides.VideoCollisionPolicy != nil {
+		plan.VideoCollisionPolicy = *overrides.VideoCollisionPolicy
 	}
 	if overrides.SkipNFO != nil {
 		if *overrides.SkipNFO {

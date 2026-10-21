@@ -42,6 +42,7 @@ type HistoryStatus string
 
 // HistoryStatus values are the outcome statuses of a history record.
 const (
+	HistoryStatusSkipped  HistoryStatus = "skipped"
 	HistoryStatusSuccess  HistoryStatus = "success"
 	HistoryStatusFailed   HistoryStatus = "failed"
 	HistoryStatusReverted HistoryStatus = "reverted"

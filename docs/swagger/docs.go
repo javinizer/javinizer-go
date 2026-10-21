@@ -2090,6 +2090,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/batch/{id}/video-collisions": {
+            "post": {
+                "description": "Read-only collision preflight with source/destination sizes and server-issued snapshot-bound review receipts.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web"
+                ],
+                "summary": "Review planned video destinations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Organization settings and existing review decisions",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.OrganizeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/browse": {
             "post": {
                 "description": "Browse a directory and list its contents",
@@ -4999,6 +5058,12 @@ const docTemplate = `{
                 "translation_warning_code": {
                     "description": "TranslationWarningCode is the machine-readable classification of\nTranslationWarning (rate_limited, unavailable, degraded, ...).",
                     "type": "string"
+                },
+                "video_collision": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.ConflictError"
+                },
+                "video_outcome": {
+                    "type": "string"
                 }
             }
         },
@@ -5354,6 +5419,9 @@ const docTemplate = `{
                     "description": "Structured arguments for translating Code into a localized message",
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "video_collision_review": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse"
                 }
             }
         },
@@ -6262,6 +6330,12 @@ const docTemplate = `{
                     "type": "string",
                     "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/IPX-535-trailer.mp4"
                 },
+                "video_collisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision"
+                    }
+                },
                 "video_files": {
                     "description": "For multi-part files: all video file paths",
                     "type": "array",
@@ -6310,6 +6384,15 @@ const docTemplate = `{
                 },
                 "skip_nfo": {
                     "type": "boolean"
+                },
+                "video_collision_decisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Decision"
+                    }
+                },
+                "video_collision_policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy"
                 }
             }
         },
@@ -6727,6 +6810,15 @@ const docTemplate = `{
                 },
                 "skip_nfo": {
                     "type": "boolean"
+                },
+                "video_collision_decisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Decision"
+                    }
+                },
+                "video_collision_policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy"
                 }
             }
         },
@@ -7015,6 +7107,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.VideoCollisionReviewResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision"
+                    }
+                },
+                "new": {
+                    "type": "integer"
+                },
+                "replaced": {
+                    "type": "integer"
+                },
+                "same_file": {
+                    "type": "integer"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "unresolved": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy": {
             "type": "string",
             "enum": [
@@ -7094,6 +7212,9 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "integer"
+                },
+                "video_collision_policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy"
                 },
                 "video_operation": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation"
@@ -8528,11 +8649,13 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_models.HistoryStatus": {
             "type": "string",
             "enum": [
+                "skipped",
                 "success",
                 "failed",
                 "reverted"
             ],
             "x-enum-varnames": [
+                "HistoryStatusSkipped",
                 "HistoryStatusSuccess",
                 "HistoryStatusFailed",
                 "HistoryStatusReverted"
@@ -8942,6 +9065,73 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_javinizer_javinizer-go_internal_videocollision.Collision": {
+            "type": "object",
+            "properties": {
+                "destination": {
+                    "type": "string"
+                },
+                "destination_size": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "review_token": {
+                    "type": "string"
+                },
+                "selected_source": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_videocollision.ConflictError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "collision": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Collision"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_videocollision.Decision": {
+            "type": "object",
+            "properties": {
+                "destination": {
+                    "type": "string"
+                },
+                "policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_videocollision.Policy"
+                },
+                "review_token": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_videocollision.Policy": {
+            "type": "string",
+            "enum": [
+                "fail",
+                "skip",
+                "replace"
+            ],
+            "x-enum-varnames": [
+                "Fail",
+                "Skip",
+                "Replace"
+            ]
         },
         "internal_api_actress.CandidatePromotionRequest": {
             "type": "object",

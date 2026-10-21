@@ -143,6 +143,23 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	}
 
 	cmd = normalizeInPlaceLinkMode(cmd)
+	if cmd.Organize.VideoCollisionPolicy != "" || len(cmd.Organize.VideoCollisionDecisions) > 0 {
+		cmd.Organize.ForceUpdate = false
+	}
+	skipped, collisionErr := o.preflightVideoCollision(ctx, &cmd)
+	if collisionErr != nil {
+		cmd.Organize.DuplicateTracker.ReleaseAbandonedBy(cmd.Match.Path)
+		opID, beginErr := o.beginRevertLog(ctx, cmd)
+		result := &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: string(progress.ProgressStepOrganize), PrePublication: true}
+		if beginErr == nil && o.revertLog != nil && opID != "" {
+			beginErr = o.completeFailedRevertLog(ctx, opID, result)
+		}
+		return result, fmt.Errorf("organization validation failed: %w", errors.Join(collisionErr, beginErr))
+	}
+	if skipped {
+		cmd.Organize.DuplicateTracker.ReleaseAbandonedBy(cmd.Match.Path)
+		return &ApplyResult{Movie: cmd.Movie, VideoOutcome: "skipped", PrePublication: true}, nil
+	}
 
 	// Unfenced legacy Apply may move the video during organize. Classify the
 	// existing cast before that mutation and reuse the read-only merge result.
@@ -217,7 +234,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// probes as anchor_missing forever, holding the batch off fully-reverted —
 	// or worse, journaling a shared intent path a promoted claimant publishes.
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		prePub := artifact != nil || (stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication))
+		prePub := artifact != nil || (stepName == string(progress.ProgressStepOrganize) && (state.organizeResult == nil || state.organizeResult.PrePublication))
 		if artifact != nil {
 			markArtifactDirty(artifact.original)
 		}
@@ -243,7 +260,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	var stepOrganize applyStep
 	if !cmd.Organize.Skip && o.organizer != nil {
 		stepOrganize = applyStep{
-			name:         "organize",
+			name:         string(progress.ProgressStepOrganize),
 			failMsg:      "organization",
 			progressMsg:  "Planning organization...",
 			progressPct:  0.3,
@@ -252,7 +269,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 	} else {
 		stepOrganize = applyStep{
-			name:    "organize",
+			name:    string(progress.ProgressStepOrganize),
 			execute: func() error { return nil },
 		}
 	}
@@ -327,6 +344,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 			o.artifactPrepared()
 		}
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
+			err = artifact.refreshedVideoCollision(ctx, err)
 			markArtifactDirty(artifact.original)
 			prePublication := !artifact.sourceCleanupArmed && !artifact.residentSidecarMutation && (state.publicationRecovery == nil || !state.publicationRecovery.Unresolved) && (artifact.directoryMove == nil || artifact.directoryMove.currentDir == artifact.directoryMove.oldDir)
 			reconcileErr := o.completeRevertLogWithStateErr(ctx, opID, state, prePublication)
@@ -365,8 +383,24 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 	}
 
+	videoOutcome := ""
+	if state.organizeResult != nil && !cmd.Organize.Skip && !cmd.DryRun && !state.organizeResult.DuplicateSkipped {
+		videoOutcome = "installed"
+	}
+	if artifact != nil && (artifact.residentPrimary || artifact.sameFilePrimary) {
+		videoOutcome = videoCollisionKindSameFile
+	} else if cmd.Organize.videoReviewTarget != "" {
+		source := cmd.Match.Path
+		if artifact != nil {
+			source = artifact.sourcePath
+		}
+		if decision, ok := cmd.Organize.VideoCollisionDecisions[filepath.Clean(source)]; ok && decision.Policy == "replace" {
+			videoOutcome = "replaced"
+		}
+	}
 	progress.FromContext(ctx).Report(progress.ProgressStepApply, 1.0, "Completed")
 	return &ApplyResult{
+		VideoOutcome:   videoOutcome,
 		OrganizeResult: state.organizeResult,
 		Movie:          state.movie,
 		DownloadPaths:  state.downloadPaths,
@@ -427,6 +461,9 @@ func (o *applyOrchImpl) planDuplicatePriming(ctx context.Context, cmd ApplyCmd) 
 		return organizer.DuplicatePriming{}, err
 	}
 	if plan.TargetPath != "" && !planner.PlanSourceExists(plan) {
+		return organizer.DuplicatePriming{}, nil
+	}
+	if decision, ok := cmd.Organize.VideoCollisionDecisions[filepath.Clean(plan.SourcePath)]; ok && decision.Policy == "skip" && filepath.Clean(decision.Source) == filepath.Clean(plan.SourcePath) && filepath.Clean(decision.Destination) == filepath.Clean(plan.TargetPath) {
 		return organizer.DuplicatePriming{}, nil
 	}
 	return organizer.DuplicatePriming{
@@ -519,8 +556,11 @@ func (o *applyOrchImpl) stepOrganize(ctx context.Context, cmd ApplyCmd, state *a
 		if err := state.artifact.setInPlaceFinalRoot(plan.TargetDir); err != nil {
 			return err
 		}
-		if len(plan.Conflicts) != 0 {
-			return fmt.Errorf("in-place staged organize destination conflict: %s", plan.Conflicts[0].Path)
+		for _, conflict := range plan.Conflicts {
+			if conflict.Kind == organizer.ConflictFile && filepath.Clean(conflict.Path) == filepath.Clean(plan.TargetPath) && state.artifact.reviewedPrimaryTarget(plan.TargetPath) {
+				continue
+			}
+			return fmt.Errorf("in-place staged organize destination conflict: %s", conflict.Path)
 		}
 		organizeCmd.OperationMode = operationmode.OperationModeInPlaceNoRenameFolder
 		organizeCmd.StagingFinalDir = state.artifact.finalRoot

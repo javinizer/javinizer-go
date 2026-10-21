@@ -144,7 +144,8 @@
 		const total = records.length;
 		const failed = records.filter((record) => record.status === 'failed').length;
 		const success = records.filter((record) => record.status === 'success').length;
-		const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+		const attempted = records.filter((record) => record.status !== 'skipped').length;
+		const successRate = attempted > 0 ? Math.round((success / attempted) * 100) : 0;
 
 		return { total, failed, successRate };
 	});
