@@ -396,31 +396,14 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 	pathParts := []string{destDir}
 	pathParts = append(pathParts, subfolderParts...)
 	overheadBase := filepath.Join(pathParts...)
-	// Use a placeholder folder + filename to compute actual separator overhead
-	fullOverhead := filepath.Join(overheadBase, "X", pc.FileName)
-	overheadBytes := len(fullOverhead) - 1
-	folderMaxBytes := 0
-	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
-		folderMaxBytes = s.config.MaxPathLength - overheadBytes
-	}
+	folderMaxBytes, overheadBytes := folderNameBudget(overheadBase, pc.FileName, s.config.MaxPathLength)
 	if s.config.MaxPathLength > 0 && folderMaxBytes <= 0 {
 		return nil, fmt.Errorf("path validation failed: destination directory and filename overhead (%d bytes) already exceeds max_path_length (%d); reduce the destination path or increase max_path_length", overheadBytes, s.config.MaxPathLength)
 	}
 
-	folderName := pc.FolderName
-	if folderMaxBytes > 0 {
-		var err error
-		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate folder name: %w", err)
-		}
-		folderName = template.SanitizeFolderPath(folderName)
-		if folderName == "" {
-			folderName = template.SanitizeFolderPath(match.MovieID)
-			if folderName == "" {
-				folderName = folderFallbackUnknown
-			}
-		}
+	folderName, err := renderBudgetedFolderName(s.templateEngine, s.config.FolderFormat, pc, match.MovieID, folderMaxBytes)
+	if err != nil {
+		return nil, err
 	}
 
 	pathParts = append(pathParts, folderName)
