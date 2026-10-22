@@ -8180,7 +8180,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "aliases": {
-                    "description": "Pipe-separated",
+                    "description": "Pipe-separated alternate-name metadata; not trusted actress_aliases resolver mappings",
                     "type": "string"
                 },
                 "created_at": {
@@ -8993,7 +8993,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "aliases": {
-                    "description": "Pipe-separated",
+                    "description": "Pipe-separated alternate-name metadata; not trusted actress_aliases resolver mappings",
                     "type": "string"
                 },
                 "created_at": {

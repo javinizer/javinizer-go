@@ -516,6 +516,8 @@ javinizer actress export > actresses.json
 javinizer actress import actresses.json
 ```
 
+The inline `aliases` field (for example, `Stage A|Stage B`) is stored metadata only. Importing it does not create trusted `actress_aliases` mappings, participate in identity matching or candidate quarantine, or move movie credits. Curated `actress_aliases` mappings are separate resolver evidence and must be managed deliberately. The field is preserved in actress records and exports; not every UI displays it.
+
 ---
 
 ### `genre`

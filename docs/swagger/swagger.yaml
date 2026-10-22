@@ -2554,7 +2554,8 @@ definitions:
   github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:
       aliases:
-        description: Pipe-separated
+        description: Pipe-separated alternate-name metadata; not trusted actress_aliases
+          resolver mappings
         type: string
       created_at:
         type: string
@@ -3147,7 +3148,8 @@ definitions:
   internal_api_actress.actressSearchResponse:
     properties:
       aliases:
-        description: Pipe-separated
+        description: Pipe-separated alternate-name metadata; not trusted actress_aliases
+          resolver mappings
         type: string
       created_at:
         type: string
