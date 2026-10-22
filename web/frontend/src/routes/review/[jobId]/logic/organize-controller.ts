@@ -1,5 +1,6 @@
 import type {
 	BatchJobResponse,
+	FileResultErrorCode,
 	Movie,
 	OperationMode,
 	ProgressMessage,
@@ -30,6 +31,7 @@ export interface ApplyRecoveryState {
 export interface FileStatus {
 	status: string;
 	error?: string;
+	error_code?: FileResultErrorCode;
 }
 
 interface OrganizeControllerDeps {
@@ -154,7 +156,11 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		for (const [filePath, result] of Object.entries(job.results ?? {})) {
 			if (job.excluded?.[filePath] || !result.movie || !expectedPaths.has(filePath)) continue;
 			if (result.status === 'failed') {
-				updateFileStatus(filePath, { status: 'failed', error: result.error });
+				updateFileStatus(filePath, {
+					status: 'failed',
+					error: result.error,
+					error_code: result.error_code,
+				});
 				deps.recordApplyFailure?.(filePath, result.error);
 			} else if (
 				includeCompleted &&
@@ -690,7 +696,11 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 				eligiblePaths.has(filePath) &&
 				!recovery?.failed[filePath]
 			) {
-				deps.getFileStatuses().set(filePath, { status: 'failed', error: result.error });
+				deps.getFileStatuses().set(filePath, {
+					status: 'failed',
+					error: result.error,
+					error_code: result.error_code,
+				});
 			}
 		}
 		startOrganizeCompletionPolling(operationJobId, operationGeneration, undefined);

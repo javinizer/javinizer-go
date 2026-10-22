@@ -1,3 +1,4 @@
+import { getCreditFailureKind, getCreditGuidance } from '../logic/credit-guidance';
 import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
@@ -185,25 +186,7 @@ export function shouldClearUnstartedApplyRecovery(
 }
 
 export function isCreditBlockedResult(result: FileResult): boolean {
-	if (result.status !== 'failed' || !result.movie) return false;
-	if (
-		result.error_code === 'credit_conflict' ||
-		result.error_code === 'credit_status_unavailable'
-	) {
-		return true;
-	}
-	// v1.6.2 persisted these exact terminal Apply-gate diagnostics as generic
-	// "blocked". Keep their metadata-bearing results in movie review after an
-	// upgrade without rewriting the stored result or treating provider blocks
-	// as credit failures. Retrying still goes through the live backend gate.
-	return (
-		result.error_code === 'blocked' &&
-		!!result.movie.code &&
-		!!result.file_path &&
-		!!result.ended_at &&
-		(result.error === 'apply blocked by an open credit collision' ||
-			result.error === 'apply blocked because credit collision status is unavailable')
-	);
+	return getCreditFailureKind(result) !== null;
 }
 
 function validRecoveryOptions(value: unknown): boolean {
@@ -876,10 +859,33 @@ export function createReviewState(getJobId: () => string) {
 		new Map<string, FileStatus>(
 			creditBlockedResults.map((result) => [
 				result.file_path,
-				{ status: 'failed', error: result.error },
+				{ status: 'failed', error: result.error, error_code: result.error_code },
 			]),
 		),
 	);
+
+	const creditGuidance = $derived(
+		new Map(
+			Array.from(fileStatuses.size > 0 ? fileStatuses : recoveredCreditStatuses).flatMap(
+				([path, status]) => {
+					const guidance = getCreditGuidance(path, status, job, movieGroups);
+					return guidance ? [[path, guidance] as const] : [];
+				},
+			),
+		),
+	);
+	let creditGuidanceFilePath = $state<string | null>(null);
+	let creditGuidanceRequest = $state(0);
+	function openCreditGuidance(filePath: string): boolean {
+		if (creditWritesBlocked || pendingMovieSave !== null || organizing) return false;
+		const guidance = creditGuidance.get(filePath);
+		if (!guidance || guidance.movieIndex === null) return false;
+		currentMovieIndex = guidance.movieIndex;
+		viewMode = 'detail';
+		creditGuidanceFilePath = filePath;
+		creditGuidanceRequest += 1;
+		return true;
+	}
 
 	const selection = createReviewSelectionModel({
 		getMovieGroups: () => movieGroups,
@@ -1977,6 +1983,8 @@ export function createReviewState(getJobId: () => string) {
 		pendingCreditMutations.clear();
 		creditMutationErrors.clear();
 		collisionRefreshToken += 1;
+		creditGuidanceFilePath = null;
+		creditGuidanceRequest += 1;
 		collisionRefreshPending = false;
 		collisionRefreshError = null;
 		recoveryStorageError = null;
@@ -2559,6 +2567,16 @@ export function createReviewState(getJobId: () => string) {
 		},
 		set organizeStatus(v) {
 			organizeStatus = v;
+		},
+		openCreditGuidance,
+		get creditGuidance() {
+			return creditGuidance;
+		},
+		get creditGuidanceFilePath() {
+			return creditGuidanceFilePath;
+		},
+		get creditGuidanceRequest() {
+			return creditGuidanceRequest;
 		},
 		get displayedFileStatuses() {
 			return fileStatuses.size > 0 ? fileStatuses : recoveredCreditStatuses;

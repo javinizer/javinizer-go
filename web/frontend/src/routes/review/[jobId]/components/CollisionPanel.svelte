@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { onDestroy, tick } from 'svelte';
 	import type { BeginCreditMutation, CreditMutation } from '$lib/utils/credit-mutation';
 	import { fade } from 'svelte/transition';
@@ -15,11 +16,13 @@
 		movieContentId,
 		onMutationStart,
 		disabled = false,
+		showEmpty = false,
 		onResolved = () => {}
 	}: {
 		movieContentId: string;
 		onMutationStart?: BeginCreditMutation;
 		disabled?: boolean;
+		showEmpty?: boolean;
 		onResolved?: (remaining: number, movieContentId: string) => void | Promise<void>;
 	} = $props();
 
@@ -30,10 +33,14 @@
 	const collisionsQuery = createQuery(() => ({
 		queryKey: ['collisions', movieContentId],
 		queryFn: () => apiClient.listCollisions(movieContentId),
+		refetchOnMount: 'always',
 		enabled: !!movieContentId
 	}));
 
-	let openCollisions = $derived(collisionsQuery.data?.collisions ?? []);
+	// A failed refetch retains cached data. Never present those rows as current, actionable conflicts.
+	let openCollisions = $derived(
+		collisionsQuery.isFetching || collisionsQuery.isError ? [] : (collisionsQuery.data?.collisions ?? [])
+	);
 	let reconciledConflict = $state<{ collisionId: number; movieContentId: string } | null>(null);
 
 	const resolveMutation = createMutation(() => ({
@@ -160,7 +167,7 @@
 	}
 
 	async function openRelink(collision: CreditCollision) {
-		if (resolveMutation.isPending) return;
+		if (resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		relinkCollision = collision;
 		relinkMovieContentId = movieContentId;
 		searchQuery = '';
@@ -171,7 +178,7 @@
 	}
 
 	function confirmRelink() {
-		if (disabled || resolveMutation.isPending) return;
+		if (disabled || resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		const collision = relinkCollision;
 		const target = selectedTarget;
 		if (!collision || !target || relinkMovieContentId !== movieContentId) return;
@@ -189,7 +196,7 @@
 	}
 
 	function resolve(collision: CreditCollision, resolution: CollisionResolution) {
-		if (disabled || resolveMutation.isPending) return;
+		if (disabled || resolveMutation.isPending || collisionsQuery.isFetching || collisionsQuery.isError) return;
 		if (resolution === 'reassign') {
 			void openRelink(collision);
 			return;
@@ -201,7 +208,7 @@
 	}
 
 	$effect(() => {
-		if (relinkCollision && relinkMovieContentId !== movieContentId) closeRelink();
+		if (relinkCollision && (relinkMovieContentId !== movieContentId || collisionsQuery.isError)) closeRelink();
 	});
 
 	const fieldLabel: Record<string, string> = {
@@ -211,19 +218,18 @@
 	};
 </script>
 
-{#if openCollisions.length > 0 || resolveError || queryError || collisionsQuery.isFetching}
+{#if showEmpty || openCollisions.length > 0 || resolveError || queryError || collisionsQuery.isFetching}
 	<Card class="border-destructive/40 p-5 space-y-3">
 		<div class="flex items-center gap-2 font-medium">
 			<TriangleAlert class="size-4 text-destructive" />
-			Collisions — organize is blocked until resolved
+			{m.review_credit_panel_title()}
 			<span class="rounded-full bg-destructive/15 px-2 py-0.5 text-xs text-destructive">
 				{openCollisions.length}
 			</span>
 		</div>
 
 		<p class="text-xs text-muted-foreground">
-			Scraped data conflicts with your catalog. Resolve each collision to unblock organizing
-			this movie.
+			{m.review_credit_panel_guidance()}
 		</p>
 
 		{#if resolveError}
@@ -244,6 +250,9 @@
 				<Loader2 class="size-4 animate-spin" /> Loading collisions…
 			</div>
 		{:else}
+			{#if showEmpty && !queryError && openCollisions.length === 0}
+				<p role="status" class="text-sm">{m.review_credit_none_open()}</p>
+			{/if}
 			<ul class="space-y-3">
 				{#each openCollisions as collision (collision.id)}
 					<li in:fade|local={{ duration: 160 }} class="rounded-lg border border-border/70 p-3 space-y-2">

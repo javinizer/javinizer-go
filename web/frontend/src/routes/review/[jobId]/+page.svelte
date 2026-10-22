@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+	import { focusCreditGuidance } from './logic/credit-guidance';
 	import { fade } from 'svelte/transition';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -118,6 +120,19 @@
 			pendingOverrideField = null;
 		}
 	}
+
+	let creditGuidanceRegion = $state<HTMLElement | undefined>();
+	async function openCreditGuidance(filePath: string) {
+		if (!s.openCreditGuidance(filePath)) return;
+		activeTab = 'movies';
+		const request = s.creditGuidanceRequest;
+		await focusCreditGuidance(
+			tick,
+			() => request === s.creditGuidanceRequest && s.viewMode === 'detail' && activeTab === 'movies' &&
+				(s.currentMovieGroup?.results.some(result => result.file_path === filePath) ?? false),
+			() => creditGuidanceRegion,
+		);
+	}
 </script>
 
 <div class="w-full px-4 py-6 lg:px-6">
@@ -176,6 +191,10 @@
 				isUpdateMode={s.isUpdateMode}
 				retryDisabled={s.creditWritesBlocked || s.isSavingEdits || s.organizing}
 				retryAvailable={s.canRetryFailed}
+				historicalJob={s.creditGuidance.size > 0 && s.job.status !== 'completed'}
+				creditGuidance={s.creditGuidance}
+				onReviewCredits={openCreditGuidance}
+				reviewCreditsDisabled={s.creditWritesBlocked || s.isSavingEdits || s.organizing}
 				onRetryFailed={() => s.retryFailed()}
 				onContinue={() => goto('/browse')}
 			/>
@@ -367,11 +386,16 @@
 							/>
 
 							{#if s.currentMovie?.code}
-								<CollisionPanel
-									movieContentId={s.currentMovie.code}
-									onMutationStart={s.beginCreditMutation}
-									disabled={s.organizing || s.isSavingEdits}
-								/>
+								{#key s.creditGuidanceRequest}
+									<section bind:this={creditGuidanceRegion} tabindex="-1" aria-label={m.review_credit_panel_title()} class="scroll-mt-24">
+										<CollisionPanel
+											movieContentId={s.currentMovie.code}
+											onMutationStart={s.beginCreditMutation}
+											disabled={s.organizing || s.isSavingEdits}
+											showEmpty={s.currentMovieGroup?.results.some(result => result.file_path === s.creditGuidanceFilePath) ?? false}
+										/>
+									</section>
+								{/key}
 							{/if}
 
 							<Card class="p-6">

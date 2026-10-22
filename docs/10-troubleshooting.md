@@ -652,3 +652,26 @@ Preserve the database and affected files. These ambiguous older jobs require a
 separately reviewed, explicit recovery decision; no automatic recovery operation
 is provided here. Do not edit their status or clear application data to bypass
 admission.
+
+When a file reports `apply blocked by an open credit collision`, use **Review
+actress-credit conflicts** on its failed-file card. This selects the affected
+movie (including multipart files), switches Poster/Cover view to Detail, and
+opens a fresh view of its actress-credit conflicts. Compare each reported field
+with the catalog and choose the appropriate available resolution. A conflict
+can concern a name, thumbnail, or identity link; it does not necessarily mean
+the actress identity is wrong.
+
+The failed-file card records the previous attempt, not the live conflict state.
+If the latest check finds no open conflicts, the old failure can still remain
+visible. Wait for any resolution and review refresh to finish, then use **Retry
+Failed** only when available. Resolution never automatically retries Apply or
+reopens an ineligible saved job. The original attempt and settings must also be
+verified before retry is available.
+
+`apply blocked because credit collision status is unavailable` means the status
+check failed, not that a conflict was confirmed. Use **Check actress-credit
+status**; if loading fails, retry that status check and inspect the server logs.
+If the file no longer has a reviewable movie, inspect the job details rather
+than trying to resolve an unrelated movie. Preserve the database and affected
+files for any job that requires an explicit recovery decision, as described
+above.
