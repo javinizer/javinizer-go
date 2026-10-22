@@ -28,7 +28,7 @@ test('catalog filter/search/sort controls reset pages and retain sort on reload'
 			const offset = Number(url.searchParams.get('offset') ?? 0);
 			const actresses = Array.from({ length: 20 }, (_, i) => ({
 				id: offset + i + 1,
-				first_name: `Catalog ${offset + i + 1}`,
+				first_name: `${url.searchParams.get('q') ? 'SearchResult' : 'Catalog'} ${offset + i + 1}`,
 				dmm_id: 1000 + offset + i,
 				japanese_name: '名前',
 				verified: true,
@@ -84,9 +84,26 @@ test('catalog filter/search/sort controls reset pages and retain sort on reload'
 	await page.getByTitle('Toggle sort direction').click();
 	await expect.poll(() => last().get('sort_order')).toBe('desc');
 	await expect.poll(() => last().get('offset') ?? '0').toBe('0');
-	await page.getByRole('button', { name: 'Clear', exact: true }).first().click();
+	await expect(page.getByText('SearchResult 1', { exact: true })).toBeVisible();
+	// Scope Clear to the search action row; the earlier form has its own Clear button.
+	const searchClear = page
+		.getByRole('button', { name: 'Search', exact: true })
+		.locator('..')
+		.getByRole('button', { name: 'Clear', exact: true });
+	await expect(searchClear).toHaveCount(1);
+	await searchClear.click();
+	await expect(page.getByRole('textbox', { name: 'Search actresses', exact: true })).toHaveValue(
+		'',
+	);
 	await expect.poll(() => last().get('q')).toBeNull();
 	expect(last().get('filter')).toBe('has_dmm');
+	expect(last().get('sort_by')).toBe('dmm_id');
+	expect(last().get('sort_order')).toBe('desc');
+	expect(last().get('offset') ?? '0').toBe('0');
+	await expect(filter).toHaveValue('has_dmm');
+	await expect(page.getByText('Page 1 of 3', { exact: true })).toBeVisible();
+	await expect(page.getByText('Catalog 1', { exact: true })).toBeVisible();
+	await expect(page.getByText('SearchResult 1', { exact: true })).toHaveCount(0);
 	await page.reload();
 	await expect(sort).toHaveValue('dmm_id');
 	await expect.poll(() => last().get('sort_order')).toBe('desc');
