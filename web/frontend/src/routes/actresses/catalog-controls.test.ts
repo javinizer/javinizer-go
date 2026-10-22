@@ -85,7 +85,11 @@ it('mounts persisted sorting and wires all catalog filters through the rendered 
 	);
 });
 
-it('distinguishes form reset from search clear after the complete filter/search/sort paging flow', async () => {
+it('distinguishes form reset from search clear on a filtered search page', async () => {
+	localStorage.setItem(
+		ACTRESS_SORT_STORAGE_KEY,
+		JSON.stringify({ sortBy: 'dmm_id', sortOrder: 'desc' }),
+	);
 	vi.mocked(apiClient.listActresses).mockImplementation(async (params) => {
 		const offset = params?.offset ?? 0;
 		const actresses = Array.from({ length: 20 }, (_, index) => ({
@@ -104,41 +108,25 @@ it('distinguishes form reset from search clear after the complete filter/search/
 	const last = () => vi.mocked(apiClient.listActresses).mock.lastCall?.[0];
 	await waitFor(() => expect(view.getByText('Catalog 1', { exact: true })).toBeTruthy());
 	const filter = view.getByRole('combobox', { name: 'Filter actresses' });
-	const sort = view.getByRole('combobox', { name: 'Sort actresses by' });
 	const search = view.getByRole('textbox', {
 		name: 'Search actresses',
 	}) as HTMLInputElement;
-	const next = view.getByRole('button', { name: 'Next' });
-	for (const value of [
-		'missing_dmm',
-		'has_dmm',
-		'missing_thumbnail',
-		'missing_japanese_name',
-		'japanese_name_only',
-		'missing_metadata',
-		'',
-	]) {
-		await fireEvent.click(next);
-		await waitFor(() => expect(last()?.offset).toBe(20));
-		await fireEvent.change(filter, { target: { value } });
-		await waitFor(() => expect(last()).toMatchObject({ offset: 0, filter: value || undefined }));
-		expect(view.getByText('Page 1 of 3', { exact: true })).toBeTruthy();
-	}
+	// Filter/sort transition matrices are covered above and in the browser test.
+	// Here only establish the non-default state needed to exercise both Clear buttons.
 	await fireEvent.change(filter, { target: { value: 'has_dmm' } });
-	await fireEvent.click(next);
-	await waitFor(() => expect(last()?.offset).toBe(20));
 	await fireEvent.input(search, { target: { value: '  1001  ' } });
 	await fireEvent.keyDown(search, { key: 'Enter' });
-	await waitFor(() => expect(last()).toMatchObject({ q: '1001', offset: 0, filter: 'has_dmm' }));
-	await fireEvent.click(next);
-	await waitFor(() => expect(last()?.offset).toBe(20));
-	await fireEvent.change(sort, { target: { value: 'dmm_id' } });
-	await waitFor(() => expect(last()).toMatchObject({ sort_by: 'dmm_id', offset: 0 }));
-	await fireEvent.click(next);
-	await waitFor(() => expect(last()?.offset).toBe(20));
-	await fireEvent.click(view.getByTitle('Toggle sort direction'));
-	await waitFor(() => expect(last()).toMatchObject({ sort_order: 'desc', offset: 0 }));
 	await waitFor(() => expect(view.getByText('SearchResult 1', { exact: true })).toBeTruthy());
+	await fireEvent.click(view.getByRole('button', { name: 'Next' }));
+	await waitFor(() => expect(view.getByText('SearchResult 21', { exact: true })).toBeTruthy());
+	expect(last()).toMatchObject({
+		q: '1001',
+		offset: 20,
+		filter: 'has_dmm',
+		sort_by: 'dmm_id',
+		sort_order: 'desc',
+	});
+	expect(view.getByText('Page 2 of 3', { exact: true })).toBeTruthy();
 
 	const firstName = view.getByRole('textbox', {
 		name: 'First Name',
@@ -151,7 +139,8 @@ it('distinguishes form reset from search clear after the complete filter/search/
 	expect(search.value).toBe('  1001  ');
 	expect(last()?.q).toBe('1001');
 	expect(vi.mocked(apiClient.listActresses).mock.calls).toHaveLength(requestsBeforeFormReset);
-	expect(view.getByText('SearchResult 1', { exact: true })).toBeTruthy();
+	expect(view.getByText('SearchResult 21', { exact: true })).toBeTruthy();
+	expect(view.getByText('Page 2 of 3', { exact: true })).toBeTruthy();
 
 	const searchActions = view.getByRole('button', { name: 'Search' }).parentElement!;
 	const searchClear = within(searchActions).getByRole('button', { name: 'Clear' });
@@ -169,5 +158,5 @@ it('distinguishes form reset from search clear after the complete filter/search/
 	expect((filter as HTMLSelectElement).value).toBe('has_dmm');
 	expect(view.getByText('Page 1 of 3', { exact: true })).toBeTruthy();
 	await waitFor(() => expect(view.getByText('Catalog 1', { exact: true })).toBeTruthy());
-	expect(view.queryByText('SearchResult 1', { exact: true })).toBeNull();
+	expect(view.queryByText('SearchResult 21', { exact: true })).toBeNull();
 });
