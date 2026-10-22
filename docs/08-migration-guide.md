@@ -158,7 +158,7 @@ PowerShell stored actress thumbnails in `jvThumbs.csv`. Go stores actress record
 | `first_name` / `last_name` | Romanized name parts |
 | `japanese_name` | Japanese name (used for dedup when `id` is absent) |
 | `thumb_url` | Thumbnail image URL |
-| `aliases` | Pipe-separated alias list |
+| `aliases` | Pipe-separated alternate-name metadata; not trusted resolver mappings |
 | `dmm_id` | DMM actress ID (optional; `0` if unknown) |
 
 ```bash
@@ -166,6 +166,10 @@ javinizer actress import actresses.json
 ```
 
 The import deduplicates by `id` when present, otherwise by `japanese_name`: identical records are skipped, differing records are updated, and new records are created. It prints `Imported: N, Skipped: N, Errors: N`.
+
+The inline `aliases` field (for example, `Stage A|Stage B`) is stored metadata only. Importing it does not create trusted `actress_aliases` mappings, participate in identity matching or candidate quarantine, or move movie credits. Curated `actress_aliases` mappings are separate resolver evidence and must be managed deliberately. The field is preserved in actress records and exports; not every UI displays it.
+
+When converting legacy CSV data to this JSON format, keep alternate names in the inline field only as metadata. Importing a CSV-derived list does not curate or validate resolver aliases.
 
 **Back up, transfer, or merge actresses:**
 
