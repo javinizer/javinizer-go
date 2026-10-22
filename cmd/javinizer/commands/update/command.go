@@ -94,11 +94,13 @@ func Run(cmd *cobra.Command, args []string, configFile string) error {
 		ctx = context.Background()
 	}
 
+	// Leave Destination unset so each file resolves to its own source directory,
+	// rather than writing all recursive results into the scan root.
 	return commandutil.RunBatchCommand(ctx, w, commandutil.BatchCommandOptions{
 		ConfigFile:             configFile,
 		SourcePath:             sourcePath,
-		Destination:            sourcePath, // Update mode: files stay in place
-		Recursive:              true,       // Always scan recursively
+		Destination:            "",
+		Recursive:              true, // Always scan recursively
 		DryRun:                 dryRun,
 		DownloadMedia:          downloadMedia,
 		DownloadExtrafanart:    downloadExtrafanart,
