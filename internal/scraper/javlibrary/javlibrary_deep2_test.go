@@ -121,7 +121,9 @@ func TestExtractActressesDeep2(t *testing.T) {
 	assert.Len(t, actresses, 2)
 	assert.Equal(t, "Jane", actresses[0].FirstName)
 	assert.Equal(t, "Smith", actresses[0].LastName)
-	assert.Equal(t, "田中麻美", actresses[1].FirstName) // single Japanese name goes to FirstName
+	assert.Equal(t, "田中麻美", actresses[1].JapaneseName)
+	assert.Empty(t, actresses[1].FirstName)
+	assert.Empty(t, actresses[1].LastName)
 }
 
 func TestExtractSeriesDeep2(t *testing.T) {
