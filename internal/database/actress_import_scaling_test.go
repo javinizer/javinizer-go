@@ -135,8 +135,8 @@ func TestImportEvidenceIndexesUpgradeReopenAndRollback(t *testing.T) {
 		require.NoError(t, db.Order("id").Find(&after).Error)
 		require.Equal(t, before, after, "indexes must not mutate legacy identities")
 		var count int64
-		require.NoError(t, db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('idx_actresses_dmm_lookup','idx_actresses_candidate_scan','idx_actresses_verified_dmmless_scan') AND sql NOT LIKE '%UNIQUE%'").Scan(&count).Error)
-		require.EqualValues(t, 3, count)
+		require.NoError(t, db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('idx_actresses_dmm_lookup','idx_actresses_name_pair_lookup','idx_actresses_candidate_scan','idx_actresses_verified_dmmless_scan') AND sql NOT LIKE '%UNIQUE%'").Scan(&count).Error)
+		require.EqualValues(t, 4, count)
 		if cycle == 0 {
 			_, err = provider.DownTo(t.Context(), 21)
 			require.NoError(t, err)
