@@ -13,6 +13,12 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewRequest:
     properties:
+      policy:
+        type: string
+      resolutions:
+        additionalProperties:
+          type: string
+        type: object
       source_id:
         example: 34
         type: integer
@@ -33,6 +39,12 @@ definitions:
         additionalProperties:
           type: string
         type: object
+      fields:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_database.ActressMergeField'
+        type: array
+      policy:
+        type: string
       proposed_merged:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
       source:
@@ -42,6 +54,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest:
     properties:
+      policy:
+        type: string
       resolutions:
         additionalProperties:
           type: string
@@ -2550,6 +2564,16 @@ definitions:
         type: string
       favorites:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FavoritesConfig'
+    type: object
+  github_com_javinizer_javinizer-go_internal_database.ActressMergeField:
+    properties:
+      default_resolution:
+        type: string
+      field:
+        type: string
+      result_value: {}
+      source_value: {}
+      target_value: {}
     type: object
   github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:

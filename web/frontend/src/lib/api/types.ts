@@ -732,6 +732,7 @@ export interface CandidatePromotionRequest {
 }
 
 export type ActressMergeResolution = 'target' | 'source';
+export type ActressMergePolicy = 'fill_empty' | 'preserve_target';
 
 export interface ActressAliasGroup {
 	canonical: string;
@@ -741,6 +742,8 @@ export interface ActressAliasGroup {
 export interface ActressMergePreviewRequest {
 	target_id: number;
 	source_id: number;
+	policy?: ActressMergePolicy;
+	resolutions?: Record<string, ActressMergeResolution>;
 }
 
 export interface ActressMergeConflict {
@@ -750,7 +753,13 @@ export interface ActressMergeConflict {
 	default_resolution: ActressMergeResolution;
 }
 
+export interface ActressMergeField extends ActressMergeConflict {
+	result_value: string | number | boolean | null;
+}
+
 export interface ActressMergePreviewResponse {
+	policy: ActressMergePolicy;
+	fields: ActressMergeField[];
 	target: Actress;
 	source: Actress;
 	proposed_merged: Actress;
@@ -761,6 +770,7 @@ export interface ActressMergePreviewResponse {
 export interface ActressMergeRequest {
 	target_id: number;
 	source_id: number;
+	policy?: ActressMergePolicy;
 	resolutions?: Record<string, ActressMergeResolution>;
 }
 
