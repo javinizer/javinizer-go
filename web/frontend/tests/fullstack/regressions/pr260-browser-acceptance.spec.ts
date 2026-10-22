@@ -179,7 +179,7 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 	};
 	const browserMovie = Object.values(browserBody.results)[0]?.movie;
 	expect(browserMovie?.code, JSON.stringify(browserMovie)).toBe(targetID);
-	await expect(page.getByText('Collisions — organize is blocked until resolved')).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Actress-credit conflicts', exact: true })).toBeVisible();
 
 	await page.getByRole('button', { name: 'Relink', exact: true }).click();
 	const chooser = page.getByRole('dialog', { name: 'Choose verified actress to relink' });

@@ -6,10 +6,8 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import * as m from '$lib/paraglide/messages';
 
-	interface FileStatus {
-		status: string;
-		error?: string;
-	}
+	import type { FileStatus } from '../logic/organize-controller';
+	import type { CreditGuidance } from '../logic/credit-guidance';
 
 	interface Props {
 		organizeStatus: 'idle' | 'organizing' | 'completed' | 'failed';
@@ -21,6 +19,10 @@
 		retryDisabled?: boolean;
 		retryAvailable?: boolean;
 		onContinue: () => void;
+		creditGuidance?: Map<string, CreditGuidance>;
+		onReviewCredits?: (filePath: string) => void;
+		historicalJob?: boolean;
+		reviewCreditsDisabled?: boolean;
 	}
 
 	let {
@@ -32,7 +34,11 @@
 		onRetryFailed,
 		retryDisabled = false,
 		retryAvailable = true,
-		onContinue
+		onContinue,
+		creditGuidance = new Map(),
+		onReviewCredits,
+		historicalJob = false,
+		reviewCreditsDisabled = false
 	}: Props = $props();
 
 	const failures = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'failed'));
@@ -124,15 +130,29 @@
 							<div class="bg-red-50 dark:bg-red-900/20 p-3 rounded text-sm">
 								<div class="font-medium">{filePath.split(/[\\/]/).pop()}</div>
 								<div class="text-red-700 dark:text-red-400 text-xs mt-1">{status.error}</div>
+								{#if creditGuidance.has(filePath)}
+									{@const guidance = creditGuidance.get(filePath)!}
+									<p class="mt-2 text-sm">{guidance.kind === 'conflict' ? m.review_credit_attempt_conflict() : m.review_credit_attempt_unavailable()}</p>
+									{#if guidance.movieIndex !== null && onReviewCredits}
+										<Button variant="outline" size="sm" class="mt-2" disabled={reviewCreditsDisabled} onclick={() => onReviewCredits?.(filePath)}>
+											{guidance.kind === 'conflict' ? m.review_credit_open_conflicts() : m.review_credit_check_status()}
+										</Button>
+									{:else}
+										<p class="mt-2 text-xs">{m.review_credit_movie_unavailable()}</p>
+									{/if}
+								{/if}
 							</div>
 						{/each}
 					</div>
 
-					{#if !retryAvailable}
+					{#if creditGuidance.size > 0}
+						<p role="status" class="mt-4 text-sm text-muted-foreground">{historicalJob ? m.review_credit_job_not_retryable() : retryAvailable ? m.review_credit_retry_guidance() : m.review_credit_review_before_apply()}</p>
+					{/if}
+					{#if !retryAvailable && !historicalJob}
 						<p role="status" class="mt-4 text-sm text-muted-foreground">{m.review_retry_operation_unknown()}</p>
 					{/if}
 					<div class="mt-4 flex gap-2">
-						<Button onclick={onRetryFailed} disabled={retryDisabled || !retryAvailable}>
+						<Button onclick={onRetryFailed} disabled={retryDisabled || !retryAvailable || historicalJob}>
 							{#snippet children()}{m.review_retry_failed()}
 							{/snippet}
 						</Button>

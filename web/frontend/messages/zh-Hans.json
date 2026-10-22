@@ -2677,5 +2677,16 @@
   "words_mode_literal": "精确匹配",
   "words_mode_wildcard": "屏蔽字通配符（?）",
   "words_mode_badge_wildcard": "通配符",
-  "browse_plan_rename_in_place_desc_files_off": "仅重命名符合条件的专用文件夹，不改变所在位置；保留视频文件名（已关闭重命名文件）。"
+  "browse_plan_rename_in_place_desc_files_off": "仅重命名符合条件的专用文件夹，不改变所在位置；保留视频文件名（已关闭重命名文件）。",
+  "review_credit_attempt_conflict": "此次操作因抓取数据与目录中的女优演职员信息存在未解决的冲突而被阻止。打开详情，查看当前冲突并逐项选择适当的解决方式。",
+  "review_credit_attempt_unavailable": "此次操作无法验证女优演职员信息的冲突状态，并不代表一定存在冲突。请在详情中检查当前状态；若加载失败，请重试状态检查并查看服务器日志。",
+  "review_credit_open_conflicts": "查看女优演职员信息冲突",
+  "review_credit_check_status": "检查女优演职员信息状态",
+  "review_credit_movie_unavailable": "此文件已无法在影片审核中查看。请先检查任务详情，再决定如何恢复。",
+  "review_credit_job_not_retryable": "此已保存的任务无法在此重试。请保留数据库和受影响的文件，检查失败任务后再决定恢复方式。解决冲突不会重新开启此任务。",
+  "review_credit_retry_guidance": "解决当前冲突，等待审核刷新，然后在可用时使用“重试失败项”。失败文件列表记录的是上一次操作，解决后仍可能显示。",
+  "review_credit_review_before_apply": "请先检查当前冲突。没有经过验证的操作设置时无法重试；开始任何新操作前，请检查任务和设置。",
+  "review_credit_panel_title": "女优演职员信息冲突",
+  "review_credit_panel_guidance": "比较每项当前冲突的抓取值和目录值，然后选择适当的可用解决方式。解决冲突不会自动重试操作或重新开启失败任务。",
+  "review_credit_none_open": "最新检查未发现未解决的女优演职员信息冲突。上方的失败记录属于之前的操作。继续前请检查任务是否可重试。"
 }
