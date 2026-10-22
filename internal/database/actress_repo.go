@@ -411,8 +411,8 @@ func (r *ActressRepository) SearchPaged(ctx context.Context, query string, limit
 	var actresses []models.Actress
 
 	searchPattern := "%" + query + "%"
-	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC, id ASC").
 		Limit(limit).
 		Offset(offset).
@@ -434,8 +434,8 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 	}
 	searchPattern := "%" + query + "%"
 
-	dbq := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern)
+	dbq := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
 	}
@@ -452,8 +452,8 @@ func (r *ActressRepository) CountSearch(ctx context.Context, query string) (int6
 	var count int64
 	searchPattern := "%" + query + "%"
 	err := r.catalogQuery(ctx).Model(&models.Actress{}).
-		Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-			searchPattern, searchPattern, searchPattern).
+		Where(actressSearchCondition,
+			searchPattern, searchPattern, searchPattern, searchPattern).
 		Count(&count).Error
 	if err != nil {
 		return 0, wrapDBErr("count", "search actresses", err)
@@ -475,8 +475,8 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 	}
 
 	searchPattern := "%" + query + "%"
-	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC").
 		Limit(50).
 		Find(&actresses).Error

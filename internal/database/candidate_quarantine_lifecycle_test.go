@@ -90,6 +90,8 @@ func TestCandidateBackfillEvidenceReadFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newCreditTestDB(t)
+			// Evidence reads remain fail-closed whenever candidates need reconciliation.
+			require.NoError(t, db.Create(&models.Actress{JapaneseName: "Candidate"}).Error)
 			injectDatabaseCallbackError(t, db, "query", tc.table, tc.occurrence)
 			require.Error(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
 		})
@@ -116,12 +118,16 @@ func TestCandidateBackfillFixedReadsAndIdempotentWrites(t *testing.T) {
 				}
 			}))
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			require.EqualValues(t, 4, reads.Load())
+			expectedReads := 4
+			if count == 0 {
+				expectedReads = 1
+			}
+			require.EqualValues(t, expectedReads, reads.Load())
 			require.LessOrEqual(t, writes.Load(), int64(4))
 			reads.Store(0)
 			writes.Store(0)
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			require.EqualValues(t, 4, reads.Load())
+			require.EqualValues(t, expectedReads, reads.Load())
 			require.Zero(t, writes.Load())
 		})
 	}

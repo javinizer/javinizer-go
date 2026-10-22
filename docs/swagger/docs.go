@@ -36,8 +36,14 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search query",
+                        "description": "Search names or DMM ID",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name, japanese_name_only, missing_metadata",
+                        "name": "filter",
                         "in": "query"
                     },
                     {
