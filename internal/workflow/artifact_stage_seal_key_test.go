@@ -60,3 +60,52 @@ func TestReadArtifactSweepSecret_Validation(t *testing.T) {
 		require.ErrorContains(t, err, "read artifact sweep key")
 	})
 }
+
+type sweepKeyCloseHook struct {
+	*os.File
+	afterClose func()
+}
+
+func (f *sweepKeyCloseHook) Close() error {
+	err := f.File.Close()
+	f.afterClose()
+	return err
+}
+
+func TestArtifactSweepSecretCreate_RevalidatePublishedKey(t *testing.T) {
+	for _, change := range []string{"replaced", "removed"} {
+		t.Run(change, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), artifactStageSecretName)
+			oldPath, oldCreate := artifactSweepSecretPath, artifactSweepCreateKey
+			t.Cleanup(func() { artifactSweepSecretPath, artifactSweepCreateKey = oldPath, oldCreate })
+			artifactSweepSecretPath = func() (string, error) { return path, nil }
+			artifactSweepCreateKey = func(path string) (artifactSweepKeyFile, error) {
+				f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+				require.NoError(t, err)
+				return &sweepKeyCloseHook{f, func() {
+					require.NoError(t, os.Remove(path))
+					if change == "replaced" {
+						require.NoError(t, os.WriteFile(path, make([]byte, artifactStageSecretBytes), 0o600))
+					}
+				}}, nil
+			}
+			key, err := defaultArtifactSweepSecretKey()
+			require.Error(t, err)
+			require.Nil(t, key)
+			if change == "replaced" {
+				require.ErrorContains(t, err, "changed during creation")
+				body, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, make([]byte, artifactStageSecretBytes), body, "never remove replacement")
+			}
+		})
+	}
+}
+
+func TestValidateArtifactSweepSecret_UnsetPlatformPolicy(t *testing.T) {
+	old := secureArtifactSweepSecret
+	t.Cleanup(func() { secureArtifactSweepSecret = old })
+	secureArtifactSweepSecret = nil
+	path := writeSweepKeyFixture(t, []byte("fixture"))
+	require.NoError(t, validateArtifactSweepSecret(path, mustSweepStat(t, path)))
+}

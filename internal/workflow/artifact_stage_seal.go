@@ -25,8 +25,8 @@ import (
 // created. Authentic ownership therefore rides an HMAC-SHA256 seal over the
 // manifest's canonical encoding, keyed by a Javinizer-local secret that lives
 // OUTSIDE the managed tree (the user cache dir, mode 0600 — never the
-// possibly-shared artifact filesystem, so a filesystem-level attacker cannot
-// read or mint seals). The seal binds every evidence field: token (replayed
+// possibly-shared artifact filesystem, provided the private-cache assumption
+// below holds). The seal binds every evidence field: token (replayed
 // seals from a sibling tree never match, since each tree's token differs),
 // hostname, PID, and both lifecycle stamps.
 //
@@ -36,9 +36,15 @@ import (
 // applies when the secret itself is unavailable: manifests are written
 // unsealed (warned) and every later verification refuses them.
 //
+// The cache directory and its ancestors must be trusted and private, including
+// when JAVINIZER_HOME overrides the location. POSIX owner/mode checks below are
+// necessary checks, not proof of privacy under NFSv4/SMB or other independent
+// ACLs. Administrators must keep those ACLs private too. Do not place the key
+// on storage accessible to other writers of the managed artifact tree.
+//
 // Cross-process scope matches the sweep's pre-existing hostname binding: only
 // a same-host Javinizer instance ever reclaimed a root, and the per-machine
-// secret file is readable by exactly that same local user — so one user's
+// secret file is intended to be readable by only that local user — so one user's
 // Javinizer processes seal and verify against one key durable across process
 // restarts.
 
@@ -67,6 +73,7 @@ var (
 )
 
 type artifactSweepKeyFile interface {
+	Stat() (os.FileInfo, error)
 	Write(p []byte) (int, error)
 	Close() error
 }
@@ -126,24 +133,50 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 		}
 		return nil, fmt.Errorf("create artifact sweep key %s: %w", path, createErr)
 	}
-	if _, writeErr := handle.Write(drawn); writeErr != nil {
+	// Requested mode is not evidence of the effective mode (for example on
+	// ACL-managed storage). Validate the opened inode before writing any secret.
+	// Leave a failed create in place: deleting/replacing it could rotate a key
+	// another process has observed, and cannot undo any earlier exposure.
+	info, statErr := handle.Stat()
+	if statErr != nil {
+		_ = handle.Close()
+		return nil, fmt.Errorf("stat artifact sweep key %s: %w", path, statErr)
+	}
+	if err := validateArtifactSweepSecret(path, info); err != nil {
+		_ = handle.Close()
+		return nil, err
+	}
+	if n, writeErr := handle.Write(drawn); writeErr != nil || n != len(drawn) {
+		if writeErr == nil {
+			writeErr = io.ErrShortWrite
+		}
 		_ = handle.Close()
 		return nil, fmt.Errorf("write artifact sweep key %s: %w", path, writeErr)
 	}
 	if closeErr := handle.Close(); closeErr != nil {
 		return nil, fmt.Errorf("close artifact sweep key %s: %w", path, closeErr)
 	}
-	return drawn, nil
+	// Revalidate the published path before using the key. A changed key or
+	// unsafe effective permissions during creation must fail closed too.
+	published, err := readArtifactSweepSecret(path)
+	if err != nil {
+		return nil, err
+	}
+	if !hmac.Equal(published, drawn) {
+		return nil, fmt.Errorf("artifact sweep key %s changed during creation", path)
+	}
+	return published, nil
 }
 
 // readArtifactSweepSecret reads and validates the key file. A corrupt
 // (wrong-length) or unreadable file is a hard failure: sealing/verifying
 // against a degraded key would silently split the ownership ring. The key is
-// opened without following a final symlink and must be a regular file that
-// passes the platform's ownership and permission policy
-// (secureArtifactSweepSecret), so a planted or foreign key is never trusted.
+// required to be a regular file and pass the platform policy. On POSIX it
+// is opened without following a final symlink, and ownership and permission
+// checks reject foreign or unsafe keys. Windows retains its existing private-
+// cache ACL assumption without verifying ACLs or rejecting symlinks.
 func readArtifactSweepSecret(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|artifactSweepKeyNoFollow, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|artifactSweepKeyReadFlags, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -152,13 +185,8 @@ func readArtifactSweepSecret(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stat artifact sweep key %s: %w", path, err)
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("artifact sweep key %s is not a regular file (mode %v)", path, info.Mode())
-	}
-	if secure := secureArtifactSweepSecret; secure != nil {
-		if err := secure(path, f, info); err != nil {
-			return nil, err
-		}
+	if err := validateArtifactSweepSecret(path, info); err != nil {
+		return nil, err
 	}
 	key, err := artifactSweepReadKey(f)
 	if err != nil {
@@ -168,6 +196,18 @@ func readArtifactSweepSecret(path string) ([]byte, error) {
 		return nil, fmt.Errorf("artifact sweep key %s corrupt (want %d bytes, got %d)", path, artifactStageSecretBytes, len(key))
 	}
 	return key, nil
+}
+
+// validateArtifactSweepSecret checks metadata from the already opened handle,
+// never a second path lookup. Both read and create must pass this policy.
+func validateArtifactSweepSecret(path string, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("artifact sweep key %s is not a regular file (mode %v)", path, info.Mode())
+	}
+	if secure := secureArtifactSweepSecret; secure != nil {
+		return secure(path, info)
+	}
+	return nil
 }
 
 // sealArtifactStageManifest MACs the manifest's canonical encoding (the

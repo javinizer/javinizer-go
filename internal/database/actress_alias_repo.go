@@ -185,6 +185,12 @@ func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
 		return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
 	}
 
+	// Only candidates receive derived updates. Avoid loading the growing verified
+	// catalogue (and unrelated evidence) when there is nothing to reconcile.
+	if len(candidates) == 0 {
+		return nil
+	}
+
 	var collisionCandidateIDs []uint
 	if err := tx.Model(&models.CreditCollision{}).
 		Distinct("movie_credits.actress_id").
@@ -194,7 +200,7 @@ func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
 		return wrapDBErr("list", "live identity-link candidate collisions", err)
 	}
 	var verified []models.Actress
-	if err := tx.Where("verified = ?", true).Order("id").Find(&verified).Error; err != nil {
+	if err := tx.Where("verified = ? AND (dmm_id <= 0 OR dmm_id IS NULL)", true).Order("id").Find(&verified).Error; err != nil {
 		return wrapDBErr("list", "verified actresses for candidate backfill", err)
 	}
 	var aliases []models.ActressAlias

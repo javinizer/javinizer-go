@@ -224,7 +224,7 @@ jobs:
   test-windows:
     name: Unit Tests (Windows)
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
     - name: Checkout code

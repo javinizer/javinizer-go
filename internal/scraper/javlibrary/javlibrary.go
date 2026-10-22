@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -732,7 +733,18 @@ func (s *scraper) extractActresses(html string) []models.ActressInfo {
 			name := strings.TrimSpace(m[1])
 			if name != "" && !seen[name] {
 				seen[name] = true
-				// Parse name into first/last (JavLibrary uses Western order)
+				// Map the displayed script, not the page language: localized
+				// pages can still contain either native or romanized cast names.
+				// Preserve native text as supplied; do not infer romanization or
+				// convert simplified/traditional Han characters.
+				if strings.ContainsFunc(name, func(r rune) bool {
+					return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana)
+				}) {
+					actresses = append(actresses, models.ActressInfo{JapaneseName: name})
+					continue
+				}
+				// Preserve the existing romanized token order. The source does
+				// not provide separate given-name and family-name fields.
 				parts := strings.Fields(name)
 				firstName := ""
 				lastName := ""

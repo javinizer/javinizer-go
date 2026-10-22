@@ -112,28 +112,14 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		if s.config.OperationMode == operationmode.OperationModeOrganize && !isDedicated {
 			baseDir = destDir
 		}
-		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
-		overheadBytes := len(fullOverhead) - len("X")
-		folderMaxBytes := 0
-		if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
-			folderMaxBytes = s.config.MaxPathLength - overheadBytes
-		}
+		folderMaxBytes, overheadBytes := folderNameBudget(baseDir, pc.FileName, s.config.MaxPathLength)
 		if s.config.MaxPathLength > 0 && folderMaxBytes <= 0 {
 			return nil, fmt.Errorf("path validation failed: directory and filename overhead (%d bytes) already exceeds max_path_length (%d); reduce the path or increase max_path_length", overheadBytes, s.config.MaxPathLength)
 		}
-		if folderMaxBytes > 0 {
-			var err error
-			folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate folder name: %w", err)
-			}
-			folderName = template.SanitizeFolderPath(folderName)
-			if folderName == "" {
-				folderName = template.SanitizeFolderPath(match.MovieID)
-				if folderName == "" {
-					folderName = folderFallbackUnknown
-				}
-			}
+		var err error
+		folderName, err = renderBudgetedFolderName(s.templateEngine, s.config.FolderFormat, pc, match.MovieID, folderMaxBytes)
+		if err != nil {
+			return nil, err
 		}
 	}
 

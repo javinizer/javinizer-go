@@ -46,12 +46,22 @@ func TestDefaultArtifactSweepSecretPath_Legs(t *testing.T) {
 }
 
 type fakeKeyFile struct {
+	info     os.FileInfo
+	statErr  error
+	writes   int
+	short    bool
 	writeErr error
 	closeErr error
 	closed   bool
 }
 
+func (f *fakeKeyFile) Stat() (os.FileInfo, error) { return f.info, f.statErr }
+
 func (f *fakeKeyFile) Write(p []byte) (int, error) {
+	f.writes++
+	if f.short {
+		return 0, nil
+	}
 	if f.writeErr != nil {
 		return 0, f.writeErr
 	}
@@ -93,18 +103,43 @@ func TestArtifactSweepSecretLoader_FailureLegs(t *testing.T) {
 	_, err = defaultArtifactSweepSecretKey()
 	require.ErrorContains(t, err, "create artifact sweep key")
 
+	fixture := writeSweepKeyFixture(t, []byte("fixture"))
+	info, err := os.Stat(fixture)
+	require.NoError(t, err)
+
 	// write failure — handle is closed on the way out
-	writeFail := &fakeKeyFile{writeErr: errors.New("write denied")}
+	writeFail := &fakeKeyFile{info: info, writeErr: errors.New("write denied")}
 	artifactSweepCreateKey = func(string) (artifactSweepKeyFile, error) { return writeFail, nil }
 	_, err = defaultArtifactSweepSecretKey()
 	require.ErrorContains(t, err, "write artifact sweep key")
 	assert.True(t, writeFail.closed, "failed write still closes the handle")
 
 	// close failure
-	closeFail := &fakeKeyFile{closeErr: errors.New("close denied")}
+	closeFail := &fakeKeyFile{info: info, closeErr: errors.New("close denied")}
 	artifactSweepCreateKey = func(string) (artifactSweepKeyFile, error) { return closeFail, nil }
 	_, err = defaultArtifactSweepSecretKey()
 	require.ErrorContains(t, err, "close artifact sweep key")
+
+	for _, test := range []struct {
+		name string
+		file *fakeKeyFile
+		want string
+	}{
+		{"stat", &fakeKeyFile{statErr: errors.New("stat denied")}, "stat artifact sweep key"},
+		{"nonregular", &fakeKeyFile{info: mustSweepStat(t, dir)}, "not a regular file"},
+		{"short write", &fakeKeyFile{info: info, short: true}, "short write"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			artifactSweepCreateKey = func(string) (artifactSweepKeyFile, error) { return test.file, nil }
+			key, err := defaultArtifactSweepSecretKey()
+			require.ErrorContains(t, err, test.want)
+			require.Nil(t, key)
+			require.True(t, test.file.closed)
+			if test.name != "short write" {
+				require.Zero(t, test.file.writes)
+			}
+		})
+	}
 }
 
 func TestArtifactSweepSecretLoader_ConcurrentCreateWonKey(t *testing.T) {
@@ -141,4 +176,11 @@ func TestArtifactStageSealed_NegativeLegs(t *testing.T) {
 	require.NoError(t, sealArtifactStageManifest(manifest), "seal with the pinned test key")
 	artifactSweepMarshal = func(any) ([]byte, error) { return nil, errors.New("encode denied") }
 	assert.False(t, artifactStageSealed(manifest))
+}
+
+func mustSweepStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	return info
 }

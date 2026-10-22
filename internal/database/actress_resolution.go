@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"gorm.io/gorm"
 
@@ -124,12 +125,24 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 		return nil, err
 	}
 	targetJP := models.NormalizeActressNameKey(japaneseName)
+	// Older JavLibrary scrapes put native text into FirstName/LastName.
+	// Bridge only that layout for native JapaneseName-only input. Keep the
+	// original parser's first+last order and collect all owners below rather
+	// than preferring a legacy row over canonical or curated-alias evidence.
+	legacyNativeInput := hasJP && !hasFirst && !hasLast && strings.ContainsFunc(targetJP, func(r rune) bool {
+		return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana)
+	})
 	targetLF := models.NormalizeActressNameKey(lastName + " " + firstName)
 	targetFL := models.NormalizeActressNameKey(firstName + " " + lastName)
 	matched := make([]models.Actress, 0, 2)
 	reversed := make([]models.Actress, 0, 2)
 	for _, a := range verifiedAll {
 		if hasJP && targetJP != "" && models.NormalizeActressNameKey(a.JapaneseName) == targetJP {
+			matched = append(matched, a)
+			continue
+		}
+		if legacyNativeInput && strings.TrimSpace(a.JapaneseName) == "" && strings.TrimSpace(a.FirstName) != "" &&
+			models.NormalizeActressNameKey(a.FirstName+" "+a.LastName) == targetJP {
 			matched = append(matched, a)
 			continue
 		}

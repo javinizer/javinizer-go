@@ -4,6 +4,7 @@
 	import { Search, ArrowUpDown, GitMerge } from 'lucide-svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import type { ActressFilter } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
@@ -12,6 +13,7 @@
 		viewMode = $bindable(),
 		sortBy = $bindable(),
 		sortOrder,
+		filter = $bindable(),
 		selectedIds,
 		total,
 		actressesCount,
@@ -28,6 +30,7 @@
 		viewMode: 'cards' | 'compact' | 'table';
 		sortBy: string;
 		sortOrder: 'asc' | 'desc';
+		filter: ActressFilter | '';
 		selectedIds: number[];
 		total: number;
 		actressesCount: number;
@@ -60,6 +63,19 @@
 					/>
 				</div>
 			</div>
+			<select
+				bind:value={filter}
+				aria-label={m.actresses_filter_label()}
+				class="rounded-md border border-input bg-background px-3 py-2 text-sm"
+			>
+				<option value="">{m.actresses_filter_all()}</option>
+				<option value="missing_dmm">{m.actresses_filter_missing_dmm()}</option>
+				<option value="has_dmm">{m.actresses_filter_has_dmm()}</option>
+				<option value="missing_thumbnail">{m.actresses_filter_missing_thumbnail()}</option>
+				<option value="missing_japanese_name">{m.actresses_filter_missing_japanese_name()}</option>
+				<option value="japanese_name_only">{m.actresses_filter_japanese_name_only()}</option>
+				<option value="missing_metadata">{m.actresses_filter_missing_metadata()}</option>
+			</select>
 			<Button onclick={onApplySearch}>{m.common_search()}</Button>
 			<Button variant="outline" onclick={onClearSearch}>{m.common_clear()}</Button>
 		</div>

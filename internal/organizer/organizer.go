@@ -205,13 +205,7 @@ func buildPlanContext(cfg *Config, engine template.EngineInterface, movie *model
 		return planContext{Err: fmt.Errorf("failed to generate folder name: %w", err)}
 	}
 
-	folderName = template.SanitizeFolderPath(folderName)
-	if folderName == "" {
-		folderName = template.SanitizeFolderPath(match.MovieID)
-		if folderName == "" {
-			folderName = folderFallbackUnknown
-		}
-	}
+	folderName = sanitizeFolderNameWithFallback(folderName, match.MovieID)
 
 	return planContext{
 		Ctx:        ctx,
