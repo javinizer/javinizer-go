@@ -22,6 +22,25 @@ const exclusiveStagingAttempts = 64
 // re-assert requested without depending on host umask behavior.
 var stagedHandleChmod = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
 
+// stagingModeChangeRefused reports whether a chmod on a staging inode this
+// process just created failed because the filesystem's permission model
+// forbids POSIX mode changes (ZFS aclmode=restricted, NFS all_squash, some
+// FUSE/SMB mounts). The owner of a fresh O_EXCL inode is never refused on a
+// mode-authoritative filesystem, so these errors mean the inherited ACL is
+// authoritative and the requested bits are unenforceable for any file there.
+func stagingModeChangeRefused(err error) bool {
+	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
+}
+
+func applyStagingModeTolerant(staged string, chmod func() error) error {
+	err := chmod()
+	if err == nil || !stagingModeChangeRefused(err) {
+		return err
+	}
+	logging.Debugf("staging mode change refused for %s (%v); keeping filesystem-assigned permissions", staged, err)
+	return nil
+}
+
 // nativeStagingModeMatches proves that an open native inode already has the
 // requested permissions. ACL-managed volumes can allow O_CREATE but forbid
 // even a no-op chmod (ZFS aclmode=restricted). Do not attempt that redundant

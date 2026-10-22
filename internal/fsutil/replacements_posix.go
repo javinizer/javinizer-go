@@ -30,15 +30,17 @@ var restoreFchown = unix.Fchown
 // authoritative when a change is needed, so a failure must fail the staging
 // attempt rather than silently restore media with narrowed permissions. A
 // handle that already has the exact permissions needs no chmod: ACL-managed
-// filesystems may reject even an otherwise redundant chmod.
+// filesystems may reject even an otherwise redundant chmod. When the
+// filesystem refuses mode changes outright (stagingModeChangeRefused), the
+// inherited ACL is authoritative and the staging proceeds with it.
 func restoreStagingMode(fs afero.Fs, staged string, fh afero.File, perm os.FileMode) error {
 	if nativeStagingModeMatches(fh, perm) {
 		return nil
 	}
 	if of, ok := osStagingHandle(fs, fh); ok {
-		return stagedHandleChmod(of, perm)
+		return applyStagingModeTolerant(staged, func() error { return stagedHandleChmod(of, perm) })
 	}
-	return fs.Chmod(stagedVirtualModePath(staged), perm)
+	return applyStagingModeTolerant(staged, func() error { return fs.Chmod(stagedVirtualModePath(staged), perm) })
 }
 
 // RestoreStagingOwnership re-applies the backup's uid/gid to the staged
