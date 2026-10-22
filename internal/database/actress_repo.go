@@ -79,6 +79,11 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
 		}
 		canonicalChanged := actressCanonicalNameChanged(&current, actress.FirstName, actress.LastName, actress.JapaneseName)
+		// An explicit catalog rename takes ownership from a curated import.
+		// A stale import-owned caller must not undo a committed manual edit.
+		if canonicalChanged && current.Origin == ActressOriginImport || current.Origin == ActressOriginUser && actress.Origin == ActressOriginImport {
+			actress.Origin = ActressOriginUser
+		}
 		identityChanged := canonicalChanged || current.ThumbURL != actress.ThumbURL
 		catalogChanged := identityChanged || current.DMMID != actress.DMMID ||
 			current.Aliases != actress.Aliases || current.Verified != actress.Verified ||
@@ -160,10 +165,13 @@ func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, f
 		if err := tx.First(&current, id).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
+		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
+		if nameChanged && current.Origin == ActressOriginImport {
+			updates["origin"] = ActressOriginUser
+		}
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
-		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
 		if nameChanged {
 			if err := deleteActressTranslationsTx(tx, id); err != nil {
 				return err
@@ -728,6 +736,7 @@ type ActressImportResult struct {
 	Outcome string `json:"outcome"`
 }
 
+// ErrActressImportIdentityConflict reports contradictory or ambiguous import references.
 var ErrActressImportIdentityConflict = errors.New("conflicting import identity")
 
 // ImportUpsert preserves the default canonical-field protection policy.
@@ -914,7 +923,7 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 			if strict && incoming.DMMID > 0 && found.DMMID > 0 && incoming.DMMID != found.DMMID {
 				return nil, fmt.Errorf("local ID %d and DMM ID %d disagree: %w", incoming.ID, incoming.DMMID, ErrActressImportIdentityConflict)
 			}
-			if strict && incoming.DMMID > 0 && found.DMMID == 0 {
+			if strict && incoming.DMMID > 0 && found.DMMID <= 0 {
 				var other models.Actress
 				err := r.GetDB().WithContext(ctx).First(&other, "dmm_id = ?", incoming.DMMID).Error
 				if err == nil {

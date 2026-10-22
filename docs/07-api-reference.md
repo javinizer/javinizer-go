@@ -170,6 +170,8 @@ curl -X POST http://localhost:8765/api/v1/actresses/import \
 
 Set top-level `"overwrite_names": true` to replace supplied nonempty names on import-owned identities only. Sparse/empty name fields never clear names. User-owned records remain protected, and existing thumbnails, stable IDs, credit ownership, original scraper evidence and manual credit choices are preserved. Canonical renames use the transactional alias/collision lifecycle and invalidate stale translations and affected rendered movie state.
 
+Explicit catalog/review name edits now persist user ownership transactionally. This does not retroactively identify historical manual edits that still have `origin: "import"`; those records can still be overwritten. Review existing imported records before opting in. Omitting `overwrite_names` retains the default non-overwriting behavior.
+
 In overwrite mode, each item may additionally specify `id`, an existing local identity reference. Unknown local IDs and contradictory local/DMM IDs are conflicts, not permission to create or redirect identity. A sparse item is accepted when it supplies a positive local or DMM ID; creation still requires a first or Japanese name. Omit `id` for portable catalogues. For compatibility, the default API continues to ignore `id`, whereas the default CLI retains its historical local-ID behavior. Both transports use the same strict identity and ownership rules when overwrite is enabled.
 
 For example: `{"overwrite_names":true,"actresses":[{"dmm_id":12345,"first_name":"Updated"}]}`.

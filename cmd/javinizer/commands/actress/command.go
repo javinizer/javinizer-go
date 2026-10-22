@@ -62,7 +62,7 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	importCmd.Flags().Bool("overwrite-names", false, "Replace imported canonical names (never manually maintained names)")
+	importCmd.Flags().Bool("overwrite-names", false, "Replace import-owned names (legacy manual edits may still be import-owned)")
 
 	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd)
 	return actressCmd
@@ -246,11 +246,6 @@ func importActressRecordsWithOptions(ctx context.Context, repo *database.Actress
 		}
 	}
 	return summary
-}
-
-func importActressRecords(ctx context.Context, repo *database.ActressRepository, actresses []models.Actress) (imported, skipped, errorsCount int) {
-	summary := importActressRecordsWithOptions(ctx, repo, actresses, database.ActressImportOptions{})
-	return summary.Imported, summary.Skipped, summary.Errors
 }
 
 func runActressImport(cmd *cobra.Command, args []string, configFile string) error {

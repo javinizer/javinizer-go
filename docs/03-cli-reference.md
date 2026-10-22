@@ -523,6 +523,12 @@ Manual/user-owned records and existing thumbnails remain protected. Existing
 DMM/local identity and credit ownership are not reassigned; previous canonical
 names are retained as legitimate aliases without taking another identity's claims.
 
+Explicit catalog/review name edits now mark imported identities user-owned in the
+same transaction, protecting them from later overwrite imports. Historical manual
+edits may still be marked import-owned and cannot be identified reliably from
+existing records. Review those records before opting into `--overwrite-names`;
+the default import remains non-overwriting.
+
 With `--overwrite-names`, a nonzero JSON `id` must refer to an existing local row,
 and a contradictory `id`/`dmm_id` pair is a conflict. Omit `id` (or use zero) when
 importing a portable catalogue into another installation. The default CLI retains
