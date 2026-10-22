@@ -3680,9 +3680,14 @@ paths:
       description: Get a paginated list of actresses with optional search query and
         sorting
       parameters:
-      - description: Search query
+      - description: Search names or DMM ID
         in: query
         name: q
+        type: string
+      - description: 'Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name,
+          japanese_name_only, missing_metadata'
+        in: query
+        name: filter
         type: string
       - default: name
         description: Sort column (id, dmm_id, japanese_name, first_name, last_name,

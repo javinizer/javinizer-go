@@ -25,6 +25,7 @@ export class ActressClient extends BaseClient {
 		if (params?.limit) queryParams.set('limit', params.limit.toString());
 		if (params?.offset) queryParams.set('offset', params.offset.toString());
 		if (params?.q) queryParams.set('q', params.q);
+		if (params?.filter) queryParams.set('filter', params.filter);
 		if (params?.sort_by) queryParams.set('sort_by', params.sort_by);
 		if (params?.sort_order) queryParams.set('sort_order', params.sort_order);
 		const query = queryParams.toString() ? `?${queryParams}` : '';

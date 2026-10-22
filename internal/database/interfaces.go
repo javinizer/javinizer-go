@@ -45,6 +45,11 @@ type ApplyArtifactPublicationFencer interface {
 
 // ActressRepositoryInterface defines the contract for actress database operations
 type ActressRepositoryInterface interface {
+	ListFiltered(ctx context.Context, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	SearchFiltered(ctx context.Context, query, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	CountFiltered(ctx context.Context, filter string) (int64, error)
+	CountSearchFiltered(ctx context.Context, query, filter string) (int64, error)
+
 	Create(ctx context.Context, actress *models.Actress) error
 	Update(ctx context.Context, actress *models.Actress) error
 	RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error

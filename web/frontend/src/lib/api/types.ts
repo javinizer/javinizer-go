@@ -690,7 +690,16 @@ export interface CollisionResolveRequest {
 
 export type CollisionPolicy = 'block' | 'auto_keep' | 'auto_alias';
 
+export type ActressFilter =
+	| 'missing_dmm'
+	| 'has_dmm'
+	| 'missing_thumbnail'
+	| 'missing_japanese_name'
+	| 'japanese_name_only'
+	| 'missing_metadata';
+
 export interface ActressListParams {
+	filter?: ActressFilter;
 	limit?: number;
 	offset?: number;
 	q?: string;
