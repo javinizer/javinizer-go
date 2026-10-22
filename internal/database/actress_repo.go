@@ -728,7 +728,10 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 }
 
 // ActressImportOptions controls explicitly requested import behavior.
-type ActressImportOptions struct{ OverwriteNames bool }
+type ActressImportOptions struct {
+	OverwriteNames       bool
+	OverwriteLegacyNames bool
+}
 
 // ActressImportResult reports the committed identity outcome, not preflight guesses.
 // Conflicted is returned with an error when stable identity or alias ownership conflicts.
@@ -751,6 +754,9 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incoming *models.Actress, options ActressImportOptions) (*ActressImportResult, error) {
 	if incoming == nil {
 		return nil, fmt.Errorf("import upsert: incoming actress must not be nil")
+	}
+	if options.OverwriteLegacyNames && !options.OverwriteNames {
+		return nil, fmt.Errorf("import upsert: overwrite_legacy_names requires overwrite_names")
 	}
 	requested := *incoming
 	if options.OverwriteNames {
@@ -793,12 +799,20 @@ func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incomin
 				if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
 					return err
 				}
+				if err := restoreImportNameProvenanceTx(tx, incoming.ID, importNamesManaged, ActressOriginImport); err != nil {
+					return err
+				}
 				outcome.Outcome = "created"
 				committed = *incoming
 				return nil
 			}
 			incoming.ID = existing.ID
-			if options.OverwriteNames && existing.Origin == ActressOriginUser {
+			provenance, err := importNameProvenanceTx(tx, existing.ID)
+			if err != nil {
+				return err
+			}
+			protected := existing.Origin == ActressOriginUser || provenance == importNamesRevoked || (existing.Origin == ActressOriginImport && provenance == importNamesLegacy && !options.OverwriteLegacyNames)
+			if options.OverwriteNames && protected {
 				outcome.Outcome = "unchanged"
 				if importNamesDiffer(existing, incoming) {
 					outcome.Outcome = "protected"
@@ -903,6 +917,9 @@ func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incomin
 				return err
 			}
 			if err := invalidateChangedMovieRenderInputsTx(tx, before, contentIDs); err != nil {
+				return err
+			}
+			if err := restoreImportNameProvenanceTx(tx, incoming.ID, provenance, previousIdentity.Origin); err != nil {
 				return err
 			}
 			committed = *incoming

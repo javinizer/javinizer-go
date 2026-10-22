@@ -18,7 +18,7 @@ func TestImportOverwriteNamesPolicy(t *testing.T) {
 				db := newCreditTestDB(t)
 				repo := NewActressRepository(db)
 				a := models.Actress{DMMID: 700, FirstName: "Old", LastName: "Family", JapaneseName: "旧名", ThumbURL: "keep.jpg", Origin: origin, Verified: true}
-				require.NoError(t, db.Create(&a).Error)
+				seedManagedImportFixture(t, db, &a)
 				in := models.Actress{ID: a.ID, DMMID: a.DMMID, FirstName: " New ", JapaneseName: "新名", ThumbURL: "replace.jpg"}
 				result, err := repo.ImportUpsertWithOptions(t.Context(), &in, ActressImportOptions{OverwriteNames: overwrite})
 				require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestImportOverwriteLifecycle(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	a := models.Actress{DMMID: 701, FirstName: "Old", LastName: "Family", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	tr := models.ActressTranslation{ActressID: a.ID, Language: "en", DisplayName: "Translated"}
 	require.NoError(t, db.Create(&tr).Error)
 	for _, tc := range []struct {
@@ -96,7 +96,7 @@ func TestImportOverwriteConflictsAndRollback(t *testing.T) {
 			db := newCreditTestDB(t)
 			repo := NewActressRepository(db)
 			a := models.Actress{DMMID: 702, FirstName: "Old", Origin: ActressOriginImport, Verified: true}
-			require.NoError(t, db.Create(&a).Error)
+			seedManagedImportFixture(t, db, &a)
 			in := models.Actress{ID: a.ID, FirstName: "New"}
 			switch tc {
 			case "unknown local":
@@ -130,7 +130,7 @@ func TestImportOverwriteRechecksConcurrentManualOwnership(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
 	a := models.Actress{DMMID: 704, FirstName: "Old", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	sqlDB, err := db.DB.DB()
 	require.NoError(t, err)
 	var once sync.Once
@@ -158,7 +158,7 @@ func TestImportOptionsValidationAndSparseFields(t *testing.T) {
 		require.Error(t, err)
 	}
 	a := models.Actress{FirstName: "Before", LastName: "Keep", JapaneseName: "保持", ThumbURL: "keep.jpg", Origin: ActressOriginImport}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	in := models.Actress{ID: a.ID, DMMID: 9876, FirstName: "After"}
 	result, err := repo.ImportUpsertWithOptions(t.Context(), &in, ActressImportOptions{OverwriteNames: true})
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestImportOptionsDMMOwnershipQueryFailure(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	a := models.Actress{FirstName: "Before", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	injectDatabaseCallbackError(t, db, "query", "actresses", 2)
 	in := models.Actress{ID: a.ID, DMMID: 9876, FirstName: "After"}
 	_, err := repo.ImportUpsertWithOptions(t.Context(), &in, ActressImportOptions{OverwriteNames: true})
@@ -186,7 +186,7 @@ func TestImportOverwriteDoesNotTrustOrStealAliases(t *testing.T) {
 	owner := models.Actress{DMMID: 705, FirstName: "Owner", Origin: ActressOriginImport, Verified: true}
 	require.NoError(t, db.Create(&owner).Error)
 	a := models.Actress{DMMID: 706, FirstName: "Old", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	alias := models.ActressAlias{AliasName: "Old", CanonicalName: "Owner"}
 	require.NoError(t, db.Create(&alias).Error)
 	in := models.Actress{ID: a.ID, FirstName: "New", Aliases: "Owner"}
@@ -207,7 +207,7 @@ func TestImportOverwriteQuarantineFailureRollsBack(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	a := models.Actress{DMMID: 707, FirstName: "Old", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:import_quarantine_failure", func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "actresses" && strings.Contains(tx.Statement.SQL.String(), "WHERE verified = ? ORDER BY id") {
 			_ = tx.AddError(errors.New("quarantine unavailable"))
@@ -227,7 +227,7 @@ func TestImportOverwriteReconcilesCollisions(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	a := models.Actress{DMMID: 708, FirstName: "Old", JapaneseName: "旧名", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	movie, err := NewMovieRepository(db).Upsert(t.Context(), creditMovie("overwrite-collision", []models.MovieCredit{{CreditedName: "新名", Source: "fixture", Scraped: models.Actress{DMMID: a.DMMID, JapaneseName: "新名"}}}))
 	require.NoError(t, err)
 	collisions, err := NewCreditCollisionRepository(db).ListOpenByMovie(t.Context(), movie.ContentID)
@@ -251,7 +251,7 @@ func TestImportOverwriteRecomputesCandidateQuarantine(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	a := models.Actress{FirstName: "Canonical", JapaneseName: "旧名", Origin: ActressOriginImport, Verified: true}
-	require.NoError(t, db.Create(&a).Error)
+	seedManagedImportFixture(t, db, &a)
 	movie, err := NewMovieRepository(db).Upsert(t.Context(), creditMovie("overwrite-quarantine", []models.MovieCredit{{CreditedName: "新名", Source: "fixture", Scraped: models.Actress{DMMID: 709, JapaneseName: "新名"}}}))
 	require.NoError(t, err)
 	require.False(t, movie.Credits[0].Actress.AmbiguityQuarantined)
@@ -264,4 +264,14 @@ func TestImportOverwriteRecomputesCandidateQuarantine(t *testing.T) {
 	require.Equal(t, movie.Credits[0].ActressID, after.Credits[0].ActressID)
 	require.False(t, after.Credits[0].Actress.Verified)
 	require.Equal(t, movie.RenderGeneration+1, after.RenderGeneration)
+}
+
+// Existing overwrite-policy tests exercise post-safeguard managed imports.
+func seedManagedImportFixture(t *testing.T, db *DB, a *models.Actress) {
+	t.Helper()
+	if a.Origin == ActressOriginImport {
+		require.NoError(t, NewActressRepository(db).ImportUpsert(t.Context(), a))
+	} else {
+		require.NoError(t, db.Create(a).Error)
+	}
 }

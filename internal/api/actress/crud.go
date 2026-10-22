@@ -388,8 +388,9 @@ func deleteActress(deps ActressDeps) gin.HandlerFunc {
 }
 
 type actressesImportRequest struct {
-	Actresses      []actressImportItem `json:"actresses"`
-	OverwriteNames bool                `json:"overwrite_names"`
+	Actresses            []actressImportItem `json:"actresses"`
+	OverwriteNames       bool                `json:"overwrite_names"`
+	OverwriteLegacyNames bool                `json:"overwrite_legacy_names"`
 }
 
 type actressImportItem struct {
@@ -472,6 +473,10 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 
+		if req.OverwriteLegacyNames && !req.OverwriteNames {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "overwrite_legacy_names requires overwrite_names"})
+			return
+		}
 		repo := deps.ActressRepo
 		var summary importSummaryResponse
 
@@ -505,7 +510,7 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 			if req.OverwriteNames {
 				incoming.ID = item.ID
 			}
-			result, err := repo.ImportUpsertWithOptions(c.Request.Context(), incoming, database.ActressImportOptions{OverwriteNames: req.OverwriteNames})
+			result, err := repo.ImportUpsertWithOptions(c.Request.Context(), incoming, database.ActressImportOptions{OverwriteNames: req.OverwriteNames, OverwriteLegacyNames: req.OverwriteLegacyNames})
 			if err != nil {
 				summary.Errors++
 				if result != nil && result.Outcome == "conflicted" {

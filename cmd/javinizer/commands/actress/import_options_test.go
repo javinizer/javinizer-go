@@ -25,7 +25,7 @@ func TestCLIImportOverwriteNames(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 			repo := database.NewActressRepository(db)
 			imported := &models.Actress{FirstName: "Original", DMMID: 123, Origin: database.ActressOriginImport, Verified: true}
-			require.NoError(t, db.Create(imported).Error)
+			require.NoError(t, repo.ImportUpsert(t.Context(), imported))
 			manual := &models.Actress{FirstName: "Manual", DMMID: 456, Origin: database.ActressOriginUser, Verified: true}
 			require.NoError(t, db.Create(manual).Error)
 			rows := []models.Actress{{ID: imported.ID, FirstName: "Replacement"}, {ID: manual.ID, FirstName: "DoNotReplace"}}

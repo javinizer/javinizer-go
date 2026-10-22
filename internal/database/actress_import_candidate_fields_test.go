@@ -77,8 +77,8 @@ func TestImportSparseFieldsAcrossStoredOrigins(t *testing.T) {
 				require.Equal(t, a.JapaneseName, in.JapaneseName)
 				require.Equal(t, a.ThumbURL, in.ThumbURL)
 				require.Equal(t, a.DMMID, in.DMMID)
-				if origin == ActressOriginUser {
-					require.Equal(t, ActressOriginUser, in.Origin)
+				if origin == ActressOriginUser || origin == ActressOriginImport {
+					require.Equal(t, origin, in.Origin)
 					require.Equal(t, verified, in.Verified)
 				} else {
 					require.Equal(t, ActressOriginImport, in.Origin)

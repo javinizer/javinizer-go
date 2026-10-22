@@ -523,17 +523,29 @@ User-owned records and verified imported thumbnails remain protected. Existing
 DMM/local identity and credit ownership are not reassigned; previous canonical
 names are retained as legitimate aliases without taking another identity's claims.
 
-Explicit catalog/review name edits now mark imported identities user-owned in the
-same transaction, protecting them from later overwrite imports. Historical manual
-edits may still be marked import-owned and cannot be identified reliably from
-existing records. Review those records before opting into `--overwrite-names`;
-the default import remains non-overwriting.
+New identities created by the importer are managed for future `--overwrite-names`
+requests. On upgrade, existing records are conservatively treated as ambiguous:
+historical manual edits cannot be identified reliably. Ordinary reimports do not
+make those records eligible for name overwrites.
 
-Candidate and legacy-origin records still follow the normal import-promotion path,
-which may apply supplied metadata and mark the identity verified/import-owned.
-In overwrite mode, omitted or empty names and thumbnails retain their stored
-values during that promotion. The option does not change default promotion or
-the existing `aliases` replacement behavior.
+After backing up the database and reviewing the selected records, use
+`--overwrite-names --overwrite-legacy-names` to overwrite supplied nonempty names
+on ambiguous import-owned records for this invocation only. This never enrolls
+legacy records permanently; future imports still need the explicit legacy flag.
+The legacy flag without `--overwrite-names` is rejected before importing any row.
+It cannot bypass user ownership, known revoked eligibility, or identity conflicts.
+
+Catalog/review name edits and merges revoke eligibility durably. Other non-import
+writes that change canonical names or origin conservatively revoke it too, so a
+revoked record is not necessarily proof of a manual edit. No-op and thumbnail-only
+edits preserve eligibility. The importer preserves existing eligibility during its
+own transactional writes; provenance is server-managed, not accepted from JSON.
+
+Scrape candidates and unknown-origin records without revoked eligibility retain normal
+promotion behavior, including supplied metadata; omitted names/thumbnails are
+retained in overwrite mode. Existing candidates are not enrolled as newly managed:
+a previously ambiguous candidate remains ambiguous after promotion, while known
+revocation remains protected. Default promotion and alias replacement are unchanged.
 
 With name overwrites enabled, user-owned identity fields remain protected, while inline `aliases` metadata keeps its existing replacement behavior (including clearing when omitted or empty). A row counted as `updated` may have only alias metadata changes; this does not mean protected names were overwritten.
 

@@ -62,7 +62,8 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	importCmd.Flags().Bool("overwrite-names", false, "Replace import-owned names (legacy manual edits may still be import-owned)")
+	importCmd.Flags().Bool("overwrite-names", false, "Replace managed import-owned names; legacy records remain protected")
+	importCmd.Flags().Bool("overwrite-legacy-names", false, "Also overwrite ambiguous legacy import names for this invocation only; requires --overwrite-names (back up and review first)")
 
 	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd)
 	return actressCmd
@@ -249,6 +250,12 @@ func importActressRecordsWithOptions(ctx context.Context, repo *database.Actress
 }
 
 func runActressImport(cmd *cobra.Command, args []string, configFile string) error {
+	overwriteNames, _ := cmd.Flags().GetBool("overwrite-names")
+	overwriteLegacyNames, _ := cmd.Flags().GetBool("overwrite-legacy-names")
+	if overwriteLegacyNames && !overwriteNames {
+		return fmt.Errorf("--overwrite-legacy-names requires --overwrite-names")
+	}
+
 	fileData, err := os.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
@@ -275,8 +282,7 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 	defer func() { _ = deps.Close() }()
 
 	repo := database.NewActressRepository(deps.DB)
-	overwriteNames, _ := cmd.Flags().GetBool("overwrite-names")
-	summary := importActressRecordsWithOptions(cmd.Context(), repo, actresses, database.ActressImportOptions{OverwriteNames: overwriteNames})
+	summary := importActressRecordsWithOptions(cmd.Context(), repo, actresses, database.ActressImportOptions{OverwriteNames: overwriteNames, OverwriteLegacyNames: overwriteLegacyNames})
 
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Imported: %d, Skipped: %d, Errors: %d\nCreated: %d, Updated: %d, Unchanged: %d, Protected: %d, Conflicted: %d\n", summary.Imported, summary.Skipped, summary.Errors, summary.Created, summary.Updated, summary.Unchanged, summary.Protected, summary.Conflicted)
 

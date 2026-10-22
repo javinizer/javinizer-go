@@ -119,6 +119,7 @@ var commandFlags = map[string][]flagSpec{
 	},
 	"actress import": {
 		{"overwrite-names", ""},
+		{"overwrite-legacy-names", ""},
 	},
 	"actress merge": {
 		{"target", ""},

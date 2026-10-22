@@ -75,7 +75,7 @@ func TestImportActressesOverwriteNamesIntegration(t *testing.T) {
 		t.Run(map[bool]string{false: "default", true: "explicit"}[overwrite], func(t *testing.T) {
 			repo := newMockActressRepo(t)
 			imported := &models.Actress{DMMID: 123, FirstName: "Original", Origin: database.ActressOriginImport, Verified: true}
-			require.NoError(t, repo.GetDB().Create(imported).Error)
+			require.NoError(t, repo.ImportUpsert(t.Context(), imported))
 			manual := &models.Actress{DMMID: 456, FirstName: "Manual", Origin: database.ActressOriginUser, Verified: true}
 			require.NoError(t, repo.GetDB().Create(manual).Error)
 			payload := actressesImportRequest{OverwriteNames: overwrite, Actresses: []actressImportItem{{ID: imported.ID, DMMID: 123, FirstName: "Replacement"}, {ID: manual.ID, DMMID: 456, FirstName: "DoNotReplace"}, {ID: 99999, FirstName: "Unknown"}}}
