@@ -6,6 +6,7 @@ import "os"
 
 const artifactSweepKeyNoFollow = 0
 
-// secureArtifactSweepSecret has no POSIX owner/mode model to enforce on
-// Windows: the key lives in the per-user profile, protected by its ACL.
-func secureArtifactSweepSecret(string, *os.File, os.FileInfo) error { return nil }
+// secureArtifactSweepSecret is unset on Windows: there is no POSIX owner/mode
+// model to enforce, and the key lives in the per-user profile protected by its
+// ACL.
+var secureArtifactSweepSecret func(path string, f *os.File, info os.FileInfo) error

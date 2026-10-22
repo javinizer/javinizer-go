@@ -155,8 +155,10 @@ func readArtifactSweepSecret(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("artifact sweep key %s is not a regular file (mode %v)", path, info.Mode())
 	}
-	if err := secureArtifactSweepSecret(path, f, info); err != nil {
-		return nil, err
+	if secure := secureArtifactSweepSecret; secure != nil {
+		if err := secure(path, f, info); err != nil {
+			return nil, err
+		}
 	}
 	key, err := artifactSweepReadKey(f)
 	if err != nil {

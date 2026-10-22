@@ -18,16 +18,18 @@ var (
 	artifactSweepGeteuid  = os.Geteuid
 	artifactSweepKeyChmod = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
 	artifactSweepKeyWarns sync.Map
+
+	secureArtifactSweepSecret = secureArtifactSweepSecretPOSIX
 )
 
-// secureArtifactSweepSecret enforces the key's owner-only contract on the
+// secureArtifactSweepSecretPOSIX enforces the key's owner-only contract on the
 // opened handle. A key owned by another account is refused outright: anyone
 // able to plant it can mint seals. Group/other permission bits are tightened
 // to 0600 through the handle; when the filesystem refuses mode changes
 // (ACL-managed volumes such as ZFS aclmode=restricted), the ACL is
 // authoritative and the key is used with a one-time warning, because
 // refusing it would only disable staging cleanup without protecting the key.
-func secureArtifactSweepSecret(path string, f *os.File, info os.FileInfo) error {
+func secureArtifactSweepSecretPOSIX(path string, f *os.File, info os.FileInfo) error {
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
 		if euid := artifactSweepGeteuid(); int(st.Uid) != euid {
 			return fmt.Errorf("artifact sweep key %s is owned by uid %d, not the running uid %d", path, st.Uid, euid)
