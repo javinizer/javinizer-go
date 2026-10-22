@@ -55,7 +55,10 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 		}
 	}
 	if kind == "reimport" || kind == "update" {
-		imported, skipped, failures := importActressRecords(tb.Context(), database.NewActressRepository(db), records)
+		// Seed a separate slice: the measured input must still model ID-less JSON,
+		// not reuse the database IDs written back by the initial import.
+		seedRecords := append([]models.Actress(nil), records...)
+		imported, skipped, failures := importActressRecords(tb.Context(), database.NewActressRepository(db), seedRecords)
 		require.Equal(tb, size, imported)
 		require.Zero(tb, skipped)
 		require.Zero(tb, failures)
@@ -74,9 +77,11 @@ func expectedImportWorkload(tb testing.TB, db *database.DB, kind string, records
 	expected := append([]models.Actress(nil), records...)
 	if kind == "reimport" || kind == "update" {
 		for i := range expected {
+			require.Zero(tb, records[i].ID, "reimport and update must match ID-less inputs")
 			var matches []models.Actress
 			require.NoError(tb, db.Where("japanese_name = ?", expected[i].JapaneseName).Find(&matches).Error)
 			require.Len(tb, matches, 1)
+			require.NotZero(tb, matches[0].ID, "the fixture must already exist in the database")
 			expected[i].ID = matches[0].ID
 		}
 	}
