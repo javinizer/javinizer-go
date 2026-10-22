@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -23,6 +24,7 @@
 	import { createConfigQuery } from '$lib/query/queries';
 
 	const store = createActressStore();
+	onMount(store.hydrateSortPreferences);
 	const queryClient = useQueryClient();
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
@@ -170,6 +172,7 @@
 					bind:viewMode={store.viewMode}
 					bind:sortBy={store.sortBy}
 					sortOrder={store.sortOrder}
+					bind:filter={store.filter}
 					selectedIds={store.selectedIds}
 					total={store.total}
 					actressesCount={store.actresses.length}
