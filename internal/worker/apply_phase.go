@@ -1088,13 +1088,26 @@ func interpretApplyResult(
 	}
 
 	if result != nil && result.VideoOutcome == "skipped" {
-		writeErr := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-			current.VideoOutcome = "skipped"
-			current.VideoCollision = nil
-			current.Status = models.JobStatusCompleted
-			current.Error, current.ErrorCode = "", ""
-			return current, prov, nil
-		})
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
+		defer unlock()
+		var writeErr error
+		if mid := strings.TrimSpace(movie.ID); mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+			writeErr = fmt.Errorf("promote witness for %s unresolved", mid)
+		} else if writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
+			writeErr = fmt.Errorf("result identity changed during Apply")
+		} else {
+			writeErr = inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+				if applyWritebackIdentityMismatch(movie, current) {
+					return nil, nil, fmt.Errorf("result identity changed during Apply")
+				}
+				current.VideoOutcome = "skipped"
+				current.VideoCollision = nil
+				current.Status = models.JobStatusCompleted
+				current.Error, current.ErrorCode = "", ""
+				return current, prov, nil
+			})
+		}
 		if writeErr != nil {
 			outcome.Failed = true
 			outcome.ErrorMsg = fmt.Sprintf("persist skipped Apply receipt: %v", writeErr)
