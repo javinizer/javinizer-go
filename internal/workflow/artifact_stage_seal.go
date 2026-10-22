@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
@@ -60,14 +63,15 @@ const (
 // key (never the developer's real cache dir) and replay the loader's failure
 // legs deterministically.
 var (
-	artifactSweepSecretPath   = defaultArtifactSweepSecretPath
-	artifactSweepSecretKey    = defaultArtifactSweepSecretKey
-	artifactSweepUserCacheDir = os.UserCacheDir
-	artifactSweepUserHomeDir  = os.UserHomeDir
-	artifactSweepMkdirAll     = os.MkdirAll
-	artifactSweepCreateKey    = defaultArtifactSweepCreateKey
-	artifactSweepStatKey      = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
-	artifactSweepReadKey      = func(r io.Reader) ([]byte, error) {
+	artifactSweepSecretPath     = defaultArtifactSweepSecretPath
+	artifactSweepSecretKey      = defaultArtifactSweepSecretKey
+	artifactSweepUserCacheDir   = os.UserCacheDir
+	artifactSweepUserHomeDir    = os.UserHomeDir
+	artifactSweepMkdirAll       = os.MkdirAll
+	artifactSweepCreateKey      = defaultArtifactSweepCreateKey
+	artifactSweepUnlinkVerified = fsutil.UnlinkVerified
+	artifactSweepStatKey        = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	artifactSweepReadKey        = func(r io.Reader) ([]byte, error) {
 		return io.ReadAll(io.LimitReader(r, artifactStageSecretBytes+1))
 	}
 )
@@ -152,6 +156,9 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 		if writeErr == nil {
 			writeErr = io.ErrShortWrite
 		}
+		if written, err := handle.Stat(); err == nil {
+			info = written
+		}
 		_ = handle.Close()
 		discardUnpublishedArtifactSweepKey(path, info)
 		return nil, fmt.Errorf("write artifact sweep key %s: %w", path, writeErr)
@@ -172,14 +179,17 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 }
 
 // discardUnpublishedArtifactSweepKey removes a key file this process created
-// but never completed, only while the path still names the created inode.
+// but never completed. The unlink is bound to the created inode through
+// fsutil.UnlinkVerified (vacate onto a claimed terminal, re-verify, unlink
+// only the terminal), so a substitute published at the path after the
+// identity check is preserved rather than removed by pathname.
 func discardUnpublishedArtifactSweepKey(path string, created os.FileInfo) {
 	current, err := os.Lstat(path)
 	if err != nil || !os.SameFile(created, current) {
 		return
 	}
-	if err := os.Remove(path); err != nil {
-		logging.Warnf("artifact sweep key %s: failed to discard incomplete key: %v", path, err)
+	if err := artifactSweepUnlinkVerified(afero.NewOsFs(), path, created); err != nil {
+		logging.Warnf("artifact sweep key %s: incomplete key not discarded: %v", path, err)
 	}
 }
 

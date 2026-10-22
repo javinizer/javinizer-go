@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,6 +24,25 @@ func TestDiscardUnpublishedArtifactSweepKey(t *testing.T) {
 		body, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, "foreign", string(body))
+	})
+
+	t.Run("substitute planted after the identity check is preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, artifactStageSecretName)
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+		created, err := os.Stat(path)
+		require.NoError(t, err)
+		old := artifactSweepUnlinkVerified
+		t.Cleanup(func() { artifactSweepUnlinkVerified = old })
+		artifactSweepUnlinkVerified = func(fs afero.Fs, name string, verified os.FileInfo) error {
+			require.NoError(t, os.Rename(name, name+".moved"))
+			require.NoError(t, os.WriteFile(name, []byte("complete key from a concurrent process"), 0o600))
+			return old(fs, name, verified)
+		}
+		discardUnpublishedArtifactSweepKey(path, created)
+		body, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, "complete key from a concurrent process", string(body))
 	})
 
 	t.Run("missing path is a no-op", func(t *testing.T) {
