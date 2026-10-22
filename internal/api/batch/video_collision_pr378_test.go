@@ -29,7 +29,9 @@ import (
 func TestPR378CollisionOverrideResolution(t *testing.T) {
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 	snap := core.NewSnapshotForTesting(core.NewAPIRuntime(nil), core.APIConfig{})
-	decision := videocollision.Decision{Source: "/source.mp4", Destination: "/target.mp4", Policy: videocollision.Skip}
+	dir := t.TempDir()
+	decision := videocollision.Decision{Source: filepath.Join(dir, "source.mp4"), Destination: filepath.Join(dir, "target.mp4"), Policy: videocollision.Skip}
+	require.Equal(t, filepath.Clean(decision.Source), decision.Source)
 	skip := videocollision.Skip
 	for _, tc := range []struct {
 		name    string
@@ -43,7 +45,7 @@ func TestPR378CollisionOverrideResolution(t *testing.T) {
 		{"duplicate decisions", contracts.OrganizeRequest{VideoCollisionDecisions: map[string]videocollision.Decision{decision.Source: decision}, Overrides: &contracts.ReviewApplyOverrides{VideoCollisionDecisions: map[string]videocollision.Decision{decision.Source: decision}}}, "must be supplied once"},
 		{"invalid policy", contracts.OrganizeRequest{VideoCollisionPolicy: "unsafe"}, "invalid video_collision_policy"},
 		{"invalid decision policy", contracts.OrganizeRequest{VideoCollisionDecisions: map[string]videocollision.Decision{decision.Source: {Source: decision.Source, Destination: decision.Destination, Policy: "unsafe"}}}, "invalid video_collision_policy"},
-		{"mismatched source", contracts.OrganizeRequest{VideoCollisionDecisions: map[string]videocollision.Decision{"/other.mp4": decision}}, "invalid video collision decision path"},
+		{"mismatched source", contracts.OrganizeRequest{VideoCollisionDecisions: map[string]videocollision.Decision{filepath.Join(dir, "other.mp4"): decision}}, "invalid video collision decision path"},
 		{"empty destination", contracts.OrganizeRequest{VideoCollisionDecisions: map[string]videocollision.Decision{decision.Source: {Source: decision.Source, Policy: skip}}}, "invalid video collision decision path"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,6 +74,17 @@ func TestPR378CollisionOverrideResolution(t *testing.T) {
 }
 
 func TestPR378CollisionReviewEndpointErrors(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "unknown.mp4")
+	decisions := map[string]videocollision.Decision{source: {Source: source, Destination: filepath.Join(dir, "target.mp4"), Policy: videocollision.Skip}}
+	unknownBody, err := json.Marshal(contracts.OrganizeRequest{
+		OperationMode:           string(operationmode.OperationModeInPlace),
+		VideoCollisionDecisions: decisions,
+	})
+	require.NoError(t, err)
+	var decoded contracts.OrganizeRequest
+	require.NoError(t, json.Unmarshal(unknownBody, &decoded))
+	require.Equal(t, decisions, decoded.VideoCollisionDecisions)
 	for _, tc := range []struct {
 		name, body, suffix, wantError string
 		badFactory                    bool
@@ -81,7 +94,7 @@ func TestPR378CollisionReviewEndpointErrors(t *testing.T) {
 		{"missing job", "{}", "missing", jobNotFoundMessage, false, http.StatusNotFound},
 		{"factory unavailable", "{}", "", factoryUnavailableMessage, true, http.StatusServiceUnavailable},
 		{"bad config", `{"video_collision_policy":"unsafe"}`, "", "invalid video_collision_policy", false, http.StatusBadRequest},
-		{"unknown decision", `{"video_collision_decisions":{"/unknown.mp4":{"source":"/unknown.mp4","destination":"/target.mp4","policy":"skip"}}}`, "", "video decision source is not in this job", false, http.StatusBadRequest},
+		{"unknown decision", string(unknownBody), "", "video decision source is not in this job: " + source, false, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.DefaultConfig(nil, nil)
@@ -98,9 +111,6 @@ func TestPR378CollisionReviewEndpointErrors(t *testing.T) {
 				id = tc.suffix
 			}
 			body := tc.body
-			if tc.name == "unknown decision" {
-				body = strings.TrimSuffix(body, "}") + `,"operation_mode":"in-place"}`
-			}
 			if tc.name == "bad config" {
 				body = strings.TrimSuffix(body, "}") + `,"operation_mode":"in-place"}`
 			}
