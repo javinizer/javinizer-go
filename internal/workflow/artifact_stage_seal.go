@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,10 @@ var (
 	artifactSweepUserHomeDir  = os.UserHomeDir
 	artifactSweepMkdirAll     = os.MkdirAll
 	artifactSweepCreateKey    = defaultArtifactSweepCreateKey
+	artifactSweepStatKey      = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	artifactSweepReadKey      = func(r io.Reader) ([]byte, error) {
+		return io.ReadAll(io.LimitReader(r, artifactStageSecretBytes+1))
+	}
 )
 
 type artifactSweepKeyFile interface {
@@ -133,11 +138,29 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 
 // readArtifactSweepSecret reads and validates the key file. A corrupt
 // (wrong-length) or unreadable file is a hard failure: sealing/verifying
-// against a degraded key would silently split the ownership ring.
+// against a degraded key would silently split the ownership ring. The key is
+// opened without following a final symlink and must be a regular file that
+// passes the platform's ownership and permission policy
+// (secureArtifactSweepSecret), so a planted or foreign key is never trusted.
 func readArtifactSweepSecret(path string) ([]byte, error) {
-	key, err := os.ReadFile(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|artifactSweepKeyNoFollow, 0)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := artifactSweepStatKey(f)
+	if err != nil {
+		return nil, fmt.Errorf("stat artifact sweep key %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("artifact sweep key %s is not a regular file (mode %v)", path, info.Mode())
+	}
+	if err := secureArtifactSweepSecret(path, f, info); err != nil {
+		return nil, err
+	}
+	key, err := artifactSweepReadKey(f)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact sweep key %s: %w", path, err)
 	}
 	if len(key) != artifactStageSecretBytes {
 		return nil, fmt.Errorf("artifact sweep key %s corrupt (want %d bytes, got %d)", path, artifactStageSecretBytes, len(key))
