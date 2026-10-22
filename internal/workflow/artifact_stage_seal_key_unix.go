@@ -30,7 +30,7 @@ func secureArtifactSweepSecretPOSIX(path string, info os.FileInfo) error {
 		return fmt.Errorf("artifact sweep key %s is owned by uid %d, not the running uid %d", path, st.Uid, euid)
 	}
 	if info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("artifact sweep key %s is accessible beyond its owner (mode %v); refusing potentially exposed key", path, info.Mode().Perm())
+		return fmt.Errorf("artifact sweep key %s is accessible beyond its owner (mode %v); refusing potentially exposed key; restrict the key and its directory (mode and ACL) to the Javinizer user, then remove the key so it is regenerated", path, info.Mode().Perm())
 	}
 	return nil
 }

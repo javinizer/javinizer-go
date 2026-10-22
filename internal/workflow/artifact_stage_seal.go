@@ -135,8 +135,9 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 	}
 	// Requested mode is not evidence of the effective mode (for example on
 	// ACL-managed storage). Validate the opened inode before writing any secret.
-	// Leave a failed create in place: deleting/replacing it could rotate a key
-	// another process has observed, and cannot undo any earlier exposure.
+	// A create rejected before any complete secret was written is discarded
+	// (bound to this inode): no process can have observed a key from it, and
+	// leaving it would wedge every later load as corrupt once storage is fixed.
 	info, statErr := handle.Stat()
 	if statErr != nil {
 		_ = handle.Close()
@@ -144,6 +145,7 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 	}
 	if err := validateArtifactSweepSecret(path, info); err != nil {
 		_ = handle.Close()
+		discardUnpublishedArtifactSweepKey(path, info)
 		return nil, err
 	}
 	if n, writeErr := handle.Write(drawn); writeErr != nil || n != len(drawn) {
@@ -151,6 +153,7 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 			writeErr = io.ErrShortWrite
 		}
 		_ = handle.Close()
+		discardUnpublishedArtifactSweepKey(path, info)
 		return nil, fmt.Errorf("write artifact sweep key %s: %w", path, writeErr)
 	}
 	if closeErr := handle.Close(); closeErr != nil {
@@ -166,6 +169,18 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 		return nil, fmt.Errorf("artifact sweep key %s changed during creation", path)
 	}
 	return published, nil
+}
+
+// discardUnpublishedArtifactSweepKey removes a key file this process created
+// but never completed, only while the path still names the created inode.
+func discardUnpublishedArtifactSweepKey(path string, created os.FileInfo) {
+	current, err := os.Lstat(path)
+	if err != nil || !os.SameFile(created, current) {
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		logging.Warnf("artifact sweep key %s: failed to discard incomplete key: %v", path, err)
+	}
 }
 
 // readArtifactSweepSecret reads and validates the key file. A corrupt

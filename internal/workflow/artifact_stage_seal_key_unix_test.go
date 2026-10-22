@@ -137,16 +137,19 @@ func TestArtifactSweepSecretCreate_POSIXValidationBeforeWrite(t *testing.T) {
 			key, err := defaultArtifactSweepSecretKey()
 			require.Error(t, err)
 			require.Nil(t, key)
-			info, err := os.Stat(path)
-			require.NoError(t, err, "failed creation is retained, never silently deleted")
-			require.Zero(t, info.Size(), "no secret bytes before validation")
 			_, err = created.Write([]byte("closed?"))
 			require.Error(t, err, "rejected handle must be closed")
-			// A later attempt must reject the retained file, not create a new key.
-			artifactSweepCreateKey = func(string) (artifactSweepKeyFile, error) { t.Fatal("must not rotate"); return nil, nil }
+			_, err = os.Lstat(path)
+			if test == "unknown owner" {
+				require.NoError(t, err, "an inode identity that cannot be proven is never removed")
+				return
+			}
+			require.True(t, os.IsNotExist(err), "an incomplete rejected key is discarded, never left to wedge later loads")
+			// Once storage is private again, the next load mints a usable key.
+			artifactSweepCreateKey, artifactSweepGeteuid = oldCreate, oldUID
 			key, err = defaultArtifactSweepSecretKey()
-			require.Error(t, err)
-			require.Nil(t, key)
+			require.NoError(t, err)
+			require.Len(t, key, artifactStageSecretBytes)
 		})
 	}
 }
