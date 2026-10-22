@@ -36,7 +36,10 @@ func NewCommand() *cobra.Command {
 	mergeCmd.Flags().Uint("target", 0, "Target actress ID to keep")
 	mergeCmd.Flags().Uint("source", 0, "Source actress ID to merge and delete")
 	mergeCmd.Flags().Bool("non-interactive", false, "Do not prompt; apply a global preference to all conflicts")
-	mergeCmd.Flags().String("prefer", "target", "Conflict preference for non-interactive mode: target or source")
+	mergeCmd.Flags().String("prefer", database.MergeResolutionTarget, "Conflict preference for non-interactive mode: target or source")
+	mergeCmd.Flags().String("policy", database.MergePolicyFillEmpty, "Scalar policy: fill_empty or preserve_target (including blanks)")
+	mergeCmd.Flags().StringToString("resolve", nil, "Explicit scalar decisions, e.g. last_name=target,dmm_id=source")
+	mergeCmd.Flags().Bool("dry-run", false, "Preview resulting scalar fields without merging or deleting the source")
 	mergeCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	_ = mergeCmd.MarkFlagRequired("target")
 	_ = mergeCmd.MarkFlagRequired("source")
@@ -66,11 +69,19 @@ func NewCommand() *cobra.Command {
 }
 
 func runMerge(cmd *cobra.Command, configFile string) error {
+	cmd.SetIn(bufio.NewReader(cmd.InOrStdin()))
 	targetID, _ := cmd.Flags().GetUint("target")
 	sourceID, _ := cmd.Flags().GetUint("source")
 	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
 	prefer, _ := cmd.Flags().GetString("prefer")
 	skipConfirm, _ := cmd.Flags().GetBool("yes")
+	policy, _ := cmd.Flags().GetString("policy")
+	explicitResolutions, _ := cmd.Flags().GetStringToString("resolve")
+	resolutions, err := database.NormalizeActressMergeResolutions(explicitResolutions)
+	if err != nil {
+		return err
+	}
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
@@ -84,28 +95,34 @@ func runMerge(cmd *cobra.Command, configFile string) error {
 	defer func() { _ = deps.Close() }()
 
 	repo := database.NewActressRepository(deps.DB)
-	preview, err := repo.PreviewMerge(context.Background(), targetID, sourceID)
+	preview, err := repo.PreviewMergeWithOptions(context.Background(), targetID, sourceID, database.ActressMergeOptions{Policy: policy, Resolutions: resolutions})
 	if err != nil {
 		return err
 	}
 
-	resolutions := make(map[string]string, len(preview.DefaultResolutions))
-	for field, decision := range preview.DefaultResolutions {
-		resolutions[field] = decision
-	}
-
 	if nonInteractive {
 		prefer = strings.ToLower(strings.TrimSpace(prefer))
-		if prefer != "target" && prefer != "source" {
+		if prefer != database.MergeResolutionTarget && prefer != database.MergeResolutionSource {
 			return fmt.Errorf("invalid --prefer value: %s (expected target or source)", prefer)
 		}
 		for _, conflict := range preview.Conflicts {
-			resolutions[conflict.Field] = prefer
+			if _, explicit := resolutions[conflict.Field]; !explicit {
+				resolutions[conflict.Field] = prefer
+			}
 		}
-	} else {
+	} else if !dryRun {
 		if err := promptMergeResolutions(cmd, preview, resolutions); err != nil {
 			return err
 		}
+	}
+
+	preview, err = repo.PreviewMergeWithOptions(context.Background(), targetID, sourceID, database.ActressMergeOptions{Policy: policy, Resolutions: resolutions})
+	if err != nil {
+		return err
+	}
+	printMergeOutcome(cmd, preview)
+	if dryRun {
+		return nil
 	}
 
 	if !skipConfirm && !nonInteractive {
@@ -115,7 +132,7 @@ func runMerge(cmd *cobra.Command, configFile string) error {
 		}
 	}
 
-	result, err := repo.Merge(context.Background(), targetID, sourceID, resolutions)
+	result, err := repo.MergeWithOptions(context.Background(), targetID, sourceID, database.ActressMergeOptions{Policy: policy, Resolutions: resolutions})
 	if err != nil {
 		return err
 	}
@@ -132,17 +149,24 @@ func promptMergeResolutions(cmd *cobra.Command, preview *database.ActressMergePr
 	reader := bufio.NewReader(cmd.InOrStdin())
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Preparing merge source #%d -> target #%d\n", preview.Source.ID, preview.Target.ID)
 
-	if len(preview.Conflicts) == 0 {
+	fields := preview.Conflicts
+	if len(preview.Fields) > 0 {
+		fields = nil
+		for _, field := range preview.Fields {
+			fields = append(fields, database.ActressMergeConflict{Field: field.Field, TargetValue: field.TargetValue, SourceValue: field.SourceValue, DefaultResolution: field.DefaultResolution})
+		}
+	}
+	if len(fields) == 0 {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No field conflicts detected; default merge behavior will be applied")
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Detected %d conflicting field(s)\n", len(preview.Conflicts))
-	for _, conflict := range preview.Conflicts {
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Reviewing %d scalar field(s)\n", len(fields))
+	for _, conflict := range fields {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nField: %s\n", conflict.Field)
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  target: %v\n", conflict.TargetValue)
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  source: %v\n", conflict.SourceValue)
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Choose value [t=target/s=source, default=t]: ")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Choose value [t=target/s=source, Enter=keep current policy/decision]: ")
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -151,16 +175,31 @@ func promptMergeResolutions(cmd *cobra.Command, preview *database.ActressMergePr
 
 		choice := strings.ToLower(strings.TrimSpace(line))
 		switch choice {
-		case "", "t", "target":
-			resolutions[conflict.Field] = "target"
-		case "s", "source":
-			resolutions[conflict.Field] = "source"
+		case "":
+			// Omitted decisions remain policy-driven at execution time.
+			if len(preview.Fields) == 0 {
+				resolutions[conflict.Field] = database.MergeResolutionTarget
+			}
+		case "t", database.MergeResolutionTarget:
+			resolutions[conflict.Field] = database.MergeResolutionTarget
+		case "s", database.MergeResolutionSource:
+			resolutions[conflict.Field] = database.MergeResolutionSource
 		default:
 			return fmt.Errorf("invalid choice for field %s: %s", conflict.Field, choice)
 		}
 	}
 
 	return nil
+}
+
+func printMergeOutcome(cmd *cobra.Command, preview *database.ActressMergePreview) {
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Policy: %s; source #%d will be deleted, target #%d retained.\n", preview.Policy, preview.Source.ID, preview.Target.ID)
+	for _, field := range preview.Fields {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s: target=%#v source=%#v result=%#v\n", field.Field, field.TargetValue, field.SourceValue, field.ResultValue)
+	}
+	if preview.Source.DMMID > 0 && preview.ProposedMerged.DMMID != preview.Source.DMMID {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Source DMM ID %d will not be retained.\n", preview.Source.DMMID)
+	}
 }
 
 func promptConfirmation(cmd *cobra.Command) bool {

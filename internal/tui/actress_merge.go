@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,9 @@ func (am *actressMergeModal) setFocus(focus int) {
 }
 
 func (am *actressMergeModal) reset() {
+	am.busy = false
+	am.policy = ""     // Empty is the shared legacy fill_empty default.
+	am.mergeReqToken++ // Invalidate replies from a dismissed dialog.
 	am.step = actressMergeStepInput
 	am.preview = nil
 	am.result = nil
@@ -117,11 +121,15 @@ type actressMergeResultMsg struct {
 }
 
 func (am *actressMergeModal) loadPreviewCmd() tea.Cmd {
+	// A failed refresh must never leave old outcomes actionable under new options.
+	am.preview = nil
 	// Snapshot the live modal inputs BEFORE returning the cmd so a later edit
 	// (or a second Enter press) cannot race with the background read. The token
 	// lets handlePreviewResult ignore stale/out-of-order replies.
 	targetVal := am.targetInput.Value()
 	sourceVal := am.sourceInput.Value()
+	policy := am.policy
+	resolutions := maps.Clone(am.resolutions)
 	token := am.nextMergeToken()
 	return func() tea.Msg {
 		repo := am.deps.ActressRepo()
@@ -138,7 +146,7 @@ func (am *actressMergeModal) loadPreviewCmd() tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
 		defer cancel()
-		preview, err := repo.PreviewMerge(ctx, targetID, sourceID)
+		preview, err := database.PreviewActressMerge(ctx, repo, targetID, sourceID, database.ActressMergeOptions{Policy: policy, Resolutions: resolutions})
 		if err != nil {
 			return actressPreviewResultMsg{err: err, token: token}
 		}
@@ -156,6 +164,7 @@ func (am *actressMergeModal) applyCmd() tea.Cmd {
 	for k, v := range am.resolutions {
 		resolutionsCopy[k] = v
 	}
+	policy := am.policy
 	token := am.nextMergeToken()
 	return func() tea.Msg {
 		repo := am.deps.ActressRepo()
@@ -172,7 +181,7 @@ func (am *actressMergeModal) applyCmd() tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), actressMergeOpTimeout)
 		defer cancel()
-		result, err := repo.Merge(ctx, targetID, sourceID, resolutionsCopy)
+		result, err := database.ApplyActressMerge(ctx, repo, targetID, sourceID, database.ActressMergeOptions{Policy: policy, Resolutions: resolutionsCopy})
 		if err != nil {
 			return actressMergeResultMsg{err: err, token: token}
 		}
@@ -184,6 +193,7 @@ func (am *actressMergeModal) applyCmd() tea.Cmd {
 // current one, so only the most-recently-launched request's reply is applied.
 func (am *actressMergeModal) nextMergeToken() uint64 {
 	am.mergeReqToken++
+	am.busy = true
 	return am.mergeReqToken
 }
 
@@ -193,8 +203,9 @@ func (am *actressMergeModal) handlePreviewResult(m actressPreviewResultMsg) (tea
 	if m.token != am.mergeReqToken {
 		return am, nil
 	}
-	am.mergeReqToken = 0
+	am.busy = false
 	if m.err != nil {
+		am.preview = nil
 		am.err = normalizeActressMergeError(m.err)
 		am.deps.AddLog("warn", "Actress merge preview failed: "+m.err.Error())
 		return am, nil
@@ -203,15 +214,6 @@ func (am *actressMergeModal) handlePreviewResult(m actressPreviewResultMsg) (tea
 	am.result = nil
 	am.err = ""
 	am.conflictCursor = 0
-	am.resolutions = make(map[string]string, len(m.preview.DefaultResolutions))
-	for field, decision := range m.preview.DefaultResolutions {
-		am.resolutions[field] = decision
-	}
-	for _, conflict := range m.preview.Conflicts {
-		if _, ok := am.resolutions[conflict.Field]; !ok {
-			am.resolutions[conflict.Field] = conflict.DefaultResolution
-		}
-	}
 	am.step = actressMergeStepConflict
 	return am, nil
 }
@@ -222,7 +224,7 @@ func (am *actressMergeModal) handleMergeResult(m actressMergeResultMsg) (tea.Mod
 	if m.token != am.mergeReqToken {
 		return am, nil
 	}
-	am.mergeReqToken = 0
+	am.busy = false
 	if m.err != nil {
 		am.err = normalizeActressMergeError(m.err)
 		am.deps.AddLog("warn", "Actress merge failed: "+m.err.Error())
@@ -248,7 +250,7 @@ func (am *actressMergeModal) loadPreview() error {
 	if err != nil {
 		return fmt.Errorf("source ID: %w", err)
 	}
-	preview, err := repo.PreviewMerge(context.Background(), targetID, sourceID)
+	preview, err := database.PreviewActressMerge(context.Background(), repo, targetID, sourceID, database.ActressMergeOptions{Policy: am.policy})
 	if err != nil {
 		return err
 	}
@@ -256,30 +258,22 @@ func (am *actressMergeModal) loadPreview() error {
 	am.result = nil
 	am.err = ""
 	am.conflictCursor = 0
-	am.resolutions = make(map[string]string, len(preview.DefaultResolutions))
-	for field, decision := range preview.DefaultResolutions {
-		am.resolutions[field] = decision
-	}
-	for _, conflict := range preview.Conflicts {
-		if _, ok := am.resolutions[conflict.Field]; !ok {
-			am.resolutions[conflict.Field] = conflict.DefaultResolution
-		}
-	}
+	am.resolutions = make(map[string]string)
 	am.step = actressMergeStepConflict
 	return nil
 }
 
 func (am *actressMergeModal) currentConflict() *database.ActressMergeConflict {
-	if am.preview == nil || len(am.preview.Conflicts) == 0 {
+	if am.preview == nil || len(am.previewFields()) == 0 {
 		return nil
 	}
 	if am.conflictCursor < 0 {
 		am.conflictCursor = 0
 	}
-	if am.conflictCursor >= len(am.preview.Conflicts) {
-		am.conflictCursor = len(am.preview.Conflicts) - 1
+	if am.conflictCursor >= len(am.previewFields()) {
+		am.conflictCursor = len(am.previewFields()) - 1
 	}
-	return &am.preview.Conflicts[am.conflictCursor]
+	return &am.previewFields()[am.conflictCursor]
 }
 
 // Init is a no-op; actress merge modals do not issue commands on init.
@@ -292,6 +286,9 @@ func (am *actressMergeModal) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return am.handlePreviewResult(m)
 	case actressMergeResultMsg:
 		return am.handleMergeResult(m)
+	}
+	if am.busy {
+		return am, nil
 	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -314,6 +311,9 @@ func (am *actressMergeModal) updateInputStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	switch msg.String() {
 	case "esc", "q":
 		am.close()
+		return am, nil
+	case "p":
+		am.togglePolicy()
 		return am, nil
 	case "tab", "up", "down":
 		if am.focus == 0 {
@@ -349,9 +349,19 @@ func (am *actressMergeModal) updateConflictStep(msg tea.KeyMsg) (tea.Model, tea.
 	case "r":
 		am.step = actressMergeStepInput
 		am.preview = nil
+		am.policy = ""
+		am.resolutions = make(map[string]string)
 		am.result = nil
 		am.err = ""
 		am.setFocus(0)
+		return am, nil
+	case "p":
+		am.togglePolicy()
+		return am, am.loadPreviewCmd()
+	case "d":
+		if conflict := am.currentConflict(); conflict != nil {
+			delete(am.resolutions, conflict.Field)
+		}
 		return am, nil
 	case "up", "k":
 		if am.conflictCursor > 0 {
@@ -359,7 +369,7 @@ func (am *actressMergeModal) updateConflictStep(msg tea.KeyMsg) (tea.Model, tea.
 		}
 		return am, nil
 	case "down", "j":
-		if am.preview != nil && am.conflictCursor < len(am.preview.Conflicts)-1 {
+		if am.preview != nil && am.conflictCursor < len(am.previewFields())-1 {
 			am.conflictCursor++
 		}
 		return am, nil
@@ -376,6 +386,9 @@ func (am *actressMergeModal) updateConflictStep(msg tea.KeyMsg) (tea.Model, tea.
 	case " ", "space":
 		if conflict := am.currentConflict(); conflict != nil {
 			current := am.resolutions[conflict.Field]
+			if current == "" {
+				current = conflict.DefaultResolution
+			}
 			if current == "source" {
 				am.resolutions[conflict.Field] = "target"
 			} else {
@@ -384,6 +397,9 @@ func (am *actressMergeModal) updateConflictStep(msg tea.KeyMsg) (tea.Model, tea.
 		}
 		return am, nil
 	case "enter":
+		if am.preview == nil {
+			return am, nil
+		}
 		// Run the blocking merge off the event loop via tea.Cmd with a bounded
 		// context, so the TUI stays responsive while the DB I/O runs.
 		am.err = ""
@@ -454,6 +470,12 @@ func (am *actressMergeModal) ViewLocalized(loc *localization.Localizer) string {
 	amErrorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	muted := lipgloss.NewStyle().Faint(true)
 	lines := []string{amTitleStyle.Render(l("TUIActressMergeTitle"))}
+	policy := am.policy
+	if policy == "" {
+		policy = database.MergePolicyFillEmpty
+	}
+	lines = append(lines, l("TUIActressMergePolicy", map[string]any{"Policy": policy}))
+
 	if am.err != "" {
 		lines = append(lines, amErrorStyle.Render(l("TUIActressMergeErrorPrefix")+" "+am.err), "")
 	}
@@ -474,13 +496,13 @@ func (am *actressMergeModal) ViewLocalized(loc *localization.Localizer) string {
 		}
 		lines = append(lines,
 			l("TUIActressMergeMerging", map[string]any{"Source": am.preview.Source.ID, "Target": am.preview.Target.ID}),
-			l("TUIActressMergeConflictsCount", map[string]any{"Count": len(am.preview.Conflicts)}),
+			l("TUIActressMergeConflictsCount", map[string]any{"Count": len(am.previewFields())}),
 			"")
-		if len(am.preview.Conflicts) == 0 {
+		if len(am.previewFields()) == 0 {
 			lines = append(lines, l("TUIActressMergeNoConflicts"), "", muted.Render(l("TUIActressMergeConflictHint")))
 			break
 		}
-		for i, conflict := range am.preview.Conflicts {
+		for i, conflict := range am.previewFields() {
 			cursor := "  "
 			if i == am.conflictCursor {
 				cursor = "▸ "
@@ -498,7 +520,21 @@ func (am *actressMergeModal) ViewLocalized(loc *localization.Localizer) string {
 			}
 			lines = append(lines, "", l("TUIActressMergeField", map[string]any{"Field": conflict.Field, "Decision": decisionLabel(decision)}), "  "+l("TUIActressMergeTargetValueLabel")+" "+formatConflictValue(conflict.TargetValue), "  "+l("TUIActressMergeSourceValueLabel")+" "+formatConflictValue(conflict.SourceValue))
 		}
-		lines = append(lines, "", muted.Render(l("TUIActressMergeConflictNavHint")))
+		if conflict := am.currentConflict(); conflict != nil {
+			decision := am.resolutions[conflict.Field]
+			if decision == "" {
+				decision = conflict.DefaultResolution
+			}
+			result := conflict.TargetValue
+			if decision == database.MergeResolutionSource {
+				result = conflict.SourceValue
+				if text, ok := result.(string); ok {
+					result = strings.TrimSpace(text)
+				}
+			}
+			lines = append(lines, "  "+l("TUIActressMergeResultValue")+" "+formatConflictValue(result))
+		}
+		lines = append(lines, l("TUIActressMergeSourceDeletion"), "", muted.Render(l("TUIActressMergeConflictNavHint")))
 	case actressMergeStepResult:
 		if am.result == nil {
 			lines = append(lines, l("TUIActressMergeNoResult"), "", muted.Render(l("TUIActressMergeNoResultHint")))
@@ -514,6 +550,28 @@ func (am *actressMergeModal) ViewLocalized(loc *localization.Localizer) string {
 	content := strings.Join(lines, "\n")
 	modal := amModalStyle.Render(content)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (am *actressMergeModal) togglePolicy() {
+	if am.policy == database.MergePolicyPreserveTarget {
+		am.policy = database.MergePolicyFillEmpty
+	} else {
+		am.policy = database.MergePolicyPreserveTarget
+	}
+}
+
+func (am *actressMergeModal) previewFields() []database.ActressMergeConflict {
+	if am.preview == nil {
+		return nil
+	}
+	if len(am.preview.Fields) == 0 {
+		return am.preview.Conflicts
+	}
+	fields := make([]database.ActressMergeConflict, 0, len(am.preview.Fields))
+	for _, field := range am.preview.Fields {
+		fields = append(fields, database.ActressMergeConflict{Field: field.Field, TargetValue: field.TargetValue, SourceValue: field.SourceValue, DefaultResolution: field.DefaultResolution})
+	}
+	return fields
 }
 
 // --- package-level helpers ---

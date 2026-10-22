@@ -93,6 +93,8 @@ type actressMergeDeps struct {
 
 // actressMergeModal holds all state for the actress merge modal.
 type actressMergeModal struct {
+	policy         string
+	busy           bool
 	showing        bool
 	targetInput    textinput.Model
 	sourceInput    textinput.Model
@@ -105,7 +107,7 @@ type actressMergeModal struct {
 	err            string
 	// mergeReqToken identifies the in-flight async merge/preview request so
 	// out-of-order or stale responses (e.g. from a second Enter press) can be
-	// ignored. Zero means no request in flight.
+	// ignored. The counter is monotonic across dialogs; busy tracks in-flight work.
 	mergeReqToken uint64
 	deps          actressMergeDeps //nolint:all
 }

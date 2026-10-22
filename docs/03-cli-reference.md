@@ -484,6 +484,9 @@ javinizer actress merge --target <id> --source <id> [flags]
 
 **Optional flags:**
 ```bash
+--policy string       # fill_empty (default) or preserve_target, including blanks
+--resolve stringToString # Explicit decisions, e.g. last_name=target,dmm_id=source
+--dry-run             # Show all five scalar outcomes without merging/deleting
 --non-interactive     # Do not prompt for per-field decisions
 --prefer string       # Global conflict preference in non-interactive mode: target|source (default target)
 -y, --yes             # Skip final confirmation prompt
@@ -496,6 +499,16 @@ Interactive conflict resolution (default):
 javinizer actress merge --target 12 --source 34
 ```
 
+Preserve the target's scalar fields, including intentional blanks, and inspect the outcome before merging:
+```bash
+javinizer actress merge --target 12 --source 34 --policy preserve_target --dry-run
+javinizer actress merge --target 12 --source 34 --policy preserve_target --resolve dmm_id=source --non-interactive
+```
+
+The policy covers only `dmm_id`, `first_name`, `last_name`, `japanese_name`, and `thumb_url`. The default `fill_empty` retains existing behavior: fill blank target strings and a zero DMM ID from the source, retaining other target values. `preserve_target` keeps those fields exactly, including blanks. Explicit `--resolve` choices override the policy, even for empty source/target values. `--prefer` still affects only nonempty conflicts in non-interactive mode; `--resolve` takes precedence.
+
+The source record is deleted after merging. A source DMM ID not selected in the outcome is discarded, including when preserving target DMM ID zero. Actor identity, alias ownership, credits, quarantine, origin and associations retain their existing guarded merge semantics; this is not an undo system.
+
 Non-interactive merge for scripts:
 ```bash
 javinizer actress merge --target 12 --source 34 --non-interactive --prefer source --yes
@@ -503,7 +516,7 @@ javinizer actress merge --target 12 --source 34 --non-interactive --prefer sourc
 
 **Interactive behavior:**
 1. Loads merge preview for target/source actresses.
-2. Prompts you for each conflicting field (`target` or `source` value).
+2. Shows all five scalar fields, including blanks, and prompts for explicit `target` or `source` decisions. Enter leaves the policy or supplied decision unchanged.
 3. Asks for final confirmation.
 4. Applies merge in one transaction: moves movie links, deduplicates associations, merges aliases, deletes source actress.
 

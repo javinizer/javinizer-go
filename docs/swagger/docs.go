@@ -4654,6 +4654,15 @@ const docTemplate = `{
                 "target_id"
             ],
             "properties": {
+                "policy": {
+                    "type": "string"
+                },
+                "resolutions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "source_id": {
                     "type": "integer",
                     "example": 34
@@ -4679,6 +4688,15 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_database.ActressMergeField"
+                    }
+                },
+                "policy": {
+                    "type": "string"
+                },
                 "proposed_merged": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
                 },
@@ -4697,6 +4715,9 @@ const docTemplate = `{
                 "target_id"
             ],
             "properties": {
+                "policy": {
+                    "type": "string"
+                },
                 "resolutions": {
                     "type": "object",
                     "additionalProperties": {
@@ -8174,6 +8195,20 @@ const docTemplate = `{
                 "favorites": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.FavoritesConfig"
                 }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_database.ActressMergeField": {
+            "type": "object",
+            "properties": {
+                "default_resolution": {
+                    "type": "string"
+                },
+                "field": {
+                    "type": "string"
+                },
+                "result_value": {},
+                "source_value": {},
+                "target_value": {}
             }
         },
         "github_com_javinizer_javinizer-go_internal_models.Actress": {
