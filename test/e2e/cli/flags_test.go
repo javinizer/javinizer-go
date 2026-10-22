@@ -117,6 +117,9 @@ var commandFlags = map[string][]flagSpec{
 	"history revert": {
 		{"scrape-ids", ""},
 	},
+	"actress import": {
+		{"overwrite-names", ""},
+	},
 	"actress merge": {
 		{"target", ""},
 		{"source", ""},
