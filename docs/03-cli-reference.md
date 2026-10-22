@@ -519,7 +519,7 @@ javinizer actress import actresses.json
 Use `--overwrite-names` to update supplied nonempty `first_name`, `last_name`, and
 `japanese_name` on import-owned records. Empty or omitted names do not clear stored
 names. Without this flag, existing protected names retain the fill-empty policy.
-Manual/user-owned records and existing thumbnails remain protected. Existing
+User-owned records and verified imported thumbnails remain protected. Existing
 DMM/local identity and credit ownership are not reassigned; previous canonical
 names are retained as legitimate aliases without taking another identity's claims.
 
@@ -528,6 +528,12 @@ same transaction, protecting them from later overwrite imports. Historical manua
 edits may still be marked import-owned and cannot be identified reliably from
 existing records. Review those records before opting into `--overwrite-names`;
 the default import remains non-overwriting.
+
+Candidate and legacy-origin records still follow the normal import-promotion path,
+which may apply supplied metadata and mark the identity verified/import-owned.
+In overwrite mode, omitted or empty names and thumbnails retain their stored
+values during that promotion. The option does not change default promotion or
+the existing `aliases` replacement behavior.
 
 With `--overwrite-names`, a nonzero JSON `id` must refer to an existing local row,
 and a contradictory `id`/`dmm_id` pair is a conflict. Omit `id` (or use zero) when

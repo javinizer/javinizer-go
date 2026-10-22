@@ -817,6 +817,10 @@ func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incomin
 			if promotingCandidate {
 				incoming.AmbiguityQuarantined = false
 			}
+			if options.OverwriteNames {
+				// Sparse references preserve omitted fields even for candidates or legacy origins.
+				fillEmptyActressFields(incoming, &previousIdentity)
+			}
 			if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
 				incoming.Verified = previousIdentity.Verified
 				incoming.Origin = previousIdentity.Origin
