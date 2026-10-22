@@ -141,13 +141,14 @@ func TestPathLengthRegression_SharedFolderBudgetStrategyBoundaries(t *testing.T)
 			if tc.limit <= 0 || (tc.inplace && !tc.dedicated && !tc.organizeMode) {
 				require.Empty(t, engine.budgets)
 				if tc.inplace {
-					require.Equal(t, source, plan.TargetPath)
+					// Plans use native, cleaned paths even when inputs use forward slashes.
+					require.Equal(t, filepath.Clean(source), plan.TargetPath)
 				}
 			} else {
 				require.Equal(t, []int{tc.limit - (len(filepath.Join(base, "X", "ABC-001.mp4")) - 1)}, engine.budgets)
 				require.LessOrEqual(t, len(plan.TargetPath), tc.limit)
 				require.True(t, utf8.ValidString(plan.FolderName))
-				require.Equal(t, base, filepath.Dir(plan.TargetDir))
+				require.Equal(t, filepath.Clean(base), filepath.Dir(plan.TargetDir))
 			}
 		})
 	}
