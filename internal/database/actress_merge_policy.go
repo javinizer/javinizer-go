@@ -16,6 +16,7 @@ const (
 	MergePolicyPreserveTarget = "preserve_target"
 )
 
+// ErrActressMergeInvalidPolicy indicates that the requested merge policy is unsupported.
 var ErrActressMergeInvalidPolicy = errors.New("invalid merge policy")
 
 // ActressMergeOptions leaves omitted fields to Policy. Explicit decisions win,
@@ -58,7 +59,7 @@ func actressMergeFields(target, source, merged *models.Actress, policy string) [
 		{Field: colFirstName, TargetValue: target.FirstName, SourceValue: source.FirstName, ResultValue: merged.FirstName},
 		{Field: colLastName, TargetValue: target.LastName, SourceValue: source.LastName, ResultValue: merged.LastName},
 		{Field: colJapaneseName, TargetValue: target.JapaneseName, SourceValue: source.JapaneseName, ResultValue: merged.JapaneseName},
-		{Field: "thumb_url", TargetValue: target.ThumbURL, SourceValue: source.ThumbURL, ResultValue: merged.ThumbURL},
+		{Field: colThumbURL, TargetValue: target.ThumbURL, SourceValue: source.ThumbURL, ResultValue: merged.ThumbURL},
 	}
 	for i := range fields {
 		field := &fields[i]

@@ -36,7 +36,7 @@ func NewCommand() *cobra.Command {
 	mergeCmd.Flags().Uint("target", 0, "Target actress ID to keep")
 	mergeCmd.Flags().Uint("source", 0, "Source actress ID to merge and delete")
 	mergeCmd.Flags().Bool("non-interactive", false, "Do not prompt; apply a global preference to all conflicts")
-	mergeCmd.Flags().String("prefer", "target", "Conflict preference for non-interactive mode: target or source")
+	mergeCmd.Flags().String("prefer", database.MergeResolutionTarget, "Conflict preference for non-interactive mode: target or source")
 	mergeCmd.Flags().String("policy", database.MergePolicyFillEmpty, "Scalar policy: fill_empty or preserve_target (including blanks)")
 	mergeCmd.Flags().StringToString("resolve", nil, "Explicit scalar decisions, e.g. last_name=target,dmm_id=source")
 	mergeCmd.Flags().Bool("dry-run", false, "Preview resulting scalar fields without merging or deleting the source")
@@ -102,7 +102,7 @@ func runMerge(cmd *cobra.Command, configFile string) error {
 
 	if nonInteractive {
 		prefer = strings.ToLower(strings.TrimSpace(prefer))
-		if prefer != "target" && prefer != "source" {
+		if prefer != database.MergeResolutionTarget && prefer != database.MergeResolutionSource {
 			return fmt.Errorf("invalid --prefer value: %s (expected target or source)", prefer)
 		}
 		for _, conflict := range preview.Conflicts {
@@ -178,12 +178,12 @@ func promptMergeResolutions(cmd *cobra.Command, preview *database.ActressMergePr
 		case "":
 			// Omitted decisions remain policy-driven at execution time.
 			if len(preview.Fields) == 0 {
-				resolutions[conflict.Field] = "target"
+				resolutions[conflict.Field] = database.MergeResolutionTarget
 			}
-		case "t", "target":
-			resolutions[conflict.Field] = "target"
-		case "s", "source":
-			resolutions[conflict.Field] = "source"
+		case "t", database.MergeResolutionTarget:
+			resolutions[conflict.Field] = database.MergeResolutionTarget
+		case "s", database.MergeResolutionSource:
+			resolutions[conflict.Field] = database.MergeResolutionSource
 		default:
 			return fmt.Errorf("invalid choice for field %s: %s", conflict.Field, choice)
 		}
