@@ -120,10 +120,7 @@ func signVideoReview(receipt videoReviewReceipt) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(receipt)
-	if err != nil {
-		return "", err
-	}
+	body, _ := json.Marshal(receipt)
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write(append([]byte("video-review-v1\x00"), body...))
 	return base64.RawURLEncoding.EncodeToString(body) + "." + hex.EncodeToString(mac.Sum(nil)), nil
@@ -320,10 +317,6 @@ func (o *applyOrchImpl) preflightVideoCollision(ctx context.Context, cmd *ApplyC
 	}
 	if collision == nil {
 		return false, nil
-	}
-	if policy == videocollision.Skip {
-		cmd.Organize.DuplicateTracker.ReleaseClaim(plan.SourcePath, plan.TargetPath)
-		return true, nil
 	}
 	if collision.Kind != videoCollisionKindFile || policy != videocollision.Replace || !explicit {
 		return false, &videocollision.ConflictError{Code: "VIDEO_COLLISION_UNRESOLVED", Collision: *collision}
