@@ -188,3 +188,31 @@ func TestImportEvidenceConcurrentRowsKeepQuarantine(t *testing.T) {
 	require.NoError(t, db.First(&candidate, candidate.ID).Error)
 	require.True(t, candidate.AmbiguityQuarantined)
 }
+
+func TestImportCancelAfterEmptyCandidateRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cancel.db")
+	db, err := New(&Config{Type: "sqlite", DSN: path, LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	repo := NewActressRepository(db)
+	first := models.Actress{DMMID: 100, JapaneseName: "First"}
+	require.NoError(t, repo.ImportUpsert(t.Context(), &first))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	seen := false
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:cancel", func(tx *gorm.DB) {
+		if tx.Statement.Table == "actresses" && strings.Contains(tx.Statement.SQL.String(), "verified = ?") && tx.RowsAffected == 0 {
+			seen = true
+			cancel()
+		}
+	}))
+	err = repo.ImportUpsert(ctx, &models.Actress{DMMID: 101, JapaneseName: "Second"})
+	require.NoError(t, db.Callback().Query().Remove("test:cancel"))
+	require.True(t, seen)
+	require.Error(t, err)
+	var rows []models.Actress
+	require.NoError(t, db.Order("id").Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, first.ID, rows[0].ID)
+}
