@@ -68,11 +68,56 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 	return db, records
 }
 
+// Snapshot seeded IDs from the database independently of the mutable import input.
+func expectedImportWorkload(tb testing.TB, db *database.DB, kind string, records []models.Actress) []models.Actress {
+	tb.Helper()
+	expected := append([]models.Actress(nil), records...)
+	if kind == "reimport" || kind == "update" {
+		for i := range expected {
+			var matches []models.Actress
+			require.NoError(tb, db.Where("japanese_name = ?", expected[i].JapaneseName).Find(&matches).Error)
+			require.Len(tb, matches, 1)
+			expected[i].ID = matches[0].ID
+		}
+	}
+	return expected
+}
+
+func assertImportedWorkload(tb testing.TB, db *database.DB, kind string, expected, records []models.Actress) {
+	tb.Helper()
+	seenIDs := make(map[uint]bool, len(expected))
+	for i, record := range expected {
+		var matches []models.Actress
+		// Locate by an immutable fixture name, never an ID returned by import.
+		require.NoError(tb, db.Where("japanese_name = ?", record.JapaneseName).Find(&matches).Error)
+		require.Len(tb, matches, 1)
+		stored := matches[0]
+		require.NotZero(tb, stored.ID)
+		require.False(tb, seenIDs[stored.ID], "each fixture must retain a distinct identity")
+		seenIDs[stored.ID] = true
+		if kind == "reimport" || kind == "update" {
+			require.NotZero(tb, record.ID)
+			require.Equal(tb, record.ID, stored.ID, "existing identity IDs must be preserved")
+		}
+		require.Equal(tb, stored.ID, records[i].ID, "import must return the original fixture's identity")
+		require.Equal(tb, record.DMMID, records[i].DMMID)
+		require.Equal(tb, record.DMMID, stored.DMMID)
+		require.Equal(tb, record.FirstName, stored.FirstName)
+		require.Equal(tb, record.LastName, stored.LastName)
+		require.Equal(tb, record.JapaneseName, stored.JapaneseName)
+		require.True(tb, stored.Verified)
+		require.Equal(tb, record.Aliases, stored.Aliases)
+	}
+}
+
 func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 	for _, kind := range []string{"fresh", "reimport", "update", "candidate-heavy", "alias-heavy", "dmmless"} {
 		for _, size := range []int{24, 48} {
 			t.Run(fmt.Sprintf("%s/%d", kind, size), func(t *testing.T) {
 				db, records := importWorkload(t, kind, size, false)
+				// ImportUpsert mutates records, including their IDs and DMM IDs. Keep
+				// the original identities (and seeded IDs) independent of its output.
+				expected := expectedImportWorkload(t, db, kind, records)
 				var before []models.Actress
 				var creditsBefore []models.MovieCredit
 				require.NoError(t, db.Where("dmm_id >= ? OR japanese_name = ?", 800000, "Fixture canonical").Order("id").Find(&before).Error)
@@ -125,13 +170,7 @@ func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 				require.NoError(t, db.Order("id").Find(&creditsAfter).Error)
 				require.Equal(t, before, after, "unrelated identities and quarantine must be unchanged")
 				require.Equal(t, creditsBefore, creditsAfter, "credits must not migrate")
-				for _, record := range records {
-					var stored models.Actress
-					require.NoError(t, db.First(&stored, record.ID).Error)
-					require.Equal(t, record.DMMID, stored.DMMID)
-					require.True(t, stored.Verified)
-					require.Equal(t, record.Aliases, stored.Aliases)
-				}
+				assertImportedWorkload(t, db, kind, expected, records)
 				t.Logf("%d rows: %d queries, %d identity rows, %d alias rows", size, queries, identityRows, aliasRows)
 			})
 		}
@@ -160,11 +199,29 @@ func benchmarkCLIImport(b *testing.B, kind string, size int) {
 	for n := 0; n < b.N; n++ {
 		b.StopTimer()
 		db, records := importWorkload(b, kind, size, true)
+		expected := expectedImportWorkload(b, db, kind, records)
+		var before []models.Actress
+		var creditsBefore []models.MovieCredit
+		require.NoError(b, db.Where("dmm_id >= ? OR japanese_name = ?", 800000, "Fixture canonical").Order("id").Find(&before).Error)
+		require.NoError(b, db.Order("id").Find(&creditsBefore).Error)
 		b.StartTimer()
 		imported, skipped, failures := importActressRecords(b.Context(), database.NewActressRepository(db), records)
 		b.StopTimer()
 		require.Zero(b, failures)
-		require.Equal(b, size, imported+skipped)
+		if kind == "reimport" {
+			require.Equal(b, size, skipped)
+			require.Zero(b, imported)
+		} else {
+			require.Equal(b, size, imported)
+			require.Zero(b, skipped)
+		}
+		assertImportedWorkload(b, db, kind, expected, records)
+		var after []models.Actress
+		var creditsAfter []models.MovieCredit
+		require.NoError(b, db.Where("dmm_id >= ? OR japanese_name = ?", 800000, "Fixture canonical").Order("id").Find(&after).Error)
+		require.NoError(b, db.Order("id").Find(&creditsAfter).Error)
+		require.Equal(b, before, after, "unrelated identities and quarantine must be unchanged")
+		require.Equal(b, creditsBefore, creditsAfter, "credits must not migrate")
 		require.NoError(b, db.Close())
 	}
 	b.ReportMetric(float64(size), "rows/op")
