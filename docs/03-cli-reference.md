@@ -535,6 +535,8 @@ In overwrite mode, omitted or empty names and thumbnails retain their stored
 values during that promotion. The option does not change default promotion or
 the existing `aliases` replacement behavior.
 
+With name overwrites enabled, user-owned identity fields remain protected, while inline `aliases` metadata keeps its existing replacement behavior (including clearing when omitted or empty). A row counted as `updated` may have only alias metadata changes; this does not mean protected names were overwritten.
+
 With `--overwrite-names`, a nonzero JSON `id` must refer to an existing local row,
 and a contradictory `id`/`dmm_id` pair is a conflict. Omit `id` (or use zero) when
 importing a portable catalogue into another installation. The default CLI retains

@@ -803,6 +803,15 @@ func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incomin
 				if importNamesDiffer(existing, incoming) {
 					outcome.Outcome = "protected"
 				}
+				if existing.Aliases != requested.Aliases {
+					// Inline alias metadata retains replacement semantics; protected
+					// identity fields and canonical alias ownership remain untouched.
+					if err := tx.Model(existing).Update("aliases", requested.Aliases).Error; err != nil {
+						return wrapDBErr("save", "imported actress aliases", err)
+					}
+					existing.Aliases = requested.Aliases
+					outcome.Outcome = "updated"
+				}
 				committed = *existing
 				return nil
 			}

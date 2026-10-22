@@ -174,6 +174,8 @@ Explicit catalog/review name edits now persist user ownership transactionally. T
 
 Candidates and legacy-origin identities retain the normal import-promotion behavior: supplied metadata may be applied while the row becomes verified/import-owned. With `overwrite_names`, omitted or empty names and thumbnails retain stored values during this promotion. Default candidate promotion and the existing `aliases` replacement behavior are unchanged.
 
+With name overwrites enabled, user-owned identity fields remain protected, while inline `aliases` metadata keeps its existing replacement behavior (including clearing when omitted or empty). A row counted as `updated` may have only alias metadata changes; this does not mean protected names were overwritten.
+
 In overwrite mode, each item may additionally specify `id`, an existing local identity reference. Unknown local IDs and contradictory local/DMM IDs are conflicts, not permission to create or redirect identity. A sparse item is accepted when it supplies a positive local or DMM ID; creation still requires a first or Japanese name. Omit `id` for portable catalogues. For compatibility, the default API continues to ignore `id`, whereas the default CLI retains its historical local-ID behavior. Both transports use the same strict identity and ownership rules when overwrite is enabled.
 
 For example: `{"overwrite_names":true,"actresses":[{"dmm_id":12345,"first_name":"Updated"}]}`.
