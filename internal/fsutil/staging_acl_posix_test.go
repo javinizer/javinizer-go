@@ -15,16 +15,11 @@ import (
 
 func denyStagingChmod(t *testing.T) *int {
 	t.Helper()
-	return failStagingChmod(t, syscall.EPERM)
-}
-
-func failStagingChmod(t *testing.T, errno error) *int {
-	t.Helper()
 	calls := new(int)
 	old := stagedHandleChmod
 	stagedHandleChmod = func(f *os.File, _ os.FileMode) error {
 		*calls++
-		return &os.PathError{Op: "chmod", Path: f.Name(), Err: errno}
+		return &os.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EPERM}
 	}
 	t.Cleanup(func() { stagedHandleChmod = old })
 	return calls
@@ -50,84 +45,13 @@ func TestExclusiveStagingACLRejectsOnlyRequiredModeChanges(t *testing.T) {
 
 	parent := t.TempDir()
 	path, file, err := CreateExclusiveStagingFile(fs, filepath.Join(parent, "media"), ".tmp", 0, 0o666)
-	require.NoError(t, err, "a filesystem that refuses mode changes keeps its inherited permissions")
-	defer file.Close()
-	require.Equal(t, 1, *calls, "a required mode change is still attempted")
-	info, err := file.Stat()
+	require.ErrorIs(t, err, syscall.EPERM, "umask narrowed permissions must not be silently accepted")
+	require.Empty(t, path)
+	require.Nil(t, file)
+	require.Equal(t, 1, *calls)
+	entries, err := os.ReadDir(parent)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
-	require.NoError(t, VerifyStagedIdentity(fs, path, file))
-}
-
-func TestExclusiveStagingModeRefusalTolerance(t *testing.T) {
-	old := syscall.Umask(0o022)
-	t.Cleanup(func() { syscall.Umask(old) })
-	fs := afero.NewOsFs()
-	for _, tc := range []struct {
-		name    string
-		errno   error
-		wantErr bool
-	}{
-		{"EPERM", syscall.EPERM, false},
-		{"ENOTSUP", syscall.ENOTSUP, false},
-		{"EOPNOTSUPP", syscall.EOPNOTSUPP, false},
-		{"EIO", syscall.EIO, true},
-		{"EROFS", syscall.EROFS, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			calls := failStagingChmod(t, tc.errno)
-			parent := t.TempDir()
-			path, file, err := CreateExclusiveStagingFile(fs, filepath.Join(parent, "media"), ".tmp", 0, 0o666)
-			require.Equal(t, 1, *calls)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				require.NoError(t, file.Close())
-				require.FileExists(t, path)
-				return
-			}
-			require.ErrorIs(t, err, tc.errno, "unexpected chmod failures still fail the staging attempt")
-			require.Empty(t, path)
-			require.Nil(t, file)
-			entries, err := os.ReadDir(parent)
-			require.NoError(t, err)
-			require.Empty(t, entries, "the failed exclusive staging inode is removed")
-		})
-	}
-}
-
-func TestVirtualStagingModeRefusalTolerance(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		errno   error
-		wantErr bool
-	}{
-		{"EPERM", syscall.EPERM, false},
-		{"EIO", syscall.EIO, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			fs := chmodErrnoFs{Fs: afero.NewMemMapFs(), errno: tc.errno}
-			path, file, err := CreateExclusiveStagingFile(fs, "/dest/media", ".tmp", 0, 0o644)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				require.NoError(t, file.Close())
-				exists, err := afero.Exists(fs, path)
-				require.NoError(t, err)
-				require.True(t, exists)
-				return
-			}
-			require.ErrorIs(t, err, tc.errno)
-			require.Nil(t, file)
-		})
-	}
-}
-
-type chmodErrnoFs struct {
-	afero.Fs
-	errno error
-}
-
-func (f chmodErrnoFs) Chmod(name string, _ os.FileMode) error {
-	return &os.PathError{Op: "chmod", Path: name, Err: f.errno}
+	require.Empty(t, entries, "the failed exclusive staging inode is removed")
 }
 
 func TestACLModeProofUsesHandleNotSubstitutedName(t *testing.T) {
@@ -147,8 +71,9 @@ func TestACLModeProofUsesHandleNotSubstitutedName(t *testing.T) {
 	require.NoError(t, restoreStagingMode(fs, path, file, 0o600))
 	require.Zero(t, *calls)
 	require.Error(t, VerifyStagedIdentity(fs, path, file), "mode proof never authorizes publishing a substituted name")
-	require.NoError(t, restoreStagingMode(fs, path, file, 0o644))
-	require.Equal(t, 1, *calls, "the symlink target's matching mode cannot stand in for the handle's mode")
+	require.ErrorIs(t, restoreStagingMode(fs, path, file, 0o644), syscall.EPERM,
+		"the symlink target's matching mode cannot stand in for the handle's mode")
+	require.Equal(t, 1, *calls)
 	DiscardFailedExclusiveStaging(fs, path, file)
 	info, err := os.Lstat(path)
 	require.NoError(t, err)
@@ -204,11 +129,7 @@ func TestDurableStagingACLModeProofAfterOwnership(t *testing.T) {
 	old := restoreFchown
 	restoreFchown = func(_ int, _, _ int) error { return file.Chmod(0o600) }
 	t.Cleanup(func() { restoreFchown = old })
-	require.NoError(t, SyncStagedMetadata(fs, file, sourceInfo), "a refused mode change keeps the inherited permissions")
-	require.Equal(t, 1, *calls, "ownership changing permissions still requires a mode restoration attempt")
-
-	ioCalls := failStagingChmod(t, syscall.EIO)
-	require.ErrorIs(t, SyncStagedMetadata(fs, file, sourceInfo), syscall.EIO,
-		"unexpected mode restoration failures still fail the durable seal")
-	require.Equal(t, 1, *ioCalls)
+	require.ErrorIs(t, SyncStagedMetadata(fs, file, sourceInfo), syscall.EPERM,
+		"ownership changing permissions still requires successful mode restoration")
+	require.Equal(t, 1, *calls)
 }

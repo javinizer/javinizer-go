@@ -19,7 +19,7 @@ func SyncStagedMetadata(fs afero.Fs, file afero.File, source os.FileInfo) error 
 	// Ownership restoration can change permission bits. Re-prove the mode
 	// afterwards, and avoid a redundant chmod on ACL-managed destinations.
 	if mode := source.Mode().Perm(); !nativeStagingModeMatches(native, mode) {
-		if err := applyStagingModeTolerant(native.Name(), func() error { return stagedHandleChmod(native, mode) }); err != nil {
+		if err := stagedHandleChmod(native, mode); err != nil {
 			return err
 		}
 	}

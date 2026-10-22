@@ -25,20 +25,9 @@ var stagedHandleChmod = func(f *os.File, mode os.FileMode) error { return f.Chmo
 // stagingModeChangeRefused reports whether a chmod on a staging inode this
 // process just created failed because the filesystem's permission model
 // forbids POSIX mode changes (ZFS aclmode=restricted, NFS all_squash, some
-// FUSE/SMB mounts). The owner of a fresh O_EXCL inode is never refused on a
-// mode-authoritative filesystem, so these errors mean the inherited ACL is
-// authoritative and the requested bits are unenforceable for any file there.
+// FUSE/SMB mounts).
 func stagingModeChangeRefused(err error) bool {
 	return errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP)
-}
-
-func applyStagingModeTolerant(staged string, chmod func() error) error {
-	err := chmod()
-	if err == nil || !stagingModeChangeRefused(err) {
-		return err
-	}
-	logging.Debugf("staging mode change refused for %s (%v); keeping filesystem-assigned permissions", staged, err)
-	return nil
 }
 
 // nativeStagingModeMatches proves that an open native inode already has the
@@ -108,6 +97,20 @@ func stagedVirtualModePath(staged string) string { return filepath.Clean(staged)
 // cannot serve. The wider mode grants nothing to the staged NAME: O_EXCL
 // still pins the inode, and the fd never escapes the staging flow.
 func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, mode os.FileMode) (string, afero.File, error) {
+	return createExclusiveStagingFile(fs, dest, suffix, start, mode, false)
+}
+
+// CreateExclusiveStagingFileModeBestEffort is CreateExclusiveStagingFile for
+// staging files whose permission bits carry no security or access contract
+// (sealed ownership markers): a filesystem that refuses mode changes outright
+// (stagingModeChangeRefused) keeps its inherited permissions instead of
+// failing the staging. Media staging must keep the strict variant so a
+// refused chmod never silently narrows or widens published file access.
+func CreateExclusiveStagingFileModeBestEffort(fs afero.Fs, dest, suffix string, start uint64, mode os.FileMode) (string, afero.File, error) {
+	return createExclusiveStagingFile(fs, dest, suffix, start, mode, true)
+}
+
+func createExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, mode os.FileMode, modeBestEffort bool) (string, afero.File, error) {
 	for attempt := uint64(0); attempt < exclusiveStagingAttempts; attempt++ {
 		ordinal := start + attempt
 		staged := dest + suffix + "." + strconv.FormatUint(ordinal, 16)
@@ -120,7 +123,12 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 			// requested perms THROUGH THE OPEN HANDLE if they are not
 			// already exact; see replacements_posix.go /
 			// replacements_windows.go for the strict-vs-best-effort split.
-			if cerr := restoreStagingMode(fs, staged, file, mode.Perm()); cerr != nil {
+			cerr := restoreStagingMode(fs, staged, file, mode.Perm())
+			if cerr != nil && modeBestEffort && stagingModeChangeRefused(cerr) {
+				logging.Debugf("staging mode change refused for %s (%v); keeping filesystem-assigned permissions", staged, cerr)
+				cerr = nil
+			}
+			if cerr != nil {
 				// wave-45 (codex P2, PR#215 finding F3): the cleanup is bound to
 				// the OPENED INODE — discarding by path alone could unlink a
 				// substitute planted after the staged name was renamed away.
