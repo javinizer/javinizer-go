@@ -65,3 +65,63 @@ func TestCastNameMappingMatchesVerifiedJapaneseIdentity(t *testing.T) {
 	require.NoError(t, db.First(&stored, existing.ID).Error)
 	require.Equal(t, existing, stored)
 }
+
+// Migration 16 marks preexisting identities verified. Their historical
+// JavLibrary field layout must remain linkable when the source shape changes.
+func TestCastNameMappingLegacyRescrape(t *testing.T) {
+	for _, tc := range []struct{ name, first, last string }{
+		{"依本しおり", "依本しおり", ""},
+		{"田中　麻美", "田中", "麻美"},
+		{"か\u3099", "が", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, db.Close()) })
+			require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+			existing := models.Actress{FirstName: tc.first, LastName: tc.last, Verified: true, Origin: database.ActressOriginUser}
+			require.NoError(t, db.Create(&existing).Error)
+			// The old field shape resolves to the preexisting row.
+			old := models.Actress{FirstName: tc.first, LastName: tc.last}
+			found, outcome, err := database.ResolveActressIdentityTx(db.DB, &old)
+			require.NoError(t, err)
+			require.Equal(t, database.ResolutionMatched, outcome)
+			require.Equal(t, existing.ID, found.ID)
+			upserter := database.NewMovieUpserter(database.NewMovieRepository(db))
+			movie := &models.Movie{ContentID: "legacy-383", ID: "LEGACY-383", Title: "Fixture", Credits: []models.MovieCredit{
+				{Scraped: old, CreditedName: old.FullName(), Source: "javlibrary", Origin: string(models.CreditOriginScrape)},
+			}}
+			saved, err := upserter.Upsert(t.Context(), movie)
+			require.NoError(t, err)
+			require.Len(t, saved.Credits, 1)
+			originalCreditID := saved.Credits[0].ID
+			require.NoError(t, db.Model(&models.MovieCredit{}).Where("id = ?", originalCreditID).Updates(map[string]any{
+				"override_name": "Pinned", "user_override": true, "order_pinned": true, "order_index": 7,
+			}).Error)
+			info := (&scraper{language: "ja"}).extractActresses(`<span class="star"><a>` + tc.name + `</a></span>`)[0]
+			for i := 0; i < 2; i++ {
+				rescrape := &models.Movie{ContentID: movie.ContentID, ID: movie.ID, Title: movie.Title, Credits: []models.MovieCredit{
+					{Scraped: models.Actress{FirstName: info.FirstName, LastName: info.LastName, JapaneseName: info.JapaneseName},
+						CreditedJapaneseName: info.JapaneseName, Source: "javlibrary", Origin: string(models.CreditOriginScrape)},
+				}}
+				saved, err = upserter.Upsert(t.Context(), rescrape)
+				require.NoError(t, err)
+				require.Len(t, saved.Credits, 1)
+				require.Equal(t, existing.ID, saved.Credits[0].ActressID)
+				require.Equal(t, originalCreditID, saved.Credits[0].ID)
+				require.Equal(t, "Pinned", saved.Credits[0].OverrideName)
+				require.True(t, saved.Credits[0].UserOverride)
+				require.True(t, saved.Credits[0].OrderPinned)
+				require.Equal(t, 7, saved.Credits[0].OrderIndex)
+				require.Len(t, saved.Actresses, 1)
+				require.Equal(t, existing.ID, saved.Actresses[0].ID)
+			}
+			var count int64
+			require.NoError(t, db.Model(&models.Actress{}).Count(&count).Error)
+			require.EqualValues(t, 1, count)
+			var stored models.Actress
+			require.NoError(t, db.First(&stored, existing.ID).Error)
+			require.Equal(t, existing, stored)
+		})
+	}
+}
