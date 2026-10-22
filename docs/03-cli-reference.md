@@ -516,6 +516,23 @@ javinizer actress export > actresses.json
 javinizer actress import actresses.json
 ```
 
+Use `--overwrite-names` to update supplied nonempty `first_name`, `last_name`, and
+`japanese_name` on import-owned records. Empty or omitted names do not clear stored
+names. Without this flag, existing protected names retain the fill-empty policy.
+Manual/user-owned records and existing thumbnails remain protected. Existing
+DMM/local identity and credit ownership are not reassigned; previous canonical
+names are retained as legitimate aliases without taking another identity's claims.
+
+With `--overwrite-names`, a nonzero JSON `id` must refer to an existing local row,
+and a contradictory `id`/`dmm_id` pair is a conflict. Omit `id` (or use zero) when
+importing a portable catalogue into another installation. The default CLI retains
+its legacy local-ID import behavior. Each row is transactional; one failed row
+does not roll back other rows. The summary reports committed `Created`, `Updated`,
+`Unchanged`, `Protected`, and `Conflicted` counts, alongside the compatible totals
+`Imported` (created + updated), `Skipped` (unchanged + protected), and `Errors`
+(including conflicts).
+
+
 ---
 
 ### `genre`

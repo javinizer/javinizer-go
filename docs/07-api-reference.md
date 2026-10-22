@@ -166,10 +166,18 @@ curl -X POST http://localhost:8765/api/v1/actresses/import \
   }'
 ```
 
-`POST /api/v1/actresses/import` accepts `{"actresses": [...]}` (request body capped at 10 MB). Each item may carry `dmm_id`, `first_name`, `last_name`, `japanese_name`, `thumb_url`, and `aliases`. Items are matched by `(japanese_name, dmm_id)`: new entries are created, existing entries are updated when any field changed, and unchanged entries are skipped. Items with both `first_name` and `japanese_name` empty, or a negative `dmm_id`, are rejected and counted as errors. The response is a summary:
+`POST /api/v1/actresses/import` accepts `{"actresses": [...]}` (request body capped at 10 MB). Each item may carry `dmm_id`, `first_name`, `last_name`, `japanese_name`, `thumb_url`, and `aliases`. Matching uses positive DMM identity first, then exact canonical-name representations; ambiguous matches are errors. The default preserves existing protected names and thumbnails, filling missing fields rather than replacing them. Negative `dmm_id` values and items with both `first_name` and `japanese_name` empty are errors.
+
+Set top-level `"overwrite_names": true` to replace supplied nonempty names on import-owned identities only. Sparse/empty name fields never clear names. User-owned records remain protected, and existing thumbnails, stable IDs, credit ownership, original scraper evidence and manual credit choices are preserved. Canonical renames use the transactional alias/collision lifecycle and invalidate stale translations and affected rendered movie state.
+
+In overwrite mode, each item may additionally specify `id`, an existing local identity reference. Unknown local IDs and contradictory local/DMM IDs are conflicts, not permission to create or redirect identity. A sparse item is accepted when it supplies a positive local or DMM ID; creation still requires a first or Japanese name. Omit `id` for portable catalogues. For compatibility, the default API continues to ignore `id`, whereas the default CLI retains its historical local-ID behavior. Both transports use the same strict identity and ownership rules when overwrite is enabled.
+
+For example: `{"overwrite_names":true,"actresses":[{"dmm_id":12345,"first_name":"Updated"}]}`.
+
+Each row commits independently. The response retains `imported` (created + updated), `skipped` (unchanged + protected), and `errors` (including conflicts), with detailed committed-outcome counts:
 
 ```json
-{"imported": 1, "skipped": 0, "errors": 0}
+{"imported":1,"skipped":0,"errors":0,"created":0,"updated":1,"unchanged":0,"protected":0,"conflicted":0}
 ```
 
 ### Batch Operations

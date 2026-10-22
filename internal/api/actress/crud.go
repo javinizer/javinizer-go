@@ -388,10 +388,12 @@ func deleteActress(deps ActressDeps) gin.HandlerFunc {
 }
 
 type actressesImportRequest struct {
-	Actresses []actressImportItem `json:"actresses"`
+	Actresses      []actressImportItem `json:"actresses"`
+	OverwriteNames bool                `json:"overwrite_names"`
 }
 
 type actressImportItem struct {
+	ID           uint   `json:"id"`
 	DMMID        int    `json:"dmm_id"`
 	FirstName    string `json:"first_name"`
 	LastName     string `json:"last_name"`
@@ -401,9 +403,14 @@ type actressImportItem struct {
 }
 
 type importSummaryResponse struct {
-	Imported int `json:"imported"`
-	Skipped  int `json:"skipped"`
-	Errors   int `json:"errors"`
+	Imported   int `json:"imported"`
+	Skipped    int `json:"skipped"`
+	Errors     int `json:"errors"`
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Unchanged  int `json:"unchanged"`
+	Protected  int `json:"protected"`
+	Conflicted int `json:"conflicted"`
 }
 
 func exportActresses(deps ActressDeps) gin.HandlerFunc {
@@ -455,16 +462,6 @@ func exportActresses(deps ActressDeps) gin.HandlerFunc {
 	}
 }
 
-func sameImportedActress(existing, incoming *models.Actress) bool {
-	return existing != nil && incoming != nil &&
-		existing.DMMID == incoming.DMMID &&
-		existing.FirstName == incoming.FirstName &&
-		existing.LastName == incoming.LastName &&
-		existing.JapaneseName == incoming.JapaneseName &&
-		existing.ThumbURL == incoming.ThumbURL &&
-		existing.Aliases == incoming.Aliases
-}
-
 func importActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
@@ -476,7 +473,7 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 		}
 
 		repo := deps.ActressRepo
-		var imported, skipped, errorsCount int
+		var summary importSummaryResponse
 
 		for _, item := range req.Actresses {
 			firstName := strings.TrimSpace(item.FirstName)
@@ -485,13 +482,14 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 			thumbURL := strings.TrimSpace(item.ThumbURL)
 			aliases := strings.TrimSpace(item.Aliases)
 
-			if firstName == "" && japaneseName == "" {
-				errorsCount++
+			// Preserve legacy default validation; sparse identity references are opt-in.
+			if firstName == "" && japaneseName == "" && (!req.OverwriteNames || (item.ID == 0 && item.DMMID == 0)) {
+				summary.Errors++
 				continue
 			}
 
 			if item.DMMID < 0 {
-				errorsCount++
+				summary.Errors++
 				continue
 			}
 
@@ -503,29 +501,34 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 				ThumbURL:     thumbURL,
 				Aliases:      aliases,
 			}
-			existing, err := repo.FindByJapaneseNameAndDMMID(c.Request.Context(), japaneseName, item.DMMID)
-			if err != nil && !database.IsNotFound(err) && !errors.Is(err, database.ErrInvalidLookup) {
-				errorsCount++
+			// The legacy API ignored local IDs. Honor them only for the new opt-in mode.
+			if req.OverwriteNames {
+				incoming.ID = item.ID
+			}
+			result, err := repo.ImportUpsertWithOptions(c.Request.Context(), incoming, database.ActressImportOptions{OverwriteNames: req.OverwriteNames})
+			if err != nil {
+				summary.Errors++
+				if result != nil && result.Outcome == "conflicted" {
+					summary.Conflicted++
+				}
 				continue
 			}
-			unchanged := existing != nil && sameImportedActress(existing, incoming)
-
-			if err := repo.ImportUpsert(c.Request.Context(), incoming); err != nil {
-				errorsCount++
-				continue
-			}
-			if unchanged && existing.Verified &&
-				(existing.Origin == database.ActressOriginUser || existing.Origin == database.ActressOriginImport) {
-				skipped++
-			} else {
-				imported++
+			switch result.Outcome {
+			case "created":
+				summary.Created++
+				summary.Imported++
+			case "updated":
+				summary.Updated++
+				summary.Imported++
+			case "unchanged":
+				summary.Unchanged++
+				summary.Skipped++
+			case "protected":
+				summary.Protected++
+				summary.Skipped++
 			}
 		}
 
-		c.JSON(http.StatusOK, importSummaryResponse{
-			Imported: imported,
-			Skipped:  skipped,
-			Errors:   errorsCount,
-		})
+		c.JSON(http.StatusOK, summary)
 	}
 }
