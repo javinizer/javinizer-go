@@ -2,6 +2,7 @@ package template
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -41,7 +42,8 @@ func TestRenderCancellationAtProcessingCheckpoints(t *testing.T) {
 			t.Cleanup(cancel)
 			execCtx := &cancelAtRenderCheckpoint{Context: underlying, cancel: cancel, at: tc.at}
 			ctx := &Context{ID: "ABC-123"}
-			before := *ctx
+			before, err := json.Marshal(ctx)
+			require.NoError(t, err)
 
 			got, err := NewEngine().ExecuteWithContext(execCtx, tc.template, ctx)
 
@@ -54,7 +56,10 @@ func TestRenderCancellationAtProcessingCheckpoints(t *testing.T) {
 			default:
 				t.Fatal("the underlying context was not canceled")
 			}
-			require.Equal(t, before, *ctx)
+			after, marshalErr := json.Marshal(ctx)
+			require.NoError(t, marshalErr)
+			require.Equal(t, before, after, "canceled rendering must preserve public template inputs")
+			require.Nil(t, ctx.execCtx, "execution context must not be installed on the caller's input")
 		})
 	}
 }

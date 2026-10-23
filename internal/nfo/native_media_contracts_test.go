@@ -18,8 +18,8 @@ func nativeAVIChunk(id string, body []byte) []byte {
 	return out
 }
 
-// nativeAVIFixture contains real RIFF/AVI headers with optional video/audio
-// streams. No external media executable or injected analyzer is used.
+// nativeAVIFixture is a header-only RIFF/AVI fixture for metadata edge cases.
+// The playable fixture below separately exercises a complete container layout.
 func nativeAVIFixture(video, audio bool, frames uint32) []byte {
 	avih := make([]byte, 56)
 	binary.LittleEndian.PutUint32(avih[0:4], 100000) //10fps
@@ -106,4 +106,21 @@ func TestDefaultAnalyzerMapsNativeAVIStreams(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDefaultAnalyzerMapsPlayableAVI(t *testing.T) {
+	// Checked-in synthetic black video and silent PCM audio, with actual movi
+	// chunks and an index. No media executable is needed when running this test.
+	details, err := (defaultMediaAnalyzer{}).Analyze(t.Context(), filepath.Join("testdata", "native-black-silence.avi"))
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.Len(t, details.Video, 1)
+	require.Equal(t, "mjpeg", details.Video[0].Codec)
+	require.Equal(t, 32, details.Video[0].Width)
+	require.Equal(t, 24, details.Video[0].Height)
+	require.InDelta(t, 4.0/3, details.Video[0].Aspect, 0.00001)
+	require.Equal(t, 1, details.Video[0].DurationInSeconds)
+	require.Len(t, details.Audio, 1)
+	require.Equal(t, "pcm", details.Audio[0].Codec)
+	require.Equal(t, 1, details.Audio[0].Channels)
 }
