@@ -96,6 +96,8 @@ func TestImportQuarantineReadFailureRollsBackOnlyCurrentRow(t *testing.T) {
 	repo := NewActressRepository(db)
 	first := models.Actress{DMMID: 100, JapaneseName: "First"}
 	require.NoError(t, repo.ImportUpsert(t.Context(), &first))
+	// Explicit pending repair keeps the oracle fault/cancellation path exercised.
+	require.NoError(t, db.Exec("UPDATE actress_quarantine_state SET revision=revision+1").Error)
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:fail-candidates", func(tx *gorm.DB) {
 		if tx.Statement.Table == "actresses" && strings.Contains(tx.Statement.SQL.String(), "verified") {
 			tx.AddError(fmt.Errorf("injected candidate read failure"))
@@ -202,6 +204,8 @@ func TestImportCancelAfterEmptyCandidateRead(t *testing.T) {
 	repo := NewActressRepository(db)
 	first := models.Actress{DMMID: 100, JapaneseName: "First"}
 	require.NoError(t, repo.ImportUpsert(t.Context(), &first))
+	// Explicit pending repair keeps the oracle fault/cancellation path exercised.
+	require.NoError(t, db.Exec("UPDATE actress_quarantine_state SET revision=revision+1").Error)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	seen := false

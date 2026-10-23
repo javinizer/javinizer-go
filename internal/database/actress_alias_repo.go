@@ -172,14 +172,17 @@ func backfillActressAliasNameKeys(ctx context.Context, db *gorm.DB) error {
 
 // backfillActressCandidateNameKeys derives candidate keys and quarantine from live evidence.
 func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
-	return db.WithContext(ctx).Transaction(recomputeActressCandidateQuarantineTx)
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Startup retains its unconditional repair opportunity.
+		return reconcileActressQuarantineRevisionTx(tx, true)
+	})
 }
 
-// recomputeActressCandidateQuarantineTx derives the candidate quarantine bit
+// recomputeActressCandidateQuarantineUnconditionallyTx derives the candidate quarantine bit
 // from current candidate components, live identity-link evidence, and verified
 // DMM-less canonical/curated-alias representations. It must be called with the
 // caller's transaction; it only writes rows whose derived state changed.
-func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
+func recomputeActressCandidateQuarantineUnconditionallyTx(tx *gorm.DB) error {
 	var candidates []models.Actress
 	if err := tx.Where("verified = ?", false).Order("id").Find(&candidates).Error; err != nil {
 		return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
