@@ -96,7 +96,8 @@ func readVintSize(r io.Reader) (int64, int, error) {
 		}
 	}
 
-	if value == 0x7FFFFFFFFFFFFFFF>>(8-length)&0x7FFFFFFFFFFFFFFF {
+	// RFC 8794 section 6.2 reserves all-one VINT_DATA for unknown size.
+	if value == (int64(1)<<uint(7*length))-1 {
 		return -1, length, nil
 	}
 

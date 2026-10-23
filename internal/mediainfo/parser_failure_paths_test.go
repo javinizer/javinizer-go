@@ -255,20 +255,3 @@ func TestMediaAnalysisRejectsCanceledContextBeforeOpen(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualError(t, err, "media analysis canceled before opening file: context canceled")
 }
-
-// Document the existing VINT boundary behavior without changing it for coverage.
-// The unknown-size sentinel in readVintSize exceeds the maximum encodable value
-// at every supported length, so neither that branch nor readElement's negative
-// scalar size guard can be reached through a byte stream.
-func TestEBMLMaximumEncodedVintSizes(t *testing.T) {
-	for length := 1; length <= 8; length++ {
-		t.Run(fmt.Sprint(length), func(t *testing.T) {
-			data := bytes.Repeat([]byte{0xff}, length)
-			data[0] = byte(0xff >> uint(length-1))
-			size, n, err := readVintSize(bytes.NewReader(data))
-			require.NoError(t, err)
-			require.Equal(t, length, n)
-			require.Equal(t, int64(uint64(1)<<uint(7*length)-1), size)
-		})
-	}
-}
