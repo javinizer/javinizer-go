@@ -97,8 +97,8 @@ func retargetProvenCanonicalAliasesDeferredTx(tx *gorm.DB, sourceActressID, targ
 	// this representation is one of the two IDs being coalesced before moving
 	// any aliases. For a rename, source and target are the same ID.
 	allowedOwnerIDs := map[uint]struct{}{sourceActressID: {}, targetActressID: {}}
-	var identities []models.Actress
-	if err := tx.Unscoped().Find(&identities).Error; err != nil {
+	identities, err := canonicalActressesByKeysTx(tx.Unscoped(), []string{oldKey}, "")
+	if err != nil {
 		return wrapDBErr("verify", fmt.Sprintf("unique actress alias owner %d", sourceActressID), err)
 	}
 	for i := range identities {
@@ -199,13 +199,34 @@ func recomputeActressCandidateQuarantineTx(tx *gorm.DB) error {
 		Pluck("movie_credits.actress_id", &collisionCandidateIDs).Error; err != nil {
 		return wrapDBErr("list", "live identity-link candidate collisions", err)
 	}
-	var verified []models.Actress
-	if err := tx.Where("verified = ? AND (dmm_id <= 0 OR dmm_id IS NULL)", true).Order("id").Find(&verified).Error; err != nil {
-		return wrapDBErr("list", "verified actresses for candidate backfill", err)
-	}
 	var aliases []models.ActressAlias
 	if err := tx.Order("id").Find(&aliases).Error; err != nil {
 		return wrapDBErr("list", "actress aliases for candidate backfill", err)
+	}
+	// Only owners whose canonical keys can affect positive candidates matter.
+	// Alias metadata is not trusted as canonical identity; its owner must exist.
+	relevant := make(map[string]struct{})
+	for i := range candidates {
+		if candidates[i].DMMID > 0 {
+			for key := range candidateEvidenceKeys(&candidates[i]) {
+				relevant[key] = struct{}{}
+			}
+		}
+	}
+	for i := range aliases {
+		if _, ok := relevant[models.NormalizeActressNameKey(aliases[i].AliasName)]; ok {
+			relevant[models.NormalizeActressNameKey(aliases[i].CanonicalName)] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(relevant))
+	for key := range relevant {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	verified, err := canonicalActressesByKeysTx(tx, keys, "verified = ? AND (dmm_id <= 0 OR dmm_id IS NULL)", true)
+	if err != nil {
+		return wrapDBErr("list", "verified actresses for candidate backfill", err)
 	}
 	groups := make(map[string][]int)
 	for i := range candidates {

@@ -98,7 +98,7 @@ func TestCandidateBackfillEvidenceReadFailures(t *testing.T) {
 	}
 }
 
-func TestCandidateBackfillFixedReadsAndIdempotentWrites(t *testing.T) {
+func TestCandidateBackfillChunkedReadsAndIdempotentWrites(t *testing.T) {
 	for _, count := range []int{0, 1, 1000} {
 		t.Run(fmt.Sprintf("candidates-%d", count), func(t *testing.T) {
 			db := newCreditTestDB(t)
@@ -118,7 +118,7 @@ func TestCandidateBackfillFixedReadsAndIdempotentWrites(t *testing.T) {
 				}
 			}))
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			expectedReads := 4
+			expectedReads := 4 + 2*((count+255)/256)
 			if count == 0 {
 				expectedReads = 1
 			}
@@ -127,7 +127,7 @@ func TestCandidateBackfillFixedReadsAndIdempotentWrites(t *testing.T) {
 			reads.Store(0)
 			writes.Store(0)
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			require.EqualValues(t, expectedReads, reads.Load())
+			require.EqualValues(t, 1+3*min(count, 1), reads.Load(), "warm backfill performs fixed reads without rehydration")
 			require.Zero(t, writes.Load())
 		})
 	}
