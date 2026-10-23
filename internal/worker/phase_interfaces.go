@@ -127,7 +127,10 @@ type scrapePhaseInputs struct {
 // applyPhaseInputs carries only what the apply phase needs.
 // Not the full *BatchJob — each field is a narrow dependency.
 type applyPhaseInputs struct {
-	JobID models.JobID
+	// RecordApplyRetryFailure retains a fenced failure without revising domain/provenance.
+	RecordApplyRetryFailure  func(string, *resultstore.MovieResult, string)
+	ApplyRetryFailurePending func(string, *resultstore.MovieResult) bool
+	JobID                    models.JobID
 	// EditLockFn acquires the per-movie-family edit key (POSTER-WRITE-HARDENING):
 	// per-file apply write-backs run under it, so a mid-phase committed review
 	// PATCH and the phase's result publication serialize rather than

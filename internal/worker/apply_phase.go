@@ -673,7 +673,8 @@ func retryWritebackClearedFailure(inputs applyPhaseInputs, outcome applyFileOutc
 		return false
 	}
 	current, err := reader.GetMovieResult(outcome.FilePath)
-	return err == nil && current != nil && current.Status == models.JobStatusCompleted
+	return err == nil && current != nil && current.Status == models.JobStatusCompleted &&
+		(inputs.ApplyRetryFailurePending == nil || !inputs.ApplyRetryFailurePending(outcome.FilePath, current))
 }
 
 // countRemainingApplyFailures returns the failures that remain after this apply
@@ -1111,6 +1112,9 @@ func interpretApplyResult(
 		if writeErr != nil {
 			outcome.Failed = true
 			outcome.ErrorMsg = fmt.Sprintf("persist skipped Apply receipt: %v", writeErr)
+			if inputs.RecordApplyRetryFailure != nil && afc != nil {
+				inputs.RecordApplyRetryFailure(filePath, afc.MovieResult, outcome.ErrorMsg)
+			}
 			if cfg.OnFileFailed != nil {
 				cfg.OnFileFailed(filePath, outcome.ErrorMsg)
 			}

@@ -86,6 +86,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	)
 
 	batchJob := &BatchJob{
+		applyRetryFailures: snapshot.ApplyRetryFailures,
 		ID:                 jobID,
 		pruneVersion:       snapshot.PruneVersion,
 		envelopeGeneration: snapshot.EnvelopeGeneration,
@@ -280,6 +281,7 @@ func s_candidateEnvelope(job *BatchJob, overrides map[string]*resultstore.MovieR
 	}
 
 	persistSnapshot := jobpersist.Snapshot{
+		ApplyRetryFailures:    snapshot.applyRetryFailures,
 		ID:                    snapshot.ID.String(),
 		PruneVersion:          snapshot.pruneVersion,
 		EnvelopeGeneration:    snapshot.envelopeGeneration,

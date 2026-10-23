@@ -488,7 +488,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	broadcaster := c.job.eventBroadcaster
 	c.job.batchJobEventSource.mu.RUnlock()
 
-	snap := c.job.results.SnapshotData()
+	snap := c.job.GetStatus()
 
 	c.job.mu.RLock()
 	upd := c.job.cfg.update
@@ -502,28 +502,30 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 	}
 
 	return applyPhaseInputs{
-		JobID:            c.job.ID,
-		EditLockFn:       func(movieIDs ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(movieIDs) },
-		PromoteWitnessFn: c.job.posterEditor.hasUnresolvedPromoteWitness,
-		Concurrency:      newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
-		NFOEnabled:       batchCfg.NFOEnabled,
-		PosterDisabled:   batchCfg.PosterDisabled,
-		WF:               wf,
-		Results:          snap.Results,
-		Provenance:       snap.Provenance,
-		Excluded:         snap.Excluded,
-		Destination:      cfg.Destination,
-		Update:           upd,
-		HistoryRepo:      histRepo,
-		MovieRepo:        movieRepo,
-		PublicationFence: publicationFence,
-		CollisionRepo:    c.job.deps.CollisionRepo,
-		OperationMode:    opMode,
-		OrganizeSkipped:  cfg.OrganizeOptions.Skip,
-		Broadcaster:      broadcaster,
-		Updater:          c.job.results,
-		Lifecycle:        c.job.lifecycle,
-		persister:        persistFunc(persistFn),
+		RecordApplyRetryFailure:  c.job.recordApplyRetryFailure,
+		ApplyRetryFailurePending: c.job.applyRetryFailurePending,
+		JobID:                    c.job.ID,
+		EditLockFn:               func(movieIDs ...string) func() { return c.job.posterEditor.lockRegistry().AcquireMany(movieIDs) },
+		PromoteWitnessFn:         c.job.posterEditor.hasUnresolvedPromoteWitness,
+		Concurrency:              newConcurrencyConfig(batchCfg.MaxWorkers, batchCfg.WorkerTimeout, batchCfg.RequestTimeout, 1, defaultWorkerTimeout),
+		NFOEnabled:               batchCfg.NFOEnabled,
+		PosterDisabled:           batchCfg.PosterDisabled,
+		WF:                       wf,
+		Results:                  snap.Results,
+		Provenance:               snap.Provenance,
+		Excluded:                 snap.Excluded,
+		Destination:              cfg.Destination,
+		Update:                   upd,
+		HistoryRepo:              histRepo,
+		MovieRepo:                movieRepo,
+		PublicationFence:         publicationFence,
+		CollisionRepo:            c.job.deps.CollisionRepo,
+		OperationMode:            opMode,
+		OrganizeSkipped:          cfg.OrganizeOptions.Skip,
+		Broadcaster:              broadcaster,
+		Updater:                  c.job.results,
+		Lifecycle:                c.job.lifecycle,
+		persister:                persistFunc(persistFn),
 	}
 }
 
