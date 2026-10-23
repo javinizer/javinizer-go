@@ -118,6 +118,27 @@ func TestDarwinExclusiveRenameUnsupported(t *testing.T) {
 			require.Equal(t, dst, target)
 		})
 	}
+	t.Run("missing source preserves existing destination", func(t *testing.T) {
+		darwinKernelError(t, syscall.EINVAL)
+		dir := t.TempDir()
+		src := filepath.Join(dir, "missing")
+		dst := filepath.Join(dir, "existing")
+		require.NoError(t, os.WriteFile(dst, []byte("foreign destination"), 0600))
+		before, err := os.Stat(dst)
+		require.NoError(t, err)
+		err = publishNoReplaceOSFS(src, dst)
+		require.ErrorIs(t, err, os.ErrNotExist)
+		require.NotErrorIs(t, err, syscall.EINVAL)
+		require.False(t, isCrossDeviceError(err))
+		after, err := os.Stat(dst)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(before, after))
+		require.Equal(t, before.Mode(), after.Mode())
+		data, err := os.ReadFile(dst)
+		require.NoError(t, err)
+		require.Equal(t, "foreign destination", string(data))
+	})
+
 }
 
 func TestDarwinUnsupportedEINVALDoesNotTriggerCopy(t *testing.T) {
