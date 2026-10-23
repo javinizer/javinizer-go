@@ -67,9 +67,9 @@ func TestR18OfflinePosterFallbackAndScreenshotDiscovery(t *testing.T) {
 		case "GET https://awsimgsrc.dmm.com/dig/digital/video/zzqq001/zzqq001ps.jpg": // Cover-derived candidate unavailable; series fallback remains usable.
 		case "GET https://awsimgsrc.dmm.com/dig/mono/movie/zzqq001/zzqq001ps.jpg":
 			status, body = http.StatusOK, img.Bytes()
-		case "GET https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg":
+		case "GET https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-99.jpg":
 			status, body = http.StatusOK, placeholderBody
-		case "HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg":
+		case "HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-99.jpg", "HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg":
 			status = http.StatusOK
 		case "HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-2.jpg":
 		default:
@@ -78,15 +78,20 @@ func TestR18OfflinePosterFallbackAndScreenshotDiscovery(t *testing.T) {
 		return &http.Response{StatusCode: status, Header: make(http.Header), Request: req, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	}))}
 	data := &r18Response{ContentID: "zzqq001", JacketFullURL: "https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001pl.jpg"}
-	data.Images.SampleImages = []string{"https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg"}
+	data.Images.SampleImages = []string{"https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-99.jpg"}
 	result := &models.ScraperResult{ID: "ZZQQ-001"}
 	resolveMediaURLs(context.Background(), s, data, result)
 	require.Equal(t, "https://awsimgsrc.dmm.com/dig/mono/movie/zzqq001/zzqq001ps.jpg", result.PosterURL)
 	require.False(t, result.ShouldCropPoster)
 	require.Equal(t, []string{"https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg"}, result.ScreenshotURL)
-	require.Equal(t, 1, calls["GET https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg"])
-	require.Equal(t, 2, calls["HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg"]) // Placeholder probe, then rediscovery.
-	require.Equal(t, 5, len(calls))
+	require.Equal(t, map[string]int{
+		"GET https://awsimgsrc.dmm.com/dig/digital/video/zzqq001/zzqq001ps.jpg": 1,
+		"GET https://awsimgsrc.dmm.com/dig/mono/movie/zzqq001/zzqq001ps.jpg":    1,
+		"GET https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-99.jpg":     1,
+		"HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-99.jpg":    1,
+		"HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-1.jpg":     1,
+		"HEAD https://pics.dmm.co.jp/digital/video/zzqq001/zzqq001jp-2.jpg":     1,
+	}, calls)
 }
 
 func TestR18OfflineConfigurationCloneAndRetryRecovery(t *testing.T) {
