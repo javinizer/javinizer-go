@@ -120,7 +120,7 @@ func TestClearDump_AfterUploadFailureAndNextFailure(t *testing.T) {
 	badUpload := buildUploadBody(t, gzBytes(t, "synthetic invalid SQL"), "synthetic.sql.gz")
 	status, _, _ := srv.doUpload(t, badUpload)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 5*time.Second)
+	awaitFixtureDone(t, h)
 	before := readDumpStatus(t, h)
 	require.True(t, before.Present)
 	require.NotEmpty(t, before.LastError)
@@ -134,7 +134,7 @@ func TestClearDump_AfterUploadFailureAndNextFailure(t *testing.T) {
 
 	status, _, _ = srv.doUpload(t, badUpload)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 5*time.Second)
+	awaitFixtureDone(t, h)
 	after = readDumpStatus(t, h)
 	assert.False(t, after.Present)
 	assert.NotEmpty(t, after.LastError, "a new failure must still be visible after clear")
