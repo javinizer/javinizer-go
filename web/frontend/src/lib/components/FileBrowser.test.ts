@@ -84,3 +84,65 @@ describe.each(['hydration', 'browse'] as const)(
 		});
 	},
 );
+
+describe('FileBrowser obsolete requests', () => {
+	function deferred<T>() {
+		let resolve!: (value: T) => void;
+		let reject!: (reason: Error) => void;
+		const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+		return { promise, resolve, reject };
+	}
+
+	it.each(['success', 'error'])('ignores an older %s after a newer path has loaded', async (outcome) => {
+		const old = deferred<BrowseResponse>();
+		const newer = deferred<BrowseResponse>();
+		vi.mocked(apiClient.browse).mockReturnValueOnce(old.promise).mockReturnValueOnce(newer.promise);
+		const onPathChange = vi.fn();
+		const view = render(FileBrowser, { initialPath: '/old', onPathChange });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(1));
+		await view.rerender({ initialPath: '/new', onPathChange });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
+		newer.resolve({ current_path: '/new', parent_path: '/', items: [] });
+		await waitFor(() => expect(onPathChange).toHaveBeenCalledExactlyOnceWith('/new'));
+		if (outcome === 'success') old.resolve({ current_path: '/old', parent_path: '/', items: [] });
+		else old.reject(new Error('Obsolete browse failure'));
+		await old.promise.catch(() => {});
+		await tick();
+		expect(onPathChange).toHaveBeenCalledExactlyOnceWith('/new');
+		expect(view.getByDisplayValue('/new')).toBeTruthy();
+		expect(view.queryByText('Obsolete browse failure')).toBeNull();
+	});
+
+	it('keeps loading while a newer request is pending after an obsolete failure', async () => {
+		const old = deferred<BrowseResponse>();
+		const newer = deferred<BrowseResponse>();
+		vi.mocked(apiClient.browse).mockReturnValueOnce(old.promise).mockReturnValueOnce(newer.promise);
+		const onPathChange = vi.fn();
+		const view = render(FileBrowser, { initialPath: '/old', onPathChange });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(1));
+		await view.rerender({ initialPath: '/new', onPathChange });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
+		old.reject(new Error('Obsolete browse failure'));
+		await old.promise.catch(() => {});
+		await tick();
+		expect(onPathChange).not.toHaveBeenCalled();
+		expect(view.queryByText('Obsolete browse failure')).toBeNull();
+		expect((view.getByTitle('Navigate to path') as HTMLButtonElement).disabled).toBe(true);
+		newer.resolve({ current_path: '/new', parent_path: '/', items: [] });
+		await waitFor(() => expect(onPathChange).toHaveBeenCalledExactlyOnceWith('/new'));
+		expect((view.getByTitle('Navigate to path') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('does not publish a late response after the browser is unmounted', async () => {
+		const response = deferred<BrowseResponse>();
+		vi.mocked(apiClient.browse).mockReturnValue(response.promise);
+		const onPathChange = vi.fn();
+		const view = render(FileBrowser, { initialPath: '/old', onPathChange });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(1));
+		await view.unmount();
+		response.resolve({ current_path: '/old', parent_path: '/', items: [] });
+		await response.promise;
+		await tick();
+		expect(onPathChange).not.toHaveBeenCalled();
+	});
+});
