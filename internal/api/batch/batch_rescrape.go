@@ -55,21 +55,20 @@ func bulkRescrapePool(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var currentMovieID string
-			defer func() {
-				if r := recover(); r != nil {
-					panicErr := panicutil.FormatRecover(r)
-					logging.Errorf("Batch rescrape worker panicked on movie %s: %v", currentMovieID, panicErr)
-					resultChan <- rescrapeMovieResult{movieID: currentMovieID, result: &contracts.BulkRescrapeMovieResult{
-						MovieID: currentMovieID,
-						Status:  models.RescrapeStatusFailed,
-						Error:   panicErr.Error(),
-					}}
-				}
-			}()
 			for movieID := range movieChan {
-				currentMovieID = movieID
-				r, rec := processBulkRescrapeMovie(ctx, movieID, job, req, factory)
+				r, rec := func() (result *contracts.BulkRescrapeMovieResult, recovery *worker.RescrapeRecoveryHandle) {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							logging.Errorf("Batch rescrape worker panicked on movie %s: %v", movieID, panicutil.FormatRecover(recovered))
+							result = &contracts.BulkRescrapeMovieResult{
+								MovieID: movieID,
+								Status:  models.RescrapeStatusFailed,
+								Error:   "Rescrape failed unexpectedly",
+							}
+						}
+					}()
+					return processBulkRescrapeMovie(ctx, movieID, job, req, factory)
+				}()
 				if rec != nil {
 					// codex cloud P1: carry the recovery handle through the pool —
 					// the caller finalizes it ONLY after the envelope lands.

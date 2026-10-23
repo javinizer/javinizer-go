@@ -151,7 +151,8 @@ func TestBulkRescrapePoolRecoversWorkerPanic(t *testing.T) {
 	require.Len(t, results, 1)
 	require.Equal(t, "TEST-001", results[0].MovieID)
 	require.Equal(t, models.RescrapeStatusFailed, results[0].Status)
-	require.Contains(t, results[0].Error, "scraper worker panic")
+	require.Equal(t, "Rescrape failed unexpectedly", results[0].Error)
+	require.NotContains(t, results[0].Error, "scraper worker panic")
 	require.Empty(t, recovery)
 	require.Equal(t, []float64{100}, progress)
 }

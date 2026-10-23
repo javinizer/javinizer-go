@@ -49,7 +49,8 @@ func TestListBatchJobsPaginationAndRepositoryFailure(t *testing.T) {
 			listBatchJobs(rt)(c)
 			if fail {
 				require.Equal(t, http.StatusInternalServerError, rec.Code)
-				require.Contains(t, rec.Body.String(), "failed to list jobs")
+				require.JSONEq(t, `{"error":"failed to list jobs"}`, rec.Body.String())
+				require.NotContains(t, rec.Body.String(), "list unavailable")
 				return
 			}
 			require.Equal(t, http.StatusOK, rec.Code)
