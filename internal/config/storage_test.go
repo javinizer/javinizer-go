@@ -160,34 +160,70 @@ func TestUpdateAtomicallyModifiesSingleField(t *testing.T) {
 	assert.False(t, reloaded.Output.Download.DownloadExtrafanart, "Update must not touch unrelated fields")
 }
 
-// TestUpdateConcurrentWritersNoLostUpdates proves config.Update is an atomic
-// read-modify-write: 100 concurrent increments of a counter field must all
-// survive (no lost updates). With an unlocked Load+Save, many increments
-// would be lost. This is the TOCTOU regression test for issue #36.
+// TestUpdateConcurrentWritersNoLostUpdates verifies the atomic read-modify-write
+// guarantee with bounded contention: all 100 updates must succeed and persist.
 func TestUpdateConcurrentWritersNoLostUpdates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrency test in short mode")
 	}
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
+	successful, timeoutErrors, otherErrors, persisted := runConcurrentConfigUpdates(t, 4, 25)
+	assert.Zero(t, timeoutErrors, "bounded writers must all obtain the lock")
+	assert.Zero(t, otherErrors)
+	assert.Equal(t, 100, successful)
+	assert.Equal(t, 100, persisted, "all successful increments must survive")
+}
+
+// TestUpdateContendedWritersPreserveAcceptedUpdates separates the documented
+// lock timeout from data loss. High contention can reject attempts, but may not
+// lose successful writes or return an undocumented error.
+func TestUpdateContendedWritersPreserveAcceptedUpdates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping contention test in short mode")
+	}
+	successful, timeoutErrors, otherErrors, persisted := runConcurrentConfigUpdates(t, 100, 1)
+	assert.Greater(t, successful, 0, "contention must still make progress")
+	assert.Zero(t, otherErrors, "only documented lock timeouts may reject attempts")
+	assert.Equal(t, 100, successful+timeoutErrors)
+	assert.Equal(t, successful, persisted, "every accepted update must be preserved")
+}
+
+func runConcurrentConfigUpdates(t *testing.T, writers, updatesPerWriter int) (successful, timeoutErrors, otherErrors, persisted int) {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := DefaultConfig(nil, nil)
 	cfg.Output.MediaFormat.MaxPosterHeight = 0
 	require.NoError(t, Save(cfg, configPath))
-
-	const N = 100
+	attempts := writers * updatesPerWriter
+	results := make(chan error, attempts)
 	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
+	for i := 0; i < writers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = Update(configPath, func(c *Config) { c.Output.MediaFormat.MaxPosterHeight++ })
+			for j := 0; j < updatesPerWriter; j++ {
+				results <- Update(configPath, func(c *Config) { c.Output.MediaFormat.MaxPosterHeight++ })
+			}
 		}()
 	}
 	wg.Wait()
-
+	close(results)
+	for updateErr := range results {
+		if updateErr == nil {
+			successful++
+			continue
+		}
+		if strings.HasPrefix(updateErr.Error(), "timed out waiting for config lock:") {
+			timeoutErrors++
+		} else {
+			otherErrors++
+		}
+		t.Logf("Update returned %T: %v", updateErr, updateErr)
+	}
 	reloaded, err := LoadOrCreate(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, N, reloaded.Output.MediaFormat.MaxPosterHeight, "no concurrent updates should be lost (atomic RMW under lock)")
+	persisted = reloaded.Output.MediaFormat.MaxPosterHeight
+	t.Logf("writers=%d attempts=%d successful=%d lock_timeouts=%d other_errors=%d persisted=%d", writers, attempts, successful, timeoutErrors, otherErrors, persisted)
+	return
 }
 
 // TestUpdateOnMissingFileWritesDefaults verifies Update on a non-existent path
