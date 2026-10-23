@@ -87,6 +87,25 @@ UNC paths like `\\server\share` can leak NTLM credentials to remote servers. Win
 
 Javinizer supports multiple metadata scrapers that can be enabled/disabled and prioritized.
 
+### Numeric per-scraper overrides
+
+Omitting `rate_limit`, `retry_count`, or `timeout` inherits the scraper's registered
+module default. An explicit zero is preserved through YAML/JSON configuration
+edits and save/reload:
+
+- `rate_limit: 0` disables the configured delay between requests.
+- `retry_count: 0` disables configured retries, including R18.dev's rate-limit retry loop.
+- `timeout: 0` bypasses the per-scraper module timeout and retains the client's
+  existing fallback behavior. DMM uses the global `scrapers.timeout_seconds`;
+  the shared HTTP client otherwise defaults to 30 seconds. Zero does not mean
+  an unlimited request timeout.
+
+A numeric `null` clears the override and inherits the module default. Deprecated
+`request_delay` and `max_retries` remain accepted as aliases for `rate_limit` and
+`retry_count`; a canonical key takes precedence even when it is zero or null.
+Saved configuration uses the canonical names. Negative values remain invalid
+for enabled scrapers.
+
 ### General Scraper Settings
 
 ```yaml

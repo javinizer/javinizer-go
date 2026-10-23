@@ -78,15 +78,13 @@ type ScraperClientResult struct {
 
 // InitScraperClient builds a scraper HTTP client from scraper and global proxy settings, applying the given options.
 func InitScraperClient(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig, opts ...ScraperHTTPClientOption) *ScraperClientResult {
-	scraperCfg := &models.ScraperSettings{
-		Enabled:       settings.Enabled,
-		Timeout:       settings.Timeout,
-		RateLimit:     settings.RateLimit,
-		RetryCount:    settings.RetryCount,
-		UserAgent:     settings.UserAgent,
-		Proxy:         settings.Proxy,
-		DownloadProxy: settings.DownloadProxy,
-	}
+	// Preserve decoded numeric presence instead of reconstructing a literal,
+	// which would turn an explicit retry_count: 0 back into an omitted value.
+	scraperCfg := settings.Clone()
+	// Retain this helper's existing opt-in behavior: settings cookies and
+	// FlareSolverr are not forwarded here; callers supply cookie options.
+	scraperCfg.Cookies = nil
+	scraperCfg.UseFlareSolverr = false
 
 	globalProxyVal := models.ProxyConfig{}
 	if globalProxy != nil {
@@ -99,7 +97,7 @@ func InitScraperClient(settings *models.ScraperSettings, globalProxy *models.Pro
 
 	allOpts := append([]ScraperHTTPClientOption{WithProxyProfile()}, opts...)
 
-	client, err := newScraperHTTPClient(scraperCfg, globalProxy, globalFlareSolverr, allOpts...)
+	client, err := newScraperHTTPClient(&scraperCfg, globalProxy, globalFlareSolverr, allOpts...)
 	if err != nil {
 		logging.Errorf("InitScraperClient: Failed to create HTTP client: %v, using no-proxy fallback", err)
 		client = NewRestyClientNoProxy(time.Duration(settings.Timeout)*time.Second, settings.RetryCount)

@@ -426,24 +426,31 @@ type ScraperSettings struct {
 	APIKey                 string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	RespectRetryAfter      *bool             `yaml:"respect_retry_after,omitempty" json:"respect_retry_after,omitempty"`
 
+	rateLimitExplicit  bool `yaml:"-" json:"-"`
+	timeoutExplicit    bool `yaml:"-" json:"-"`
+	retryCountExplicit bool `yaml:"-" json:"-"`
+
 	enabledDecoded  bool `yaml:"-" json:"-"`
 	enabledExplicit bool `yaml:"-" json:"-"`
 }
 
-// MarshalYAML preserves the full unified scraper settings shape so config
-// save/load round-trips do not drop scraper-specific data.
-func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
-	if s == nil {
-		return nil, nil
-	}
-
+// MarshalYAML preserves scraper-specific data and explicit numeric zeros.
+// Unset numeric zeros are omitted so a round trip cannot disable defaults.
+// A value receiver also preserves these semantics in maps of settings values.
+func (s ScraperSettings) MarshalYAML() (interface{}, error) {
 	result := make(map[string]any)
 
 	result["enabled"] = s.Enabled
 	result["language"] = s.Language
-	result["timeout"] = s.Timeout
-	result["rate_limit"] = s.RateLimit
-	result["retry_count"] = s.RetryCount
+	if s.Timeout != 0 || s.timeoutExplicit {
+		result["timeout"] = s.Timeout
+	}
+	if s.RateLimit != 0 || s.rateLimitExplicit {
+		result["rate_limit"] = s.RateLimit
+	}
+	if s.RetryCount != 0 || s.retryCountExplicit {
+		result["retry_count"] = s.RetryCount
+	}
 	result["user_agent"] = s.UserAgent
 	if s.Proxy != nil {
 		result["proxy"] = s.Proxy
@@ -481,8 +488,8 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 	return result, nil
 }
 
-// MarshalJSON preserves the full unified scraper settings shape for JSON serialization.
-func (s *ScraperSettings) MarshalJSON() ([]byte, error) {
+// MarshalJSON uses the same presence-preserving shape as YAML serialization.
+func (s ScraperSettings) MarshalJSON() ([]byte, error) {
 	// Reuse MarshalYAML logic
 	result, err := s.MarshalYAML()
 	if err != nil {
@@ -523,7 +530,7 @@ func (s *ScraperSettings) Clone() ScraperSettings {
 }
 
 // MergeDefaultsFrom copies non-zero-value fields from defaults into s,
-// but only where s has the Go zero value. This is used by
+// but only where s has the Go zero value and no explicit numeric override. This is used by
 // Finalize/Normalize to merge module defaults (e.g. r18dev's
 // UserAgent, caribbeancom's BaseURL) into existing user overrides
 // that have those fields empty.
@@ -548,13 +555,13 @@ func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 	if defaults.APIKey != "" && s.APIKey == "" {
 		s.APIKey = defaults.APIKey
 	}
-	if defaults.RateLimit != 0 && s.RateLimit == 0 {
+	if defaults.RateLimit != 0 && s.RateLimit == 0 && !s.rateLimitExplicit {
 		s.RateLimit = defaults.RateLimit
 	}
-	if defaults.Timeout != 0 && s.Timeout == 0 {
+	if defaults.Timeout != 0 && s.Timeout == 0 && !s.timeoutExplicit {
 		s.Timeout = defaults.Timeout
 	}
-	if defaults.RetryCount != 0 && s.RetryCount == 0 {
+	if defaults.RetryCount != 0 && s.RetryCount == 0 && !s.retryCountExplicit {
 		s.RetryCount = defaults.RetryCount
 	}
 	if defaults.PlaceholderThresholdKB != 0 && s.PlaceholderThresholdKB == 0 {

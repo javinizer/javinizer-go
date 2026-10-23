@@ -90,9 +90,9 @@ func TestScraperSettings_MarshalYAML(t *testing.T) {
 
 	t.Run("nil receiver returns nil", func(t *testing.T) {
 		var s *ScraperSettings
-		got, err := s.MarshalYAML()
+		got, err := yaml.Marshal(s)
 		assert.NoError(t, err)
-		assert.Nil(t, got)
+		assert.Equal(t, "null\n", string(got))
 	})
 
 	t.Run("basic fields", func(t *testing.T) {
