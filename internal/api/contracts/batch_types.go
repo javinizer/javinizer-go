@@ -6,6 +6,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
 // BatchScrapeRequest represents a batch scrape request
@@ -57,20 +58,32 @@ func presentJSONFields(data []byte) map[string]bool {
 
 // ReviewApplyOverrides .
 type ReviewApplyOverrides struct {
-	OperationMode          *string `json:"operation_mode,omitempty"`
-	Destination            *string `json:"destination,omitempty"`
-	SkipNFO                *bool   `json:"skip_nfo,omitempty"`
-	SkipDownload           *bool   `json:"skip_download,omitempty"`
-	OverwriteExistingMedia *bool   `json:"overwrite_existing_media,omitempty"`
-	Preset                 *string `json:"preset,omitempty"`
-	ScalarStrategy         *string `json:"scalar_strategy,omitempty"`
-	ArrayStrategy          *string `json:"array_strategy,omitempty"`
-	ForceOverwrite         *bool   `json:"force_overwrite,omitempty"`
-	PreserveNFO            *bool   `json:"preserve_nfo,omitempty"`
+	VideoCollisionPolicy    *videocollision.Policy             `json:"video_collision_policy,omitempty"`
+	VideoCollisionDecisions map[string]videocollision.Decision `json:"video_collision_decisions,omitempty"`
+	OperationMode           *string                            `json:"operation_mode,omitempty"`
+	Destination             *string                            `json:"destination,omitempty"`
+	SkipNFO                 *bool                              `json:"skip_nfo,omitempty"`
+	SkipDownload            *bool                              `json:"skip_download,omitempty"`
+	OverwriteExistingMedia  *bool                              `json:"overwrite_existing_media,omitempty"`
+	Preset                  *string                            `json:"preset,omitempty"`
+	ScalarStrategy          *string                            `json:"scalar_strategy,omitempty"`
+	ArrayStrategy           *string                            `json:"array_strategy,omitempty"`
+	ForceOverwrite          *bool                              `json:"force_overwrite,omitempty"`
+	PreserveNFO             *bool                              `json:"preserve_nfo,omitempty"`
 }
 
 // EffectiveApplyPlan .
 type EffectiveApplyPlan = applyplan.EffectivePlan
+
+// VideoCollisionReviewResponse reports planned video outcomes and unresolved collisions.
+type VideoCollisionReviewResponse struct {
+	Items      []videocollision.Collision `json:"items"`
+	New        int                        `json:"new"`
+	Replaced   int                        `json:"replaced"`
+	Skipped    int                        `json:"skipped"`
+	Unresolved int                        `json:"unresolved"`
+	SameFile   int                        `json:"same_file"`
+}
 
 // BatchScrapeResponse represents batch scrape response
 type BatchScrapeResponse struct {
@@ -80,15 +93,17 @@ type BatchScrapeResponse struct {
 // BatchFileResult represents a per-file result in a batch job response.
 // Flattened from FileMatchInfo to match the frontend FileResult contract.
 type BatchFileResult struct {
-	ResultID    string           `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath    string           `json:"file_path"`
-	MovieID     string           `json:"movie_id"`
-	IsMultiPart bool             `json:"is_multi_part"`
-	PartNumber  int              `json:"part_number"`
-	PartSuffix  string           `json:"part_suffix"`
-	Status      models.JobStatus `json:"status"`
-	Error       string           `json:"error,omitempty"`
-	ErrorCode   string           `json:"error_code,omitempty"`
+	VideoCollision *videocollision.ConflictError `json:"video_collision,omitempty"`
+	VideoOutcome   string                        `json:"video_outcome,omitempty"`
+	ResultID       string                        `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath       string                        `json:"file_path"`
+	MovieID        string                        `json:"movie_id"`
+	IsMultiPart    bool                          `json:"is_multi_part"`
+	PartNumber     int                           `json:"part_number"`
+	PartSuffix     string                        `json:"part_suffix"`
+	Status         models.JobStatus              `json:"status"`
+	Error          string                        `json:"error,omitempty"`
+	ErrorCode      string                        `json:"error_code,omitempty"`
 	// TranslationWarning is populated when metadata translation partially failed
 	// or degraded; empty when translation fully succeeded.
 	TranslationWarning string `json:"translation_warning,omitempty"`
@@ -107,15 +122,17 @@ type BatchFileResult struct {
 
 // BatchFileResultSlim is a lightweight per-file result without movie data.
 type BatchFileResultSlim struct {
-	ResultID    string           `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath    string           `json:"file_path"`
-	MovieID     string           `json:"movie_id"`
-	IsMultiPart bool             `json:"is_multi_part"`
-	PartNumber  int              `json:"part_number"`
-	PartSuffix  string           `json:"part_suffix"`
-	Status      models.JobStatus `json:"status"`
-	Error       string           `json:"error,omitempty"`
-	ErrorCode   string           `json:"error_code,omitempty"`
+	VideoCollision *videocollision.ConflictError `json:"video_collision,omitempty"`
+	VideoOutcome   string                        `json:"video_outcome,omitempty"`
+	ResultID       string                        `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath       string                        `json:"file_path"`
+	MovieID        string                        `json:"movie_id"`
+	IsMultiPart    bool                          `json:"is_multi_part"`
+	PartNumber     int                           `json:"part_number"`
+	PartSuffix     string                        `json:"part_suffix"`
+	Status         models.JobStatus              `json:"status"`
+	Error          string                        `json:"error,omitempty"`
+	ErrorCode      string                        `json:"error_code,omitempty"`
 	// TranslationWarningCode is exposed on the slim payload (without the raw
 	// warning string) so the UI can badge mid-run with localized copy; the full
 	// BatchFileResult carries both fields.
@@ -308,7 +325,9 @@ func (r UpdateRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizeRequest represents an organize request
 type OrganizeRequest struct {
-	ExpectedApplyGeneration *uint64 `json:"expected_apply_generation,omitempty"`
+	VideoCollisionPolicy    videocollision.Policy              `json:"video_collision_policy,omitempty"`
+	VideoCollisionDecisions map[string]videocollision.Decision `json:"video_collision_decisions,omitempty"`
+	ExpectedApplyGeneration *uint64                            `json:"expected_apply_generation,omitempty"`
 
 	Overrides      *ReviewApplyOverrides `json:"overrides,omitempty"`
 	Destination    string                `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
@@ -366,6 +385,7 @@ func (r OrganizePreviewRequest) Has(field string) bool { return r.present[field]
 
 // OrganizePreviewResponse represents the expected output structure
 type OrganizePreviewResponse struct {
+	VideoCollisions []videocollision.Collision  `json:"video_collisions,omitempty"`
 	FolderName      string                      `json:"folder_name" example:"IPX-535 [IdeaPocket] - Beautiful Woman (2021)"`
 	FileName        string                      `json:"file_name" example:"IPX-535"`
 	SubfolderPath   string                      `json:"subfolder_path,omitempty" example:"IdeaPocket/2025"` // Subfolder hierarchy relative to destination (e.g. "Studio/Year")

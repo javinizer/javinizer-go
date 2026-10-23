@@ -3,7 +3,6 @@ package config
 import (
 	"testing"
 
-	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -83,13 +82,6 @@ func TestUnmarshalYAML_ScraperEntryDecodeError(t *testing.T) {
 	err := yaml.Unmarshal([]byte("r18dev:\n  timeout: not-an-int\n"), &sc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to decode config for scraper")
-}
-
-func TestApplyYAMLAliases_NonMappingNoOp(t *testing.T) {
-	sc := &ScrapersConfig{}
-	ss := &models.ScraperSettings{}
-	sc.applyYAMLAliases(&yaml.Node{Kind: yaml.ScalarNode, Value: "x"}, ss)
-	assert.Equal(t, 0, ss.RateLimit)
 }
 
 func TestValidateYAMLScraperKeys_NonMappingNoOp(t *testing.T) {

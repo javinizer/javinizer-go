@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
 // ProvenanceData holds per-file provenance (field and actress source attribution)
@@ -57,16 +58,18 @@ func (p *ProvenanceData) Clone() *ProvenanceData {
 // Provenance (FieldSources/ActressSources) has been moved to ProvenanceData —
 // use ResultTracker.Provenance to look up provenance by file path.
 type MovieResult struct {
-	ResultID       string               `json:"result_id"` // Stable UUID — survives movie_id changes from rescrape/edit
-	FileMatchInfo  models.FileMatchInfo `json:"file_match_info"`
-	Movie          *models.Movie        `json:"movie,omitempty"` // typed, replaces Data any
-	Revision       uint64               `json:"revision"`
-	PersistedMovie bool                 `json:"-"` // Successful authoritative repository read, not a client-provided field.
-	Status         models.JobStatus     `json:"status"`
-	Error          string               `json:"error,omitempty"`
-	ErrorCode      string               `json:"error_code,omitempty"`
-	StartedAt      time.Time            `json:"started_at"`
-	EndedAt        *time.Time           `json:"ended_at,omitempty"`
+	VideoCollision *videocollision.ConflictError `json:"video_collision,omitempty"`
+	VideoOutcome   string                        `json:"video_outcome,omitempty"`
+	ResultID       string                        `json:"result_id"` // Stable UUID — survives movie_id changes from rescrape/edit
+	FileMatchInfo  models.FileMatchInfo          `json:"file_match_info"`
+	Movie          *models.Movie                 `json:"movie,omitempty"` // typed, replaces Data any
+	Revision       uint64                        `json:"revision"`
+	PersistedMovie bool                          `json:"-"` // Successful authoritative repository read, not a client-provided field.
+	Status         models.JobStatus              `json:"status"`
+	Error          string                        `json:"error,omitempty"`
+	ErrorCode      string                        `json:"error_code,omitempty"`
+	StartedAt      time.Time                     `json:"started_at"`
+	EndedAt        *time.Time                    `json:"ended_at,omitempty"`
 
 	// Orchestration metadata propagated from ScrapeResult.
 	// Embedded with json:",inline" so the serialized shape is unchanged for
@@ -82,6 +85,10 @@ func (mr *MovieResult) Clone() *MovieResult {
 		return nil
 	}
 	dst := *mr
+	if mr.VideoCollision != nil {
+		conflict := *mr.VideoCollision
+		dst.VideoCollision = &conflict
+	}
 	if mr.EndedAt != nil {
 		t := *mr.EndedAt
 		dst.EndedAt = &t

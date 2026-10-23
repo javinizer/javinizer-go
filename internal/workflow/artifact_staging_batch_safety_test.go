@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
 type cleanupRevalidationFS struct {
@@ -353,19 +354,39 @@ func TestDeferredMultipartRetainsInstallWhenCompensationAlsoRefuses(t *testing.T
 }
 
 func TestDeferredMultipartAdmissionAndOccupiedDestination(t *testing.T) {
-	for _, kind := range []string{"occupied", "busy refusal", "source drift", "unknown admission"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		policy   videocollision.Policy
+		decision bool
+	}{
+		{name: "occupied"},
+		{name: "occupied typed policy", policy: videocollision.Fail},
+		{name: "occupied typed decision", decision: true},
+		{name: "busy refusal"},
+		{name: "source drift"},
+		{name: "unknown admission"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := tc.name
+			occupied := strings.HasPrefix(kind, "occupied")
 			var fs *deferredSiblingLateFailureFS
 			env := buildDeferredArmEnv(t, "multipart-admission", func(base afero.Fs) afero.Fs {
 				fs = &deferredSiblingLateFailureFS{Fs: base, kind: kind, suffix: "-cd2.mp4"}
 				return fs
 			}, nil)
 			multipart := strings.TrimSuffix(env.source, filepath.Ext(env.source)) + "-cd2.mp4"
+			sourceBefore, err := fs.Fs.Stat(multipart)
+			require.NoError(t, err)
 			cmd := pr260FencedCommand(&env.movie, env.match, env.dest, pr260FencedCounter(t, env.db), operationmode.OperationModeOrganize, false, true, organizer.LinkModeNone, false, false)
+			cmd.Organize.VideoCollisionPolicy = tc.policy
 			planner := env.orch.organizer.(artifactPlanExecutor)
 			plan, err := planner.PlanOrganize(t.Context(), organizer.OrganizeCmd{Match: env.match, Movie: &env.movie, DestDir: env.dest, MoveFiles: true})
 			require.NoError(t, err)
 			target := filepath.Join(plan.TargetDir, stagedArtifactSiblingName(filepath.Base(env.source), filepath.Base(plan.TargetPath), filepath.Base(multipart)))
+			if tc.decision {
+				cmd.Organize.VideoCollisionDecisions = map[string]videocollision.Decision{env.source: {Source: env.source, Destination: plan.TargetPath, Policy: videocollision.Fail}}
+			}
+			var targetBefore os.FileInfo
 			if kind == "unknown admission" {
 				stage, stagedCmd, prepareErr := env.orch.prepareArtifact(t.Context(), cmd)
 				require.NoError(t, prepareErr)
@@ -380,21 +401,36 @@ func TestDeferredMultipartAdmissionAndOccupiedDestination(t *testing.T) {
 				err = stage.publish(t.Context(), env.orch, state, nil)
 				require.ErrorContains(t, err, "admission identity unavailable")
 			} else {
-				if kind == "occupied" || kind == "source drift" {
+				if occupied || kind == "source drift" {
 					env.orch.organizer = armAfterExecOrganizer{deferredOrganizerBase{env.orch.organizer}, func() {
-						if kind == "occupied" {
+						if occupied {
 							require.NoError(t, afero.WriteFile(fs.Fs, target, []byte("foreign"), 0o600))
+							var statErr error
+							targetBefore, statErr = fs.Fs.Stat(target)
+							require.NoError(t, statErr)
 						} else {
 							require.NoError(t, afero.WriteFile(fs.Fs, multipart, []byte("changed source"), 0o600))
 						}
 					}}
 				}
 				_, err = env.orch.Execute(t.Context(), cmd)
-				if kind == "occupied" {
-					require.NoError(t, err)
+				if occupied {
+					if tc.policy != "" || tc.decision {
+						var conflict *videocollision.ConflictError
+						require.ErrorAs(t, err, &conflict)
+						assert.Equal(t, "VIDEO_COLLISION_REFRESHED", conflict.Code)
+						assert.Equal(t, multipart, conflict.Collision.Source)
+						assert.Equal(t, target, conflict.Collision.Destination)
+						assert.Equal(t, "multipart", conflict.Collision.Kind)
+					} else {
+						require.NoError(t, err)
+					}
 					body, readErr := afero.ReadFile(fs.Fs, target)
 					require.NoError(t, readErr)
 					assert.Equal(t, "foreign", string(body))
+					targetAfter, statErr := fs.Fs.Stat(target)
+					require.NoError(t, statErr)
+					assert.True(t, os.SameFile(targetBefore, targetAfter))
 				} else {
 					require.Error(t, err)
 				}
@@ -405,6 +441,9 @@ func TestDeferredMultipartAdmissionAndOccupiedDestination(t *testing.T) {
 				assert.Equal(t, "changed source", string(body))
 			} else {
 				assert.Equal(t, "part two", string(body))
+				sourceAfter, statErr := fs.Fs.Stat(multipart)
+				require.NoError(t, statErr)
+				assert.True(t, os.SameFile(sourceBefore, sourceAfter))
 			}
 		})
 	}

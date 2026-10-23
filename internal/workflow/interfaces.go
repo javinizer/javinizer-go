@@ -10,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
 // OrganizeOptions controls the file organization step within Apply.
@@ -17,11 +18,18 @@ import (
 // LinkMode is resolved at the factory boundary — callers
 // pass a validated link mode, not raw CLI input.
 type OrganizeOptions struct {
-	Skip            bool
-	MoveFiles       bool
-	LinkMode        organizer.LinkMode // resolved at factory boundary, not inside orchestrator
-	ForceUpdate     bool
-	ForceRenameFile bool
+	videoReviewScope              string
+	videoReviewTarget             string
+	VideoCollisionSelectedSources map[string]bool
+	VideoCollisionPolicy          videocollision.Policy
+	VideoCollisionDecisions       map[string]videocollision.Decision
+	VideoCollisionScope           string
+	VideoCollisionGeneration      uint64
+	Skip                          bool
+	MoveFiles                     bool
+	LinkMode                      organizer.LinkMode // resolved at factory boundary, not inside orchestrator
+	ForceUpdate                   bool
+	ForceRenameFile               bool
 	// DuplicateTracker carries the batch run's intra-batch duplicate
 	// preflight registry into every file's plan (#224 phase E). The apply
 	// phase allocates one per run (non-probing for dry runs, #240 finding B),
@@ -100,6 +108,7 @@ type stepCompletion struct {
 // partial Steps AND a non-nil error — callers should check result != nil even
 // when err != nil. FailedStep identifies which step failed programmatically.
 type ApplyResult struct {
+	VideoOutcome         string
 	PublicationPending   bool                        `json:"-"`
 	PublicationFinalized bool                        `json:"-"`
 	PublicationRecovery  *models.PublicationRecovery `json:"-"`
@@ -133,18 +142,22 @@ type ApplyResult struct {
 // PreviewCmd is the command struct that crosses the Preview seam (ADR-0004).
 // OperationMode is resolved at the factory boundary.
 type PreviewCmd struct {
-	Movie           *models.Movie
-	FileResults     []models.FileMatchInfo
-	Destination     string
-	OperationMode   operationmode.OperationMode // resolved at factory boundary
-	SkipNFO         bool
-	SkipDownload    bool
-	ForceNFO        bool
-	ForceRenameFile bool
+	VideoCollisionSelectedSources map[string]bool
+	VideoCollisionScope           string
+	VideoCollisionGeneration      uint64
+	Movie                         *models.Movie
+	FileResults                   []models.FileMatchInfo
+	Destination                   string
+	OperationMode                 operationmode.OperationMode // resolved at factory boundary
+	SkipNFO                       bool
+	SkipDownload                  bool
+	ForceNFO                      bool
+	ForceRenameFile               bool
 }
 
 // PreviewResult is the domain result from the Preview seam (ADR-0004).
 type PreviewResult struct {
+	VideoCollisions []videocollision.Collision
 	FolderName      string
 	FileName        string
 	SubfolderPath   string

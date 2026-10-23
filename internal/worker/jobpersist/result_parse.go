@@ -12,8 +12,9 @@ import (
 // ParsedJobResults holds the parsed results and provenance from a job's
 // persisted Results JSON column. Returned by ParseResultsJSON.
 type ParsedJobResults struct {
-	Results    map[string]*resultstore.MovieResult
-	Provenance map[string]*resultstore.ProvenanceData
+	ApplyRetryFailures map[string]ApplyRetryFailure
+	Results            map[string]*resultstore.MovieResult
+	Provenance         map[string]*resultstore.ProvenanceData
 	// CurrentPhase is the durable phase marker stored on new-format envelopes
 	// ("" for legacy formats, which conservatively reads as busy on Running
 	// rows — POSTER-WRITE-HARDENING D16/R18-3).
@@ -89,7 +90,7 @@ func parseEnvelopeFormat(raw []byte) (*ParsedJobResults, error) {
 	if envelope.Provenance == nil {
 		envelope.Provenance = make(map[string]*resultstore.ProvenanceData)
 	}
-	return &ParsedJobResults{Results: envelope.Domain, Provenance: envelope.Provenance, CurrentPhase: envelope.CurrentPhase, ApplyGeneration: envelope.ApplyGeneration}, nil
+	return &ParsedJobResults{ApplyRetryFailures: envelope.ApplyRetryFailures, Results: envelope.Domain, Provenance: envelope.Provenance, CurrentPhase: envelope.CurrentPhase, ApplyGeneration: envelope.ApplyGeneration}, nil
 }
 
 // parseLegacyFileResultFormat parses the legacy FileResult format with "data_type" key.

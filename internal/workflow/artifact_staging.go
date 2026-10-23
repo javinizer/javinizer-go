@@ -20,6 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
 	"github.com/javinizer/javinizer-go/internal/organizer"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 	"github.com/spf13/afero"
 )
 
@@ -108,6 +109,7 @@ type artifactStage struct {
 	// Resident primary ownership stays separate from unresolved sidecar moves.
 	residentSidecarMutation bool
 	residentPrimary         bool
+	sameFilePrimary         bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -259,6 +261,9 @@ func (o *applyOrchImpl) prepareArtifact(ctx context.Context, cmd ApplyCmd) (*art
 		}
 		for _, entry := range entries {
 			sibling := filepath.Join(filepath.Dir(sourcePath), entry.Name())
+			if cmd.Organize.VideoCollisionSelectedSources[filepath.Clean(sibling)] {
+				continue
+			}
 			if entry.Name() == base || entry.IsDir() ||
 				(!selectedSubtitles[filepath.Clean(sibling)] && !isStagedArtifactVideoSibling(base, entry.Name())) {
 				continue
@@ -733,7 +738,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 				}
 			}
 			var armErr error
-			finalReplaced, armErr = batch.BeforePublish(ctx, plan.TargetPath, s.original.Organize.ForceUpdate)
+			finalReplaced, armErr = s.armReviewedVideo(ctx, batch, plan)
 			if armErr != nil {
 				return armErr
 			}
@@ -1384,8 +1389,14 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			// is re-proven at consumption, the MoveBack inverse is journaled
 			// pre-move, and the install binds the identity the move lane
 			// produced rather than re-deriving it from the destination name.
-			if _, statErr := s.fs.Stat(target); statErr == nil {
-				continue
+			if _, statErr := lstatArtifactSource(s.fs, target); statErr == nil {
+				if artifactSameRegularFile(s.fs, sibling.sourcePath, target) {
+					continue
+				}
+				if s.original.Organize.ForceUpdate && s.original.Organize.VideoCollisionPolicy == "" && len(s.original.Organize.VideoCollisionDecisions) == 0 {
+					continue
+				}
+				return &videocollision.ConflictError{Code: "VIDEO_COLLISION_REFRESHED", Collision: videocollision.Collision{Source: sibling.sourcePath, Destination: target, Kind: "multipart"}}
 			} else if !os.IsNotExist(statErr) {
 				return fmt.Errorf("inspect deferred publication sibling: %w", statErr)
 			}
@@ -1761,6 +1772,9 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 				return false, err
 			}
 			if resident {
+				if plan.primary {
+					s.sameFilePrimary = true
+				}
 				plan.skip = true
 				s.markUnownedSkipped(target)
 				plans = append(plans, plan)
@@ -1801,8 +1815,14 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			if info.IsDir() {
 				return false, fmt.Errorf("artifact destination is a directory: %s", target)
 			}
-			if plan.video && (!plan.primary || !s.original.Organize.ForceUpdate) {
-				return false, fmt.Errorf("%w: staged video destination %s", fsutil.ErrPublishCollision, target)
+			if plan.video && (!plan.primary || (!s.original.Organize.ForceUpdate && !s.reviewedPrimaryTarget(target))) {
+				originalSource := s.sourcePath
+				if !plan.primary {
+					if sibling, ok := s.stagedVideoSources[registered]; ok {
+						originalSource = sibling.sourcePath
+					}
+				}
+				return false, errors.Join(fmt.Errorf("%w: staged video destination %s", fsutil.ErrPublishCollision, target), &videocollision.ConflictError{Code: "VIDEO_COLLISION_REFRESHED", Collision: videocollision.Collision{Source: originalSource, Destination: target, Kind: "multipart"}})
 			}
 			if digestEq, eqErr := sameBytes(s.fs, source, target); !plan.video && eqErr == nil && digestEq {
 				// Byte-identical (e.g. this operation just copy-installed through the
@@ -1855,7 +1875,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 			s.sharedPublishBegan = true
 		}
 		if plan.video {
-			if err := s.publishStagedVideo(plan.source, plan.target, plan.primary && s.original.Organize.ForceUpdate); err != nil {
+			if err := s.publishStagedVideo(plan.source, plan.target, plan.primary && (s.original.Organize.ForceUpdate || s.reviewedPrimaryTarget(plan.target))); err != nil {
 				return false, err
 			}
 			continue
