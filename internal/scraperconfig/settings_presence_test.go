@@ -79,7 +79,7 @@ func TestNumericPresenceInvalidInputDoesNotMutate(t *testing.T) {
 		require.Error(t, json.Unmarshal([]byte(input), &original))
 		assert.Equal(t, before, original)
 	}
-	for _, input := range []string{"timeout: bad", "request_delay: bad", "max_retries: []", "rate_limit: 0\nrate_limit: 2"} {
+	for _, input := range []string{"timeout: bad", "request_delay: bad", "max_retries: []", "rate_limit: 0\nrate_limit: 2", "&loop {<<: *loop}", "<<: [2]"} {
 		original := ScraperSettings{Timeout: 20, RetryCount: 2}
 		before := original.Clone()
 		require.Error(t, yaml.Unmarshal([]byte(input), &original))

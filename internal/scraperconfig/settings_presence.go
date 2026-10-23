@@ -19,6 +19,12 @@ type numericSettings struct {
 
 // UnmarshalJSON records numeric presence independently of the integer value.
 func (s *ScraperSettings) UnmarshalJSON(data []byte) error {
+	// Validate object shape before typed decoding; later probes cannot add
+	// structural errors after the full settings have already decoded.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
 	type plain ScraperSettings
 	decoded := plain(s.Clone())
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -26,10 +32,6 @@ func (s *ScraperSettings) UnmarshalJSON(data []byte) error {
 	}
 	var numeric numericSettings
 	if err := json.Unmarshal(data, &numeric); err != nil {
-		return err
-	}
-	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(data, &keys); err != nil {
 		return err
 	}
 	// Canonical keys win even when their value is zero or null.
@@ -45,6 +47,11 @@ func (s *ScraperSettings) UnmarshalJSON(data []byte) error {
 
 // UnmarshalYAML records numeric presence, including aliases and merged mappings.
 func (s *ScraperSettings) UnmarshalYAML(node *yaml.Node) error {
+	// Resolve merge structure first, before decoding either typed view.
+	keys, err := effectiveMappingKeys(node)
+	if err != nil {
+		return err
+	}
 	type plain ScraperSettings
 	decoded := plain(s.Clone())
 	if err := node.Decode(&decoded); err != nil {
@@ -52,10 +59,6 @@ func (s *ScraperSettings) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var numeric numericSettings
 	if err := node.Decode(&numeric); err != nil {
-		return err
-	}
-	keys, err := effectiveMappingKeys(node)
-	if err != nil {
 		return err
 	}
 	present := make(map[string]bool, len(keys))
