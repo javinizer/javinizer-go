@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -9,8 +10,8 @@ import (
 
 const hashTableName = "schema_migrations_hash"
 
-func ensureMigrationHashTable(db *sql.DB) error {
-	_, err := db.Exec(fmt.Sprintf(`
+func ensureMigrationHashTable(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
 			migration_name TEXT PRIMARY KEY,
 			content_hash TEXT NOT NULL,
