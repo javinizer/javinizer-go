@@ -830,6 +830,11 @@ func (s *scraper) extractRating(html string, doc *goquery.Document) *models.Rati
 		}
 	}
 
+	// HTML parsing can reject excessive nesting while regex metadata remains usable.
+	if doc == nil {
+		return nil
+	}
+
 	scoreText := strings.TrimSpace(doc.Find("#video_rating span.num").First().Text())
 	if scoreText == "" {
 		return nil
