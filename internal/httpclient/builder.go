@@ -31,6 +31,7 @@ type ScraperOption func(*scraperConfig)
 type scraperConfig struct {
 	timeout            time.Duration
 	retryCount         int
+	retryCountExplicit bool
 	globalProxy        models.ProxyConfig
 	globalFlareSolverr models.FlareSolverrConfig
 	scraperProxy       *models.ProxyConfig
@@ -162,7 +163,7 @@ func (b *ScraperClientBuilder) build(returnProxyProfile bool) (*ScraperClient, e
 	}
 
 	retryCount := cfg.retryCount
-	if retryCount == 0 {
+	if retryCount == 0 && !cfg.retryCountExplicit {
 		retryCount = DefaultRetryCount
 	}
 
@@ -275,8 +276,9 @@ func FromScraperSettings(settings *models.ScraperSettings, globalProxy *models.P
 			logging.Debugf("HTTPClient: scraper per-request timeout=%s", resolved)
 			builder.Apply(withTimeout(resolved.Duration))
 		}
-		if settings.RetryCount > 0 {
+		if settings.RetryCount > 0 || settings.HasExplicitRetryCount() {
 			builder.Apply(withRetryCount(settings.RetryCount))
+			builder.config.retryCountExplicit = settings.HasExplicitRetryCount()
 		}
 		if settings.Proxy != nil {
 			builder.Apply(withScraperProxy(settings.Proxy))

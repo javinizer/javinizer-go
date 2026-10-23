@@ -267,11 +267,6 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 			}
 			ss.SetEnabledPresence(scraperYAMLHasEnabledKey(valNode))
 
-			// Handle deprecated aliases: request_delay → rate_limit, max_retries → retry_count.
-			// Walk the node content to find alias keys and apply them if the canonical
-			// field is still zero (canonical takes precedence).
-			s.applyYAMLAliases(valNode, &ss)
-
 			// Unknown-field checking: walk the node's Content pairs and compare
 			// against the known-fields set for ScraperSettings.
 			if err := s.validateYAMLScraperKeys(key, valNode); err != nil {
@@ -283,33 +278,6 @@ func (s *ScrapersConfig) UnmarshalYAML(node *yaml.Node) error {
 	}
 
 	return nil
-}
-
-// applyYAMLAliases handles deprecated YAML aliases request_delay→rate_limit
-// and max_retries→retry_count in a scraper entry's value node.
-func (s *ScrapersConfig) applyYAMLAliases(valNode *yaml.Node, ss *models.ScraperSettings) {
-	if valNode.Kind != yaml.MappingNode {
-		return
-	}
-	for i := 0; i < len(valNode.Content); i += 2 {
-		k := valNode.Content[i].Value
-		switch k {
-		case "request_delay":
-			if ss.RateLimit == 0 {
-				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RateLimit = v
-				}
-			}
-		case "max_retries":
-			if ss.RetryCount == 0 {
-				var v int
-				if err := valNode.Content[i+1].Decode(&v); err == nil {
-					ss.RetryCount = v
-				}
-			}
-		}
-	}
 }
 
 func scraperYAMLHasEnabledKey(valNode *yaml.Node) bool {

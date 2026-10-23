@@ -79,7 +79,7 @@ func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfi
 
 	// Set defaults for rate limiting if not configured
 	maxRetries := settings.RetryCount
-	if maxRetries == 0 {
+	if maxRetries == 0 && !settings.HasExplicitRetryCount() {
 		maxRetries = 3 // Default to 3 retries
 	}
 
