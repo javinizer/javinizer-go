@@ -33,6 +33,8 @@ export const TERMINAL_STATUSES = new Set([
 	'failed',
 	'cancelled',
 	'organized',
+	'skipped',
+	'replaced',
 	// 'updated' is the update-mode per-file completion status (symmetric with
 	// 'organized' for organize mode; apply_config_builder.go emits it WITH
 	// FilePath + Progress:100). Without it here, completed update jobs are

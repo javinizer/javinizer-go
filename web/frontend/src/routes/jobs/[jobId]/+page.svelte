@@ -6,7 +6,7 @@
 	import { untrack } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
-	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
+	import { createMutation, createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import {
 		ArrowLeft,
 		AlertTriangle,
@@ -32,6 +32,14 @@
 	let operationsQuery = $derived(createJobOperationsQuery(jobId));
 	let job = $derived(jobQuery.data ?? null);
 	let operations = $derived(operationsQuery.data?.operations ?? []);
+	const receiptsQuery = createQuery(() => ({ queryKey:['job',jobId,'apply-receipts'], queryFn:()=>apiClient.getBatchJob(jobId,false), retry:false, staleTime:5000 }));
+	const applyReceipts = $derived(Object.values(receiptsQuery.data?.results ?? {}).filter((result) => !!result.video_outcome));
+	function videoOutcomeLabel(outcome: string | undefined) {
+		if (outcome === 'skipped') return m.review_video_outcome_skipped();
+		if (outcome === 'replaced') return m.review_video_outcome_replaced();
+		if (outcome === 'same-file') return m.review_video_outcome_same_file();
+		return m.review_video_outcome_installed();
+	}
 	let jobStatus = $derived(operationsQuery.data?.job_status ?? jobQuery.data?.status ?? '');
 	let loading = $derived(jobQuery.isPending || operationsQuery.isPending);
 	let error = $derived(jobQuery.error?.message ?? operationsQuery.error?.message ?? null);
@@ -300,6 +308,14 @@
 				</div>
 			{/if}
 
+			{#if applyReceipts.length > 0}
+				<Card class="p-4 space-y-2">
+					<h2 class="font-semibold">{m.review_video_title()}</h2>
+					{#each applyReceipts as receipt (receipt.file_path)}
+						<p class="text-sm break-all"><span class="font-mono">{receipt.file_path}</span> · {videoOutcomeLabel(receipt.video_outcome)}</p>
+					{/each}
+				</Card>
+			{/if}
 			<!-- File List -->
 			<div class="space-y-3">
 				<h2 class="text-lg font-semibold">{m.jobs_files()}</h2>

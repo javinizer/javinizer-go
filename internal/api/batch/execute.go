@@ -136,6 +136,22 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		review, reviewErr := reviewVideoCollisions(c.Request.Context(), snap, job, applyOpts)
+		if reviewErr != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: reviewErr.Error()})
+			return
+		}
+		if review.Unresolved > 0 {
+			code := "VIDEO_COLLISION_UNRESOLVED"
+			for _, item := range review.Items {
+				if item.Kind == videoCollisionKindStale {
+					code = "VIDEO_COLLISION_STALE"
+					break
+				}
+			}
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "Resolve video collisions before Apply", Code: code, VideoCollisionReview: review})
+			return
+		}
 		prepareAndLaunchApply(c, rt, snap, job, applyOpts, "Organization started")
 	}
 }
@@ -315,15 +331,27 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Failed to create workflow for preview: %v", wfErr)})
 			return
 		}
+		selectedSources := map[string]bool{}
+		var reviewGeneration uint64
+		if previewJob, ok := rt.Deps().GetJobStore().GetBatchJob(jobID); ok {
+			status := previewJob.GetStatus()
+			reviewGeneration = status.ApplyGeneration
+			for source := range status.Results {
+				selectedSources[source] = true
+			}
+		}
 		previewResult, previewErr := wf.Preview(c.Request.Context(), workflow.PreviewCmd{
-			Movie:           movieData,
-			FileResults:     fileMatchInfos,
-			Destination:     destination,
-			OperationMode:   resolvedPreview.OperationMode,
-			SkipNFO:         skipNFO,
-			SkipDownload:    skipDownload,
-			ForceNFO:        forceNFO,
-			ForceRenameFile: forceRenameFile,
+			VideoCollisionSelectedSources: selectedSources,
+			VideoCollisionScope:           jobID,
+			VideoCollisionGeneration:      reviewGeneration,
+			Movie:                         movieData,
+			FileResults:                   fileMatchInfos,
+			Destination:                   destination,
+			OperationMode:                 resolvedPreview.OperationMode,
+			SkipNFO:                       skipNFO,
+			SkipDownload:                  skipDownload,
+			ForceNFO:                      forceNFO,
+			ForceRenameFile:               forceRenameFile,
 		})
 		if previewErr != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Preview failed: %v", previewErr)})

@@ -59,6 +59,7 @@ interface OrganizeControllerDeps {
 	recordApplyFailure?: (filePath: string, error?: string) => void;
 	recordApplySuccess?: (filePath: string) => void;
 	clearApplyRecovery?: () => void;
+	onApplyRejected?: () => void;
 	navigateBrowse: () => void;
 	isCurrentOperation?: (jobId: string, generation: number) => boolean;
 	getRouteGeneration?: () => number;
@@ -164,9 +165,20 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			} else if (
 				includeCompleted &&
 				result.status === 'completed' &&
-				deps.getFileStatuses().get(filePath)?.status !== 'failed'
+				(deps.getFileStatuses().get(filePath)?.status !== 'failed' ||
+					result.video_outcome === 'skipped' ||
+					result.video_outcome === 'replaced' ||
+					result.video_outcome === 'installed' ||
+					result.video_outcome === 'same-file')
 			) {
-				updateFileStatus(filePath, { status: 'success' });
+				updateFileStatus(filePath, {
+					status:
+						result.video_outcome === 'skipped'
+							? 'skipped'
+							: result.video_outcome === 'replaced'
+								? 'replaced'
+								: 'success',
+				});
 				deps.recordApplySuccess?.(filePath);
 				forgetRecoveryRetryPath(filePath);
 			}
@@ -199,6 +211,16 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			const failures = Array.from(deps.getFileStatuses().values()).filter(
 				(s) => s.status === 'failed',
 			).length;
+			const skipped = Array.from(deps.getFileStatuses().values()).filter(
+				(s) => s.status === 'skipped',
+			).length;
+			if (failures === 0 && skipped > 0) {
+				deps.clearApplyRecovery?.();
+				deps.toastInfo(
+					`${skipped} file(s) skipped; their videos and metadata were left unchanged.`,
+				);
+				return;
+			}
 			if (failures === 0) {
 				deps.clearApplyRecovery?.();
 				const action = deps.getIsUpdateMode() ? 'updated' : 'organized';
@@ -463,6 +485,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			deps.setOrganizeStatus('failed');
 			deps.setOrganizing(false);
 			clearOrganizePollTimer();
+			deps.onApplyRejected?.();
 			const errorMessage = e instanceof Error ? e.message : 'Failed to start organize';
 			deps.toastError(errorMessage, 7000);
 		}
@@ -600,8 +623,16 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			deps.toastError(`Failed to ${action} ${fileName}: ${msg.error}`, 7000);
 		}
 
-		if ((msg.status === 'organized' || msg.status === 'updated') && msg.file_path) {
-			updateFileStatus(msg.file_path, { status: 'success' });
+		if (msg.status === 'skipped' && msg.file_path) {
+			updateFileStatus(msg.file_path, { status: 'skipped' });
+		}
+		if (
+			(msg.status === 'organized' || msg.status === 'updated' || msg.status === 'replaced') &&
+			msg.file_path
+		) {
+			updateFileStatus(msg.file_path, {
+				status: msg.status === 'replaced' ? 'replaced' : 'success',
+			});
 			deps.recordApplySuccess?.(msg.file_path);
 			forgetRecoveryRetryPath(msg.file_path);
 		}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
 // Version1 .
@@ -93,12 +94,13 @@ type MergePolicy struct {
 
 // Plan .
 type Plan struct {
-	Version        int            `json:"version"`
-	VideoOperation VideoOperation `json:"video_operation"`
-	Destination    string         `json:"destination,omitempty"`
-	NFOOutput      NFOOutput      `json:"nfo_output"`
-	MediaPolicy    MediaPolicy    `json:"media_policy"`
-	Merge          *MergePolicy   `json:"merge,omitempty"`
+	VideoCollisionPolicy videocollision.Policy `json:"video_collision_policy,omitempty"`
+	Version              int                   `json:"version"`
+	VideoOperation       VideoOperation        `json:"video_operation"`
+	Destination          string                `json:"destination,omitempty"`
+	NFOOutput            NFOOutput             `json:"nfo_output"`
+	MediaPolicy          MediaPolicy           `json:"media_policy"`
+	Merge                *MergePolicy          `json:"merge,omitempty"`
 }
 
 // MergeOverride .
@@ -121,6 +123,7 @@ type EffectivePlan struct {
 
 // Projection .
 type Projection struct {
+	VideoCollisionPolicy   videocollision.Policy
 	Update                 bool
 	OperationMode          operationmode.OperationMode
 	Destination            string
@@ -139,11 +142,12 @@ type Projection struct {
 // Default .
 func Default(operation VideoOperation, destination string) *Plan {
 	plan := &Plan{
-		Version:        Version1,
-		VideoOperation: operation,
-		Destination:    destination,
-		NFOOutput:      NFOOutputWrite,
-		MediaPolicy:    MediaPolicyMissing,
+		VideoCollisionPolicy: videocollision.Fail,
+		Version:              Version1,
+		VideoOperation:       operation,
+		Destination:          destination,
+		NFOOutput:            NFOOutputWrite,
+		MediaPolicy:          MediaPolicyMissing,
 	}
 	if operation == VideoOperationLeaveInPlace {
 		plan.Merge = &MergePolicy{ScalarStrategy: ScalarPreferNFO, ArrayStrategy: ArrayMerge}
@@ -184,6 +188,11 @@ func Normalize(plan *Plan) (*Plan, error) {
 		return nil, nil
 	}
 	normalized := Clone(plan)
+	var policyErr error
+	normalized.VideoCollisionPolicy, policyErr = videocollision.Normalize(normalized.VideoCollisionPolicy)
+	if policyErr != nil {
+		return nil, policyErr
+	}
 	normalized.Destination = strings.TrimSpace(normalized.Destination)
 	if normalized.NFOOutput == "" {
 		normalized.NFOOutput = NFOOutputWrite
@@ -226,6 +235,9 @@ func Normalize(plan *Plan) (*Plan, error) {
 func Validate(plan *Plan) error {
 	if plan == nil {
 		return fmt.Errorf("apply plan is required")
+	}
+	if _, err := videocollision.Normalize(plan.VideoCollisionPolicy); err != nil {
+		return err
 	}
 	if plan.Version != Version1 {
 		return fmt.Errorf("unsupported apply plan version %d", plan.Version)
@@ -283,6 +295,7 @@ func Project(plan *Plan) (Projection, error) {
 		return Projection{}, err
 	}
 	projection := Projection{
+		VideoCollisionPolicy:   normalized.VideoCollisionPolicy,
 		Destination:            normalized.Destination,
 		SkipNFO:                normalized.NFOOutput == NFOOutputSkip,
 		SkipDownload:           normalized.MediaPolicy == MediaPolicySkip,

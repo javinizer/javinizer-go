@@ -109,12 +109,13 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 			logging.Warnf("Failed to decode job %s apply plan: %v", job.ID, decodeErr)
 		}
 
+		retryDelta := jobpersist.ProjectApplyRetryFailures(persisted.Results, persisted.Excluded, persisted.ApplyRetryFailures)
 		response.Jobs = append(response.Jobs, contracts.BatchJobResponse{
 			ID:                    job.ID,
 			Status:                job.Status,
 			TotalFiles:            job.TotalFiles,
-			Completed:             job.Completed,
-			Failed:                job.Failed,
+			Completed:             job.Completed - retryDelta,
+			Failed:                job.Failed + retryDelta,
 			OperationCount:        opCounts[job.ID],
 			RevertedCount:         revertedCounts[job.ID],
 			NoopCount:             noopCounts[job.ID],

@@ -34,6 +34,7 @@ export function operationFromMode(mode?: OperationMode): VideoOperation | null {
 export function defaultApplyPlan(operation: VideoOperation, destination = ''): BatchApplyPlan {
 	const plan: BatchApplyPlan = {
 		version: 1,
+		video_collision_policy: 'fail',
 		video_operation: operation,
 		nfo_output: 'write',
 		media_policy: 'missing',
@@ -53,7 +54,11 @@ export function initialApplyPlan(mode?: OperationMode, destination = ''): BatchA
 export function normalizeApplyPlan(input: BatchApplyPlan): BatchApplyPlan {
 	const enumErrors = validateApplyPlanEnums(input);
 	if (enumErrors.length > 0) throw new Error(enumErrors.join(' '));
-	const plan: BatchApplyPlan = { ...input, merge: input.merge ? { ...input.merge } : undefined };
+	const plan: BatchApplyPlan = {
+		...input,
+		video_collision_policy: input.video_collision_policy ?? 'fail',
+		merge: input.merge ? { ...input.merge } : undefined,
+	};
 	plan.destination =
 		plan.video_operation === 'organize' ? (plan.destination ?? '').trim() : undefined;
 	if (plan.video_operation === 'leave-in-place') {
@@ -100,6 +105,11 @@ export function setMergeStrategies(
 function validateApplyPlanEnums(plan: BatchApplyPlan): string[] {
 	const errors: string[] = [];
 	if (plan.version !== 1) errors.push(m.apply_plan_err_version());
+	if (
+		plan.video_collision_policy !== undefined &&
+		!['fail', 'skip', 'replace'].includes(plan.video_collision_policy)
+	)
+		errors.push(m.review_video_unresolved());
 	if (
 		!['organize', 'rename-in-place', 'rename-file', 'leave-in-place', 'metadata-artwork'].includes(
 			plan.video_operation,

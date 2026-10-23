@@ -22,6 +22,7 @@ vi.mock('$app/stores', async () => {
 vi.mock('$lib/api/client', () => ({
 	apiClient: {
 		getJob: vi.fn(),
+		getBatchJob: vi.fn(),
 		getJobOperations: vi.fn(),
 		getConfig: vi.fn(),
 		revertBatchJob: vi.fn(),
@@ -84,6 +85,7 @@ beforeEach(() => {
 		started_at: '2026-01-01T00:00:00Z',
 	} as never);
 	vi.mocked(apiClient.getConfig).mockResolvedValue({ output: { allow_revert: true } } as never);
+	vi.mocked(apiClient.getBatchJob).mockResolvedValue({ results: {} } as never);
 	vi.mocked(apiClient.getJobOperations).mockImplementation(async () => ({
 		job_id: 'undo-job',
 		job_status: 'organized',
@@ -106,6 +108,26 @@ async function confirmOperation(view: ReturnType<typeof showPage>) {
 }
 
 describe('job history Undo outcomes', () => {
+	it('shows skipped Apply receipts without creating Undo controls', async () => {
+		vi.mocked(apiClient.getJobOperations).mockResolvedValue({
+			job_id: 'undo-job',
+			job_status: 'organized',
+			total: 0,
+			operations: [],
+		});
+		vi.mocked(apiClient.getBatchJob).mockResolvedValue({
+			results: {
+				source: {
+					file_path: '/incoming/skipped.mp4',
+					video_outcome: 'skipped',
+					status: 'completed',
+				},
+			},
+		} as never);
+		const view = showPage();
+		await view.findByText(/Entire Apply skipped; files unchanged/);
+		expect(view.queryByRole('button', { name: 'Revert File' })).toBeNull();
+	});
 	it('shows HTTP-success failures, retains details after refresh, and permits retry', async () => {
 		vi.mocked(apiClient.revertJobOperation).mockImplementation(async () => {
 			currentStatus = 'failed';
@@ -240,7 +262,7 @@ describe('job history Undo outcomes', () => {
 async function retryMovie(view: ReturnType<typeof showPage>, movieId: string) {
 	const label = await view.findByText(movieId, { selector: 'span.font-semibold.text-sm' });
 	const rowHeader = label.parentElement!.parentElement!;
-	await fireEvent.click(within(rowHeader).getByRole('button', { name: 'Revert File' }));
+	await fireEvent.click(await within(rowHeader).findByRole('button', { name: 'Revert File' }));
 	await fireEvent.click(
 		within(view.getByRole('dialog')).getByRole('button', { name: 'Revert file' }),
 	);

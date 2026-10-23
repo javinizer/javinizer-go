@@ -34,6 +34,9 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 		if afc == nil || afc.Movie == nil || afr == nil {
 			return
 		}
+		if afr.Result != nil && afr.Result.VideoOutcome == "skipped" {
+			return
+		}
 		emitter := deps.GetEventEmitter()
 		if emitter == nil {
 			return
@@ -84,7 +87,7 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 				emit("file_move", fmt.Sprintf("Organize failed for %s", afc.Movie.ID), models.SeverityError, failCtx)
 			}
 			for _, warning := range warnings {
-				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, errorResponseKey: afr.Err.Error(), applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
+				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, fileKey: afc.FilePath, "new_path": newPath, "warning": warning, errorResponseKey: afr.Err.Error(), applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 			}
 			return
 		}
@@ -92,13 +95,13 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			newPath = afr.Result.OrganizeResult.NewPath
 		}
-		emit("file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
+		emit("file_move", fmt.Sprintf("Organized %s", afc.Movie.ID), models.SeverityInfo, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, fileKey: afc.FilePath, "new_path": newPath, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 		// #224 phase E: authorized intra-batch duplicates are demoted from
 		// conflicts to per-file warnings; each warning gets its own audit
 		// event via the existing eventlog.
 		if afr.Result != nil && afr.Result.OrganizeResult != nil {
 			for _, warning := range afr.Result.OrganizeResult.Warnings {
-				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, "file": afc.FilePath, "new_path": newPath, "warning": warning, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
+				emit("file_move", fmt.Sprintf("Organize warning for %s: %s", afc.Movie.ID, warning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, fileKey: afc.FilePath, "new_path": newPath, "warning": warning, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
 			}
 		}
 	}

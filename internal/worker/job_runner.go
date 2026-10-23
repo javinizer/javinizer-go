@@ -68,8 +68,9 @@ func (r *JobRunner) SetRunOptions(scrapeCfg ScrapePhaseConfig, applyCfg ApplyPha
 func defaultApplyPhaseConfig(destination string) ApplyPhaseConfig {
 	return ApplyPhaseConfig{
 		OrganizeOptions: workflow.OrganizeOptions{
-			MoveFiles:   true,
-			ForceUpdate: false,
+			VideoCollisionPolicy: "fail",
+			MoveFiles:            true,
+			ForceUpdate:          false,
 		},
 		MergeOptions: workflow.MergeOptions{
 			ForceOverwrite: true,

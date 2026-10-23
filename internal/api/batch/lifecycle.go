@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -364,6 +365,10 @@ func parseAndConvertJobResults(job *models.Job, fs afero.Fs) map[string]*contrac
 		logging.Warnf("Failed to parse results for job %s: %v", job.ID, err)
 		return make(map[string]*contracts.BatchFileResult)
 	}
+
+	var excluded map[string]bool
+	_ = json.Unmarshal([]byte(job.Excluded), &excluded)
+	jobpersist.ProjectApplyRetryFailures(parsed.Results, excluded, parsed.ApplyRetryFailures)
 
 	// Drop cropped_poster_url values pointing at temp posters that no longer
 	// exist on disk (e.g. after upgrade from a version that did not preserve the

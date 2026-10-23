@@ -40,13 +40,14 @@ func (s *applyReceiptCountingStore) PersistJobByID(string) error { s.persists.Ad
 func TestApplyStartResponse_RequestScopedReceipt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, endpoint := range []struct {
-		name    string
-		handler func(*core.APIRuntime) gin.HandlerFunc
-		body    string
-		message string
+		name        string
+		handler     func(*core.APIRuntime) gin.HandlerFunc
+		body        string
+		message     string
+		statusReads int
 	}{
-		{"organize", organizeJob, `{"operation_mode":"in-place","skip_nfo":true,"skip_download":true,"expected_apply_generation":12}`, "Organization started"},
-		{"update", updateBatchJob, `{"skip_nfo":true,"skip_download":true,"expected_apply_generation":12}`, "Update started"},
+		{"organize", organizeJob, `{"operation_mode":"in-place","skip_nfo":true,"skip_download":true,"expected_apply_generation":12}`, "Organization started", 3},
+		{"update", updateBatchJob, `{"skip_nfo":true,"skip_download":true,"expected_apply_generation":12}`, "Update started", 2},
 	} {
 		t.Run(endpoint.name, func(t *testing.T) {
 			deps := createTestDeps(t, &config.Config{}, "")
@@ -57,7 +58,9 @@ func TestApplyStartResponse_RequestScopedReceipt(t *testing.T) {
 			var globalGeneration atomic.Uint64
 			globalGeneration.Store(12)
 			job.EXPECT().GetStatus().RunAndReturn(func() *worker.BatchJobStatus {
-				return &worker.BatchJobStatus{Status: models.JobStatusCompleted, ApplyGeneration: globalGeneration.Load()}
+				generation := globalGeneration.Load()
+				assert.Equal(t, uint64(12), generation, "status reads must precede admission")
+				return &worker.BatchJobStatus{Status: models.JobStatusCompleted, ApplyGeneration: generation}
 			})
 			job.EXPECT().SetWorkflow(mock.Anything).Return().Once()
 			job.EXPECT().StartApply(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, cfg worker.ApplyPhaseConfig) error {
@@ -89,7 +92,7 @@ func TestApplyStartResponse_RequestScopedReceipt(t *testing.T) {
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &legacy))
 			assert.Equal(t, endpoint.message, legacy.Message)
 			assert.Equal(t, uint64(42), globalGeneration.Load())
-			job.AssertNumberOfCalls(t, "GetStatus", 2)
+			job.AssertNumberOfCalls(t, "GetStatus", endpoint.statusReads)
 			require.True(t, rt.WaitBackgroundTasks(time.Second))
 		})
 	}
@@ -224,7 +227,7 @@ func TestApplyStartResponse_ExpectedGenerationConfig(t *testing.T) {
 	rt := testkit.GetTestRuntime(deps)
 	snap := rt.Snapshot()
 	factory := snap.BatchJobFactory()
-	job := &stubControlledJob{status: &worker.BatchJobStatus{Status: models.JobStatusCompleted}}
+	job := &stubControlledJob{status: &worker.BatchJobStatus{Status: models.JobStatusCompleted, ApplyGeneration: 9}}
 	for _, data := range []string{`{}`, `{"expected_apply_generation":0}`, `{"expected_apply_generation":27}`} {
 		t.Run(data, func(t *testing.T) {
 			var organizeRequest contracts.OrganizeRequest
@@ -236,10 +239,15 @@ func TestApplyStartResponse_ExpectedGenerationConfig(t *testing.T) {
 			require.NoError(t, err)
 			update, err := resolveUpdateApplyConfig(snap, factory, job, updateRequest)
 			require.NoError(t, err)
-			assert.Equal(t, organizeRequest.ExpectedApplyGeneration, organize.ExpectedApplyGeneration)
+			require.NotNil(t, organize.ExpectedApplyGeneration)
+			assert.Equal(t, uint64(9), organize.OrganizeOptions.VideoCollisionGeneration)
+			if organizeRequest.ExpectedApplyGeneration == nil {
+				assert.Equal(t, uint64(9), *organize.ExpectedApplyGeneration)
+			} else {
+				assert.Equal(t, *organizeRequest.ExpectedApplyGeneration, *organize.ExpectedApplyGeneration)
+			}
 			assert.Equal(t, updateRequest.ExpectedApplyGeneration, update.ExpectedApplyGeneration)
 			if data == `{}` {
-				assert.Nil(t, organize.ExpectedApplyGeneration)
 				assert.Nil(t, update.ExpectedApplyGeneration)
 			} else {
 				require.NotNil(t, organize.ExpectedApplyGeneration)

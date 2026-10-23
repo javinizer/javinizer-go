@@ -7,6 +7,7 @@ import (
 
 func previewResultToResponse(result *workflow.PreviewResult) contracts.OrganizePreviewResponse {
 	return contracts.OrganizePreviewResponse{
+		VideoCollisions: result.VideoCollisions,
 		FolderName:      result.FolderName,
 		FileName:        result.FileName,
 		SubfolderPath:   result.SubfolderPath,

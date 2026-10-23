@@ -715,6 +715,7 @@ type ScrapePhaseConfig struct {
 // Per DEEP-6: WF and BatchCfg overrides removed. These are resolved at the
 // factory/job level instead of per-call phase config overrides.
 type ApplyPhaseConfig struct {
+	OnFileSkipped func(filePath string)
 	// Per-apply configuration (maps directly to ApplyCmd fields)
 	OrganizeOptions        workflow.OrganizeOptions // File organization settings
 	MergeOptions           workflow.MergeOptions    // NFO merge strategy settings

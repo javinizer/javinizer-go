@@ -1,4 +1,10 @@
-import { BaseClient, AuthClient, SystemClient, getAPIBaseURL, type RequestOptions } from './clients/common';
+import {
+	BaseClient,
+	AuthClient,
+	SystemClient,
+	getAPIBaseURL,
+	type RequestOptions,
+} from './clients/common';
 import type { DesktopUpgradeRequest, DesktopUpgradeResponse } from './types';
 import { JobClient, FileClient, ScraperClient } from './clients/jobs';
 import { ActressClient } from './clients/actress';
@@ -128,11 +134,7 @@ class APIClient {
 	async batchScrape(request: Parameters<JobClient['batchScrape']>[0]) {
 		return this.jobs.batchScrape(request);
 	}
-	async getBatchJob(
-		jobId: string,
-		includeData?: boolean,
-		options?: RequestOptions,
-	) {
+	async getBatchJob(jobId: string, includeData?: boolean, options?: RequestOptions) {
 		return this.jobs.getBatchJob(jobId, includeData, options);
 	}
 	async cancelBatchJob(jobId: string) {
@@ -187,6 +189,12 @@ class APIClient {
 	}
 	async bulkRescrapeMovies(jobId: string, request: Parameters<JobClient['bulkRescrapeMovies']>[1]) {
 		return this.jobs.bulkRescrapeMovies(jobId, request);
+	}
+	async reviewVideoCollisions(
+		jobId: string,
+		request: Parameters<JobClient['reviewVideoCollisions']>[1],
+	) {
+		return this.jobs.reviewVideoCollisions(jobId, request);
 	}
 	async organizeBatchJob(jobId: string, request: Parameters<JobClient['organizeBatchJob']>[1]) {
 		return this.jobs.organizeBatchJob(jobId, request);
@@ -272,26 +280,16 @@ class APIClient {
 	async listCandidates(limit = 50, offset = 0) {
 		return this.actresses.listCandidates(limit, offset);
 	}
-	async promoteCandidate(
-		id: number,
-		request?: Parameters<ActressClient['promoteCandidate']>[1],
-	) {
+	async promoteCandidate(id: number, request?: Parameters<ActressClient['promoteCandidate']>[1]) {
 		return this.actresses.promoteCandidate(id, request);
 	}
 	async listCollisions(movieId: string) {
 		return this.actresses.listCollisions(movieId);
 	}
-	async resolveCollision(
-		id: number,
-		request: Parameters<ActressClient['resolveCollision']>[1],
-	) {
+	async resolveCollision(id: number, request: Parameters<ActressClient['resolveCollision']>[1]) {
 		return this.actresses.resolveCollision(id, request);
 	}
-	async updateCreditOverride(
-		creditId: number,
-		overrideName: string,
-		userOverride: boolean,
-	) {
+	async updateCreditOverride(creditId: number, overrideName: string, userOverride: boolean) {
 		return this.actresses.updateCreditOverride(creditId, overrideName, userOverride);
 	}
 	async suppressCredit(creditId: number, suppressed: boolean) {
