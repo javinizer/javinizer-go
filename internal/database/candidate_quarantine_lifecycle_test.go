@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -113,21 +114,21 @@ func TestCandidateBackfillChunkedReadsAndIdempotentWrites(t *testing.T) {
 			require.NoError(t, db.Callback().Query().After("gorm:query").Register("count_candidate_backfill_reads", func(*gorm.DB) { reads.Add(1) }))
 			require.NoError(t, db.Callback().Update().After("gorm:update").Register("count_candidate_backfill_updates", func(*gorm.DB) { writes.Add(1) }))
 			require.NoError(t, db.Callback().Raw().After("gorm:raw").Register("count_candidate_backfill_raw", func(tx *gorm.DB) {
-				if tx.Statement != nil && len(tx.Statement.SQL.String()) >= 6 && tx.Statement.SQL.String()[:6] == "UPDATE" {
+				if tx.Statement != nil && len(tx.Statement.SQL.String()) >= 6 && tx.Statement.SQL.String()[:6] == "UPDATE" && !strings.Contains(tx.Statement.SQL.String(), "actress_quarantine_state") {
 					writes.Add(1)
 				}
 			}))
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			expectedReads := 4 + 2*((count+255)/256)
+			expectedReads := 5 + 2*((count+255)/256) // Includes one persisted revision read.
 			if count == 0 {
-				expectedReads = 1
+				expectedReads = 2
 			}
 			require.EqualValues(t, expectedReads, reads.Load())
 			require.LessOrEqual(t, writes.Load(), int64(4))
 			reads.Store(0)
 			writes.Store(0)
 			require.NoError(t, backfillActressCandidateNameKeys(t.Context(), db.DB))
-			require.EqualValues(t, 1+3*min(count, 1), reads.Load(), "warm backfill performs fixed reads without rehydration")
+			require.EqualValues(t, 2+3*min(count, 1), reads.Load(), "warm backfill performs fixed reads without rehydration")
 			require.Zero(t, writes.Load())
 		})
 	}

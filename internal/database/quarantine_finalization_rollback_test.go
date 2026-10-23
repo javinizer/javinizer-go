@@ -14,6 +14,8 @@ import (
 
 func failNextQuarantineRecompute(t *testing.T, db *DB) {
 	t.Helper()
+	// Force a pending repair so the injected oracle failure is not a clean skip.
+	require.NoError(t, db.Exec("UPDATE actress_quarantine_state SET revision=revision+1").Error)
 	name := fmt.Sprintf("fail-quarantine-recompute-%p", t)
 	fired := false
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
