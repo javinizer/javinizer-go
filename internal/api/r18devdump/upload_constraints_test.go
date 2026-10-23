@@ -58,7 +58,7 @@ func TestUpload_ConstraintViolationPreservesWorkingDump(t *testing.T) {
 			}
 			status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, prefix.String()+tc.block), "synthetic.sql.gz"))
 			require.Equal(t, http.StatusAccepted, status)
-			awaitDone(t, h, 5*time.Second)
+			awaitFixtureDone(t, h)
 			require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 			lastErr, kind, running := handlerState(h)
 			assert.Equal(t, kindValidation, kind)
@@ -80,7 +80,7 @@ func TestUpload_ConstraintViolationPreservesWorkingDump(t *testing.T) {
 
 			status, _, _ = srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump+optionalRows), "retry.sql.gz"))
 			require.Equal(t, http.StatusAccepted, status)
-			awaitDone(t, h, 5*time.Second)
+			awaitFixtureDone(t, h)
 			require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 			lastErr, kind, running = handlerState(h)
 			assert.Empty(t, lastErr)

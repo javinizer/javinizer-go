@@ -57,13 +57,13 @@ func TestUploadInstallLockWaitServerLifecycle(t *testing.T) {
 				c.Request.Header.Set("Content-Type", payload.contentType)
 				h.startUpload(c)
 				require.Equal(t, http.StatusAccepted, rec.Code)
-				require.Eventually(t, func() bool {
+				awaitFixtureReady(t, h, "import/validation to reach the install lock", func() bool {
 					if h.dumpMu.TryLock() {
 						h.dumpMu.Unlock()
 						return false
 					}
 					return true
-				}, 5*time.Second, time.Millisecond)
+				})
 				require.False(t, h.rt.WaitBackgroundTasks(time.Millisecond))
 				require.Zero(t, old.calls.Load(), "the old handle stays attached while waiting")
 				shutdownDone := make(chan struct{})
@@ -81,7 +81,11 @@ func TestUploadInstallLockWaitServerLifecycle(t *testing.T) {
 					}
 				}
 				release()
-				awaitDone(t, h, 5*time.Second)
+				if outcome == "server shutdown" {
+					awaitDone(t, h, 5*time.Second)
+				} else {
+					awaitFixtureDone(t, h)
+				}
 				require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 				after, err := os.ReadFile(path)
 				require.NoError(t, err)
@@ -149,7 +153,7 @@ func TestUploadInstallFailureRecovery(t *testing.T) {
 			}
 			rec := stageRequest(t, h, payload)
 			require.Equal(t, http.StatusAccepted, rec.Code)
-			awaitDone(t, h, 5*time.Second)
+			awaitFixtureDone(t, h)
 			require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 			lastErr, kind, running := handlerState(h)
 			require.NotEmpty(t, lastErr)
