@@ -60,6 +60,16 @@ func TestCastNameOverrideGuards(t *testing.T) {
 		applied              bool
 	}{
 		{"live", ` href="vl_star.php?s=aa6sc" rel="tag"`, "Yorimoto Shiori", true},
+		{"duplicate href conflicting", ` href="vl_star.php?s=aa6sc" href="vl_star.php?s=other"`, "Yorimoto Shiori", false},
+		{"duplicate href reversed", ` href="vl_star.php?s=other" href="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", false},
+		{"duplicate href same", ` href="vl_star.php?s=aa6sc" href="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", false},
+		{"duplicate href case", ` href="vl_star.php?s=aa6sc" HREF="vl_star.php?s=other"`, "Yorimoto Shiori", false},
+		{"uppercase href", ` HREF="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", true},
+		{"not anchor", `bbr href="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", false},
+		{"unquoted", ` href=vl_star.php?s=aa6sc rel=tag`, "Yorimoto Shiori", true},
+		{"quoted href text is not attribute", ` title='href="vl_star.php?s=other"' href="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", true},
+		{"boolean attribute", ` disabled href="vl_star.php?s=aa6sc"`, "Yorimoto Shiori", true},
+		{"malformed quote", ` href="vl_star.php?s=aa6sc`, "Yorimoto Shiori", false},
 		{"single quote", ` href='vl_star.php?s=aa6sc'`, "Yorimoto Shiori", true},
 		{"localized", ` href="/en/vl_star.php?s=aa6sc"`, "Yorimoto Shiori", true},
 		{"whitespace", ` href="vl_star.php?s=aa6sc"`, " Yorimoto　 Shiori ", true},
@@ -123,4 +133,10 @@ func TestCastNameOverrideMatchesDisplayedEntities(t *testing.T) {
 	s.settings.ActressNameOverrides["compound"] = scraperconfig.ActressNameOverride{SourceName: "Mary & Jane Doe", FirstName: "Mary & Jane", LastName: "Doe"}
 	cast := s.extractActresses(`<span class="star"><a href="vl_star.php?s=compound">Mary &amp; Jane Doe</a></span>`)
 	require.Equal(t, []models.ActressInfo{{FirstName: "Mary & Jane", LastName: "Doe"}}, cast)
+}
+
+func TestCastNameOverridesDuplicateHrefFallback(t *testing.T) {
+	s := &scraper{settings: nameOverrideSettings()}
+	cast := s.extractActresses(`<span class="star"><a href="vl_star.php?s=aa6sc" HREF="vl_star.php?s=other">Yorimoto Shiori</a></span>`)
+	require.Equal(t, []models.ActressInfo{{FirstName: "Yorimoto", LastName: "Shiori"}}, cast)
 }

@@ -3,11 +3,15 @@ package javlibrary
 import (
 	"html"
 	"net/url"
+	"regexp"
 	"strings"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
+
+// A strict attribute-token subset keeps quoted contents together and rejects
+// malformed/unrecognized syntax instead of letting an HTML parser repair it.
+var castAttributeToken = regexp.MustCompile("^[ \t\r\n\f]+([A-Za-z_:][A-Za-z0-9_.:-]*)(?:[ \t\r\n\f]*=[ \t\r\n\f]*(?:\"([^\"]*)\"|'([^']*)'|([^ \t\r\n\f\"'`<>]+)))?")
 
 // castNameOverride only consumes metadata already present on the detail page.
 // No profile fetch, catalog lookup, or name/nationality inference is performed.
@@ -15,10 +19,24 @@ func (s *scraper) castNameOverride(anchorAttributes, name string) (models.Actres
 	if len(s.settings.ActressNameOverrides) == 0 {
 		return models.ActressInfo{}, false
 	}
-	// The bounded anchor fragment has no nesting and strings.Reader cannot
-	// return a read error. HTML parsing tolerates malformed attributes.
-	doc, _ := goquery.NewDocumentFromReader(strings.NewReader("<a" + anchorAttributes + "></a>"))
-	href, _ := doc.Find("a").First().Attr("href")
+	// HTML parsers (including the current tokenizer) discard duplicate
+	// attributes. Inspect raw tokens before trusting a performer identity.
+	var href string
+	hrefs := 0
+	for strings.TrimSpace(anchorAttributes) != "" {
+		match := castAttributeToken.FindStringSubmatch(anchorAttributes)
+		if match == nil {
+			return models.ActressInfo{}, false
+		}
+		if strings.EqualFold(match[1], "href") {
+			href = html.UnescapeString(match[2] + match[3] + match[4])
+			hrefs++
+		}
+		anchorAttributes = anchorAttributes[len(match[0]):]
+	}
+	if hrefs != 1 {
+		return models.ActressInfo{}, false
+	}
 	u, err := url.Parse(href)
 	if err != nil || u.Host != "" || u.Scheme != "" || u.Fragment != "" || u.User != nil {
 		return models.ActressInfo{}, false
