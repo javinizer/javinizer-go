@@ -46,7 +46,7 @@ func TestNoClobberProbeLinuxFUSERefusal(t *testing.T) {
 				require.ErrorIs(t, err, ErrPublishNoReplaceUnsupported)
 				require.NotErrorIs(t, err, syscall.EINVAL)
 				require.False(t, isCrossDeviceError(err))
-				for _, text := range []string{"renameat2(RENAME_NOREPLACE)", syscall.EINVAL.Error(), "link(2)", syscall.EPERM.Error(), "native-filesystem path", "/mnt/diskN/", "protected_hardlinks"} {
+				for _, text := range []string{"renameat2(RENAME_NOREPLACE)", syscall.EINVAL.Error(), "link(2)", syscall.EPERM.Error(), "source/destination pair", "filesystem support or access policy"} {
 					require.ErrorContains(t, err, text)
 				}
 			}
