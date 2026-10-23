@@ -74,7 +74,10 @@ func TestOfflineDetailSearchPropagatesFetchFailure(t *testing.T) {
 			if status == 0 {
 				require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 			} else {
-				require.ErrorContains(t, err, "502")
+				classified, ok := models.AsScraperError(err)
+				require.True(t, ok)
+				require.Equal(t, models.ScraperErrorKindUnavailable, classified.Kind)
+				require.Equal(t, http.StatusBadGateway, classified.StatusCode)
 			}
 		})
 	}
