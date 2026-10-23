@@ -437,6 +437,8 @@ type ScraperSettings struct {
 // MarshalYAML preserves scraper-specific data and explicit numeric zeros.
 // Unset numeric zeros are omitted so a round trip cannot disable defaults.
 // A value receiver also preserves these semantics in maps of settings values.
+// Nil pointers must be passed to yaml.Marshal/json.Marshal (which emit null),
+// rather than invoking these value-receiver methods directly.
 func (s ScraperSettings) MarshalYAML() (interface{}, error) {
 	result := make(map[string]any)
 

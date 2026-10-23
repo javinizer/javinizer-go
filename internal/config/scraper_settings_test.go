@@ -1,20 +1,28 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
 func TestScraperSettings_MarshalYAML(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil_receiver", func(t *testing.T) {
+	t.Run("nil_pointer_serialization", func(t *testing.T) {
+		// Value receivers preserve numeric presence for settings stored by
+		// value (including map elements). Nil pointers use the encoders'
+		// standard null handling, not a direct method call on a nil value.
 		var s *models.ScraperSettings
-		result, err := s.MarshalYAML()
+		result, err := yaml.Marshal(s)
 		assert.NoError(t, err)
-		assert.Nil(t, result)
+		assert.Equal(t, "null\n", string(result))
+		result, err = json.Marshal(s)
+		assert.NoError(t, err)
+		assert.Equal(t, "null", string(result))
 	})
 
 	t.Run("with_typed_fields", func(t *testing.T) {
