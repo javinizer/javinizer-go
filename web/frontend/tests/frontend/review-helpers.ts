@@ -150,7 +150,12 @@ export async function setupMockRoutes(page: import('@playwright/test').Page): Pr
 		const url = route.request().url();
 		const method = route.request().method();
 
-		if (method === 'GET' && url.includes(`/batch/${JOB_ID}`)) {
+		if (method === 'POST' && new URL(url).pathname === `/api/v1/batch/${JOB_ID}/video-collisions`) {
+			// Grid interactions need a stable review layout, not a late proxy-error banner.
+			await route.fulfill({
+				json: { items: [], new: 5, replaced: 0, skipped: 0, unresolved: 0, same_file: 0 },
+			});
+		} else if (method === 'GET' && url.includes(`/batch/${JOB_ID}`)) {
 			await route.fulfill({ json: buildBatchJob(excluded) });
 		} else if (method === 'POST' && url.includes('/batch-exclude')) {
 			const body = route.request().postDataJSON();

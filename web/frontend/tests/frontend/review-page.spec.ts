@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import {
+	JOB_ID,
 	navigateToReviewPage,
 	switchToGridView,
 	getGridCards,
@@ -17,7 +18,13 @@ import {
 } from './review-helpers';
 
 test.beforeEach(async ({ page }) => {
+	const collisionReview = page.waitForResponse(response =>
+		response.request().method() === 'POST' &&
+		new URL(response.url()).pathname === `/api/v1/batch/${JOB_ID}/video-collisions`
+	);
 	await navigateToReviewPage(page);
+	expect((await collisionReview).ok()).toBe(true);
+	await expect(page.getByTestId('video-collision-review').locator('[aria-live="polite"]')).toBeVisible();
 	await switchToGridView(page);
 });
 
@@ -53,9 +60,9 @@ test.describe('Completeness Dial on Grid Cards', () => {
 		await expect(dial).toBeVisible({ timeout: 10_000 });
 
 		await dial.hover();
-		await page.waitForTimeout(300);
-
-		const visibleTooltip = page.locator('[role="tooltip"]').first();
+		const tooltipId = await dial.getAttribute('aria-describedby');
+		expect(tooltipId).toBeTruthy();
+		const visibleTooltip = page.locator(`[role="tooltip"][id="${tooltipId}"]`);
 		await expect(visibleTooltip).toBeVisible({ timeout: 5_000 });
 		const tooltipText = await visibleTooltip.textContent();
 		expect(tooltipText).toMatch(/Essential|Important|Nice-to-have/);
