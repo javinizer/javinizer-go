@@ -50,7 +50,7 @@ func newTestHandler(t *testing.T) (*dumpHandler, string) {
 	rt := core.NewAPIRuntime(deps)
 	rt.SetConfig(cfg)
 
-	return &dumpHandler{
+	h := &dumpHandler{
 		rt:         rt,
 		httpClient: &http.Client{},
 		reloadFn: func(cfg *config.Config, lockHeld bool) error {
@@ -60,7 +60,10 @@ func newTestHandler(t *testing.T) (*dumpHandler, string) {
 			return rt.ReloadConfig(cfg)
 		},
 		removeFn: os.Remove,
-	}, dumpPath
+	}
+	// Registered after TempDir so detached jobs finish before its files go away.
+	t.Cleanup(func() { shutdownTestHandler(h) })
+	return h, dumpPath
 }
 
 // newTestHandlerWithHub creates a dumpHandler with a real WebSocket hub so
@@ -70,11 +73,16 @@ func newTestHandlerWithHub(t *testing.T) (*dumpHandler, string, *ws.Hub) {
 	h, dumpPath := newTestHandler(t)
 	hub := ws.NewHub()
 	ctx, cancel := context.WithCancel(context.Background())
+	hubDone := make(chan struct{})
 	t.Cleanup(func() {
+		shutdownTestHandler(h)
 		cancel()
-		time.Sleep(50 * time.Millisecond)
+		<-hubDone
 	})
-	go hub.Run(ctx)
+	go func() {
+		defer close(hubDone)
+		hub.Run(ctx)
+	}()
 	h.rt.EnsureRuntime().SetWebSocketHubForTesting(hub)
 	return h, dumpPath, hub
 }
@@ -1404,11 +1412,6 @@ func TestGetStatus_WaitsForDumpMutation(t *testing.T) {
 
 	h.dumpMu.Lock()
 	locked := true
-	defer func() {
-		if locked {
-			h.dumpMu.Unlock()
-		}
-	}()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1417,6 +1420,12 @@ func TestGetStatus_WaitsForDumpMutation(t *testing.T) {
 	go func() {
 		h.getStatus(c)
 		close(done)
+	}()
+	defer func() {
+		if locked {
+			h.dumpMu.Unlock()
+		}
+		<-done
 	}()
 
 	select {
@@ -1441,11 +1450,6 @@ func TestSearch_WaitsForDumpMutation(t *testing.T) {
 
 	h.dumpMu.Lock()
 	locked := true
-	defer func() {
-		if locked {
-			h.dumpMu.Unlock()
-		}
-	}()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1454,6 +1458,12 @@ func TestSearch_WaitsForDumpMutation(t *testing.T) {
 	go func() {
 		h.search(c)
 		close(done)
+	}()
+	defer func() {
+		if locked {
+			h.dumpMu.Unlock()
+		}
+		<-done
 	}()
 
 	select {
@@ -1478,11 +1488,6 @@ func TestClearDump_WaitsForInFlightReader(t *testing.T) {
 
 	h.dumpMu.RLock()
 	locked := true
-	defer func() {
-		if locked {
-			h.dumpMu.RUnlock()
-		}
-	}()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -1491,6 +1496,12 @@ func TestClearDump_WaitsForInFlightReader(t *testing.T) {
 	go func() {
 		h.clearDump(c)
 		close(done)
+	}()
+	defer func() {
+		if locked {
+			h.dumpMu.RUnlock()
+		}
+		<-done
 	}()
 
 	select {
@@ -1525,6 +1536,8 @@ func TestStartDownload_RegistryPublishHoldsReloadLock(t *testing.T) {
 	h.httpClient = srv.Client()
 	publishStarted := make(chan bool, 1)
 	publish := make(chan struct{})
+	releasePublish := sync.OnceFunc(func() { close(publish) })
+	defer releasePublish()
 	h.reloadFn = func(_ *config.Config, lockHeld bool) error {
 		publishStarted <- lockHeld
 		<-publish
@@ -1553,13 +1566,14 @@ func TestStartDownload_RegistryPublishHoldsReloadLock(t *testing.T) {
 		_ = h.rt.GetAPIConfig()
 		close(snapshotDone)
 	}()
+	defer func() { releasePublish(); <-snapshotDone }()
 	select {
 	case <-snapshotDone:
 		t.Fatal("runtime snapshot must wait until the new registry is published")
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(publish)
+	releasePublish()
 	<-h.done
 	select {
 	case <-snapshotDone:
@@ -1590,6 +1604,8 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 		_ = gw.Close()
 	}))
 	defer srv.Close()
+	releaseImport := sync.OnceFunc(func() { close(proceed) })
+	defer releaseImport() // Release the server before either Close or runtime join.
 
 	h, dumpPath, _ := newTestHandlerWithHub(t)
 	h.httpClient = srv.Client()
@@ -1626,7 +1642,12 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	// A concurrent config reload must not block while the import streams.
 	cfg := h.rt.Deps().CoreDeps.GetConfig()
 	reloadDone := make(chan error, 1)
-	go func() { reloadDone <- h.rt.ReloadConfig(cfg) }()
+	reloadExited := make(chan struct{})
+	go func() {
+		defer close(reloadExited)
+		reloadDone <- h.rt.ReloadConfig(cfg)
+	}()
+	defer func() { releaseImport(); <-reloadExited }()
 	select {
 	case err := <-reloadDone:
 		require.NoError(t, err)
@@ -1635,7 +1656,7 @@ func TestStartDownload_ImportDoesNotHoldReloadLock(t *testing.T) {
 	}
 
 	// Release the import stream so the download goroutine completes.
-	close(proceed)
+	releaseImport()
 	<-h.done
 
 	// The real reloadFn (ReloadConfig) opened a live SQLite handle to the dump

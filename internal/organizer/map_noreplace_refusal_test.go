@@ -27,6 +27,7 @@ func TestMapNoReplaceRefusal(t *testing.T) {
 	require.Error(t, unsupported)
 	assert.Contains(t, unsupported.Error(), "cannot express an atomic no-clobber write")
 	assert.NotContains(t, unsupported.Error(), "refusing to overwrite")
+	assert.NotContains(t, unsupported.Error(), "destination volume")
 
 	plain := errors.New("io failure")
 	assert.ErrorIs(t, mapNoReplaceRefusal(plain, "/dst/x.mp4"), plain)

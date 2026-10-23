@@ -79,7 +79,11 @@ func newUploadTestServer(t *testing.T, h *dumpHandler) *uploadTestServer {
 	router.POST("/api/v1/r18dev/dump/download", h.startDownload)
 	router.DELETE("/api/v1/r18dev/dump", h.clearDump)
 	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		h.rt.Shutdown()
+		srv.Close()
+		shutdownTestHandler(h)
+	})
 	return &uploadTestServer{srv: srv, client: srv.Client()}
 }
 
@@ -93,7 +97,11 @@ func newUploadTestServerH2(t *testing.T, h *dumpHandler) *uploadTestServer {
 	srv := httptest.NewUnstartedServer(router)
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		h.rt.Shutdown()
+		srv.Close()
+		shutdownTestHandler(h)
+	})
 	return &uploadTestServer{srv: srv, client: srv.Client()}
 }
 
@@ -144,7 +152,7 @@ func awaitDone(t *testing.T, h *dumpHandler, d time.Duration) {
 	select {
 	case <-done:
 	case <-time.After(d):
-		t.Fatal("operation did not finish in time")
+		t.Fatalf("operation did not finish in %s\n%s", d, dumpTimeoutDiagnostics(h))
 	}
 }
 
@@ -644,6 +652,8 @@ func TestClear_AcquiresGuard_UploadDuringClear409(t *testing.T) {
 
 	release := make(chan struct{})
 	entered := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	var once sync.Once
 	h.reloadFn = func(_ *config.Config, _ bool) error {
 		once.Do(func() { close(entered) })
@@ -658,7 +668,7 @@ func TestClear_AcquiresGuard_UploadDuringClear409(t *testing.T) {
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	assert.Equal(t, http.StatusConflict, status, "clear must hold the shared guard for its whole duration")
 
-	close(release)
+	unblock()
 	resp := <-clearDone
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -675,6 +685,8 @@ func TestClear_DuringUploadJob409(t *testing.T) {
 
 	// Hold the job in progress via reloadFn gate.
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	h.reloadFn = func(_ *config.Config, _ bool) error { <-release; return nil }
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/x.sql.gz"), "new.db"))
 	require.Equal(t, http.StatusAccepted, status)
@@ -690,7 +702,7 @@ func TestClear_DuringUploadJob409(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, "clear during an upload job must 409")
 
-	close(release)
+	unblock()
 	awaitDone(t, h, 10*time.Second)
 }
 
