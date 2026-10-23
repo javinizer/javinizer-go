@@ -245,7 +245,7 @@ func TestRunActressImport_UpdateExistingByID(t *testing.T) {
 
 	err := rootCmd.Execute()
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Imported: 1")
+	assert.Contains(t, buf.String(), "Protected: 1")
 }
 
 // --- runActressImport with empty actresses array (line 232) ---

@@ -174,10 +174,28 @@ curl -X POST http://localhost:8765/api/v1/actresses/import \
   }'
 ```
 
-`POST /api/v1/actresses/import` accepts `{"actresses": [...]}` (request body capped at 10 MB). Each item may carry `dmm_id`, `first_name`, `last_name`, `japanese_name`, `thumb_url`, and `aliases`. Items are matched by `(japanese_name, dmm_id)`: new entries are created, existing entries are updated when any field changed, and unchanged entries are skipped. Items with both `first_name` and `japanese_name` empty, or a negative `dmm_id`, are rejected and counted as errors. The response is a summary:
+`POST /api/v1/actresses/import` accepts `{"actresses": [...]}` (request body capped at 10 MB). Each item may carry `dmm_id`, `first_name`, `last_name`, `japanese_name`, `thumb_url`, and `aliases`. Matching uses positive DMM identity first, then exact canonical-name representations; ambiguous matches are errors. The default preserves existing protected names and thumbnails, filling missing fields rather than replacing them. Negative `dmm_id` values and items with both `first_name` and `japanese_name` empty are errors.
+
+For managed import-owned identities, set top-level `"overwrite_names": true` to replace supplied nonempty names. Sparse/empty name fields never clear names. User-owned records remain protected. Verified imported thumbnails, stable IDs, credit ownership, original scraper evidence and manual credit choices are preserved. Canonical renames use the transactional alias/collision lifecycle and invalidate stale translations and affected rendered movie state.
+
+New identities created by the importer are managed for later name overwrites. The upgrade marks no existing identity as managed: historical manual edits are ambiguous and remain protected. Ordinary/default reimports never enroll legacy records.
+
+After backing up the database and reviewing selected records, add `"overwrite_legacy_names": true` alongside `"overwrite_names": true` to overwrite ambiguous import-owned records in this request only. Future imports remain protected unless they repeat this explicit legacy override. Using the legacy option without `overwrite_names` returns HTTP 400 before any row is imported. The override never bypasses user ownership, known revoked eligibility, or identity conflicts.
+
+Catalog/review name edits and merges durably revoke eligibility. Other non-import canonical-name or origin changes revoke conservatively too, so revocation is not necessarily evidence of a manual edit. No-op/thumbnail-only edits preserve eligibility. Provenance is internal and cannot be supplied through JSON or ordinary model updates. Import writes preserve their transaction-local prior eligibility; failed writes roll back both identity and provenance.
+
+Scrape candidates and unknown-origin identities without revoked eligibility retain normal import promotion: supplied metadata may be applied while the row becomes verified/import-owned. Overwrite mode retains omitted names/thumbnails. Promotion does not enroll a preexisting identity: absent legacy provenance remains ambiguous; known revocation stays protected. Default promotion and inline `aliases` replacement are unchanged.
+
+With name overwrites enabled, user-owned identity fields remain protected, while inline `aliases` metadata keeps its existing replacement behavior (including clearing when omitted or empty). A row counted as `updated` may have only alias metadata changes; this does not mean protected names were overwritten.
+
+In overwrite mode, each item may additionally specify `id`, an existing local identity reference. Unknown local IDs and contradictory local/DMM IDs are conflicts, not permission to create or redirect identity. A sparse item is accepted when it supplies a positive local or DMM ID; creation still requires a first or Japanese name. Omit `id` for portable catalogues. For compatibility, the default API continues to ignore `id`, whereas the default CLI retains its historical local-ID behavior. Both transports use the same strict identity and ownership rules when overwrite is enabled.
+
+For example: `{"overwrite_names":true,"actresses":[{"dmm_id":12345,"first_name":"Updated"}]}`.
+
+Each row commits independently. The response retains `imported` (created + updated), `skipped` (unchanged + protected), and `errors` (including conflicts), with detailed committed-outcome counts:
 
 ```json
-{"imported": 1, "skipped": 0, "errors": 0}
+{"imported":1,"skipped":0,"errors":0,"created":0,"updated":1,"unchanged":0,"protected":0,"conflicted":0}
 ```
 
 ### Batch Operations

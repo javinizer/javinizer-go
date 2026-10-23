@@ -1235,6 +1235,80 @@ func (_c *MockActressRepositoryInterface_ImportUpsert_Call) RunAndReturn(run fun
 	return _c
 }
 
+// ImportUpsertWithOptions provides a mock function for the type MockActressRepositoryInterface
+func (_mock *MockActressRepositoryInterface) ImportUpsertWithOptions(ctx context.Context, incoming *models.Actress, options database.ActressImportOptions) (*database.ActressImportResult, error) {
+	ret := _mock.Called(ctx, incoming, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ImportUpsertWithOptions")
+	}
+
+	var r0 *database.ActressImportResult
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Actress, database.ActressImportOptions) (*database.ActressImportResult, error)); ok {
+		return returnFunc(ctx, incoming, options)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *models.Actress, database.ActressImportOptions) *database.ActressImportResult); ok {
+		r0 = returnFunc(ctx, incoming, options)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*database.ActressImportResult)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, *models.Actress, database.ActressImportOptions) error); ok {
+		r1 = returnFunc(ctx, incoming, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockActressRepositoryInterface_ImportUpsertWithOptions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ImportUpsertWithOptions'
+type MockActressRepositoryInterface_ImportUpsertWithOptions_Call struct {
+	*mock.Call
+}
+
+// ImportUpsertWithOptions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - incoming *models.Actress
+//   - options database.ActressImportOptions
+func (_e *MockActressRepositoryInterface_Expecter) ImportUpsertWithOptions(ctx any, incoming any, options any) *MockActressRepositoryInterface_ImportUpsertWithOptions_Call {
+	return &MockActressRepositoryInterface_ImportUpsertWithOptions_Call{Call: _e.mock.On("ImportUpsertWithOptions", ctx, incoming, options)}
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsertWithOptions_Call) Run(run func(ctx context.Context, incoming *models.Actress, options database.ActressImportOptions)) *MockActressRepositoryInterface_ImportUpsertWithOptions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *models.Actress
+		if args[1] != nil {
+			arg1 = args[1].(*models.Actress)
+		}
+		var arg2 database.ActressImportOptions
+		if args[2] != nil {
+			arg2 = args[2].(database.ActressImportOptions)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsertWithOptions_Call) Return(actressImportResult *database.ActressImportResult, err error) *MockActressRepositoryInterface_ImportUpsertWithOptions_Call {
+	_c.Call.Return(actressImportResult, err)
+	return _c
+}
+
+func (_c *MockActressRepositoryInterface_ImportUpsertWithOptions_Call) RunAndReturn(run func(ctx context.Context, incoming *models.Actress, options database.ActressImportOptions) (*database.ActressImportResult, error)) *MockActressRepositoryInterface_ImportUpsertWithOptions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // List provides a mock function for the type MockActressRepositoryInterface
 func (_mock *MockActressRepositoryInterface) List(ctx context.Context, limit int, offset int) ([]models.Actress, error) {
 	ret := _mock.Called(ctx, limit, offset)

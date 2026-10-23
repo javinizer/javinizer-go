@@ -80,6 +80,7 @@ type ActressRepositoryInterface interface {
 	SetUserOwned(ctx context.Context, id uint) error
 	UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
 	ImportUpsert(ctx context.Context, incoming *models.Actress) error
+	ImportUpsertWithOptions(ctx context.Context, incoming *models.Actress, options ActressImportOptions) (*ActressImportResult, error)
 	DeleteStaleCandidates(ctx context.Context, olderThan time.Time) (int64, error)
 }
 

@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Exercise the CLI's preflight lookups as well as ImportUpsert. A missing-row
+// Exercise the CLI's transactional import lookups. A missing-row
 // lookup returns zero rows even if it scans the entire growing catalogue, so
 // returned-row bounds alone are insufficient: inspect the actual query plans.
 func TestCLIImportLookupPlansAndScaling(t *testing.T) {
@@ -25,7 +25,7 @@ func TestCLIImportLookupPlansAndScaling(t *testing.T) {
 				sql  string
 				args []interface{}
 			}
-			preflight := map[string]query{}
+			lookups := map[string]query{}
 			var queries, identityRows int64
 			require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:cli-import-plans", func(tx *gorm.DB) {
 				queries++
@@ -35,7 +35,7 @@ func TestCLIImportLookupPlansAndScaling(t *testing.T) {
 				identityRows += tx.RowsAffected
 				sql := tx.Statement.SQL.String()
 				// Only First lookups have LIMIT 1. Capture the real SQL and arguments,
-				// including the CLI-only Japanese and English preflight lookups.
+				// including the stable local-ID and DMM-ID predicates.
 				if !strings.Contains(sql, "LIMIT 1") {
 					return
 				}
@@ -48,7 +48,7 @@ func TestCLIImportLookupPlansAndScaling(t *testing.T) {
 				case strings.Contains(sql, "dmm_id = ?"):
 					kind = "dmm"
 				}
-				preflight[kind] = query{sql, append([]interface{}(nil), tx.Statement.Vars...)}
+				lookups[kind] = query{sql, append([]interface{}(nil), tx.Statement.Vars...)}
 			}))
 			records := make([]models.Actress, size)
 			for i := range records {
@@ -61,8 +61,8 @@ func TestCLIImportLookupPlansAndScaling(t *testing.T) {
 			require.Zero(t, failures)
 			require.Zero(t, identityRows)
 			require.LessOrEqual(t, queries, int64(8*size))
-			require.Len(t, preflight, 4, "all CLI preflight paths must be exercised")
-			for kind, q := range preflight {
+			require.Len(t, lookups, 2, "local-ID and DMM-ID transactional lookup plans must be exercised")
+			for kind, q := range lookups {
 				var plan []struct{ Detail string }
 				require.NoError(t, db.Raw("EXPLAIN QUERY PLAN "+q.sql, q.args...).Scan(&plan).Error)
 				var details []string
@@ -82,27 +82,13 @@ func TestCLIImportLookupPlansAndScaling(t *testing.T) {
 	}
 }
 
-func TestCLIEnglishPreflightIndexPreservesDuplicateOrdering(t *testing.T) {
+func TestCLIImportRejectsAmbiguousCanonicalNames(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
-	// Duplicate names remain legal. Positive DMM wins first; among DMM-less
-	// ties the smaller row ID still wins, regardless of insertion order.
-	rows := []models.Actress{
-		{ID: 30, DMMID: 100, FirstName: "Shared", LastName: "Name"},
-		{ID: 20, DMMID: 200, FirstName: "Shared", LastName: "Name"},
-		{ID: 10, DMMID: 0, FirstName: "Shared", LastName: "Name"},
-		{ID: 50, DMMID: 0, FirstName: "Tied", LastName: "Name"},
-		{ID: 40, DMMID: 0, FirstName: "Tied", LastName: "Name"},
-	}
+	rows := []models.Actress{{DMMID: 100, FirstName: "Shared", LastName: "Name"}, {DMMID: 200, FirstName: "Shared", LastName: "Name"}}
 	require.NoError(t, db.Create(&rows).Error)
-	for _, tc := range []struct {
-		name string
-		want uint
-	}{{"Shared", 20}, {"Tied", 40}} {
-		found, err := findActressImportMatch(t.Context(), database.NewActressRepository(db), &models.Actress{FirstName: tc.name, LastName: "Name"})
-		require.NoError(t, err)
-		require.Equal(t, tc.want, found.ID)
-	}
+	summary := importActressRecordsWithOptions(t.Context(), database.NewActressRepository(db), []models.Actress{{FirstName: "Shared", LastName: "Name"}}, database.ActressImportOptions{OverwriteNames: true})
+	require.Equal(t, actressImportSummary{Errors: 1, Conflicted: 1}, summary)
 }

@@ -491,6 +491,11 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				}
 				return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
 			}
+			// A manually merged identity must not inherit import-name eligibility,
+			// even when its canonical names happen to remain unchanged.
+			if err := revokeImportNameManagementTx(tx, targetID); err != nil {
+				return err
+			}
 			if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &previousTarget); err != nil {
 				return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", targetID), err)
 			}

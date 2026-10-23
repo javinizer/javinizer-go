@@ -57,12 +57,16 @@ func NewCommand() *cobra.Command {
 	importCmd := &cobra.Command{
 		Use:   "import <input.json>",
 		Short: "Import actresses from JSON",
+		Long:  "Import actresses from JSON. Inline pipe-separated aliases are stored metadata, not trusted identity mappings.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile, _ := cmd.Flags().GetString("config")
 			return runActressImport(cmd, args, configFile)
 		},
 	}
+
+	importCmd.Flags().Bool("overwrite-names", false, "Replace managed import-owned names; legacy records remain protected")
+	importCmd.Flags().Bool("overwrite-legacy-names", false, "Also overwrite ambiguous legacy import names for this invocation only; requires --overwrite-names (back up and review first)")
 
 	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd)
 	return actressCmd
@@ -250,68 +254,47 @@ func runActressExport(cmd *cobra.Command, args []string, configFile string) erro
 	return nil
 }
 
-func findActressImportMatch(ctx context.Context, repo *database.ActressRepository, incoming *models.Actress) (*models.Actress, error) {
-	lookups := make([]func() (*models.Actress, error), 0, 4)
-	if incoming.ID > 0 {
-		lookups = append(lookups, func() (*models.Actress, error) { return repo.FindByID(ctx, incoming.ID) })
-	}
-	if incoming.DMMID > 0 {
-		lookups = append(lookups, func() (*models.Actress, error) { return repo.FindByDMMID(ctx, incoming.DMMID) })
-	}
-	if strings.TrimSpace(incoming.JapaneseName) != "" {
-		lookups = append(lookups, func() (*models.Actress, error) { return repo.FindByJapaneseName(ctx, incoming.JapaneseName) })
-	}
-	if incoming.FirstName != "" || incoming.LastName != "" {
-		lookups = append(lookups, func() (*models.Actress, error) {
-			return repo.FindByFirstNameLastName(ctx, incoming.FirstName, incoming.LastName)
-		})
-	}
-	for _, lookup := range lookups {
-		found, err := lookup()
-		if err == nil {
-			return found, nil
-		}
-		if !database.IsNotFound(err) {
-			return nil, err
-		}
-	}
-	return nil, nil
+type actressImportSummary struct {
+	Imported, Skipped, Errors                          int
+	Created, Updated, Unchanged, Protected, Conflicted int
 }
 
-func sameImportedActress(existing, incoming *models.Actress) bool {
-	return existing != nil && incoming != nil &&
-		existing.DMMID == incoming.DMMID &&
-		existing.FirstName == incoming.FirstName &&
-		existing.LastName == incoming.LastName &&
-		existing.JapaneseName == incoming.JapaneseName &&
-		existing.ThumbURL == incoming.ThumbURL &&
-		existing.Aliases == incoming.Aliases
-}
-
-func importActressRecords(ctx context.Context, repo *database.ActressRepository, actresses []models.Actress) (imported, skipped, errorsCount int) {
+func importActressRecordsWithOptions(ctx context.Context, repo *database.ActressRepository, actresses []models.Actress, options database.ActressImportOptions) actressImportSummary {
+	var summary actressImportSummary
 	for i := range actresses {
-		a := &actresses[i]
-		existing, err := findActressImportMatch(ctx, repo, a)
+		result, err := repo.ImportUpsertWithOptions(ctx, &actresses[i], options)
 		if err != nil {
-			errorsCount++
+			summary.Errors++
+			if result != nil && result.Outcome == "conflicted" {
+				summary.Conflicted++
+			}
 			continue
 		}
-		unchanged := sameImportedActress(existing, a)
-		if err := repo.ImportUpsert(ctx, a); err != nil {
-			errorsCount++
-			continue
-		}
-		if unchanged && existing.Verified &&
-			(existing.Origin == database.ActressOriginUser || existing.Origin == database.ActressOriginImport) {
-			skipped++
-		} else {
-			imported++
+		switch result.Outcome {
+		case "created":
+			summary.Created++
+			summary.Imported++
+		case "updated":
+			summary.Updated++
+			summary.Imported++
+		case "unchanged":
+			summary.Unchanged++
+			summary.Skipped++
+		case "protected":
+			summary.Protected++
+			summary.Skipped++
 		}
 	}
-	return imported, skipped, errorsCount
+	return summary
 }
 
 func runActressImport(cmd *cobra.Command, args []string, configFile string) error {
+	overwriteNames, _ := cmd.Flags().GetBool("overwrite-names")
+	overwriteLegacyNames, _ := cmd.Flags().GetBool("overwrite-legacy-names")
+	if overwriteLegacyNames && !overwriteNames {
+		return fmt.Errorf("--overwrite-legacy-names requires --overwrite-names")
+	}
+
 	fileData, err := os.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
@@ -338,9 +321,9 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 	defer func() { _ = deps.Close() }()
 
 	repo := database.NewActressRepository(deps.DB)
-	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, actresses)
+	summary := importActressRecordsWithOptions(cmd.Context(), repo, actresses, database.ActressImportOptions{OverwriteNames: overwriteNames, OverwriteLegacyNames: overwriteLegacyNames})
 
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Imported: %d, Skipped: %d, Errors: %d\n", imported, skipped, errorsCount)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Imported: %d, Skipped: %d, Errors: %d\nCreated: %d, Updated: %d, Unchanged: %d, Protected: %d, Conflicted: %d\n", summary.Imported, summary.Skipped, summary.Errors, summary.Created, summary.Updated, summary.Unchanged, summary.Protected, summary.Conflicted)
 
 	return nil
 }

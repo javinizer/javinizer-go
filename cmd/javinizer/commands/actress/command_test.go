@@ -267,7 +267,7 @@ func TestActressImport_WithIDs(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	assert.Contains(t, stdout, "Imported: 2")
+	assert.Contains(t, stdout, "Imported: 1")
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)

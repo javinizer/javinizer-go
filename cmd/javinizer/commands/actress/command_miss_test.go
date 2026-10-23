@@ -499,7 +499,7 @@ func TestRunActressImport_WithJapaneseNameLookup(t *testing.T) {
 	err := rootCmd.Execute()
 	require.NoError(t, err)
 	output := buf.String()
-	assert.Contains(t, output, "Imported: 1")
+	assert.Contains(t, output, "Protected: 1")
 }
 
 func TestRunActressImport_SkipIdenticalByJapaneseName(t *testing.T) {
@@ -667,8 +667,8 @@ func TestImportActressRecords_MatchesExistingID(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), existing))
 
 	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, []models.Actress{{ID: 1, DMMID: 222, FirstName: "New", JapaneseName: "new"}})
-	assert.Equal(t, 1, imported)
-	assert.Zero(t, skipped)
+	assert.Zero(t, imported)
+	assert.Equal(t, 1, skipped)
 	assert.Zero(t, errorsCount)
 }
 
@@ -721,7 +721,7 @@ func TestRunActressImport_JapaneseNameDifferentFields(t *testing.T) {
 
 	err := rootCmd.Execute()
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Imported: 1")
+	assert.Contains(t, buf.String(), "Protected: 1")
 }
 
 // --- runActressExport to stdout with data (line 191) ---
