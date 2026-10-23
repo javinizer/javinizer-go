@@ -13,7 +13,7 @@ func writeArtifactStageBoundMarker(fs afero.Fs, root, path string, body []byte, 
 	if !artifactStageDirMatches(fs, root, identity) {
 		return fmt.Errorf("staging directory identity changed before marker creation %s", path)
 	}
-	temporary, file, err := fsutil.CreateExclusiveStagingFile(fs, path, ".jv-stage.artifact-marker", 0, 0o600)
+	temporary, file, err := fsutil.CreateExclusiveStagingFileModeBestEffort(fs, path, ".jv-stage.artifact-marker", 0, 0o600)
 	if err != nil {
 		return err
 	}

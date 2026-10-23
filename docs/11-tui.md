@@ -277,7 +277,11 @@ From Browser view, press `M` to open the manual actress merge modal. This merges
 | `Enter` | On Target: move focus to Source. On Source: load the conflict preview |
 | `Esc` / `q` | Cancel and close |
 
-**Conflict step** — resolve differing fields before applying:
+The initial policy is `fill_empty`, matching CLI and API defaults. Press `p` in the input or preview step to switch to `preserve_target`, which includes intentional blanks. The preview lists all five scalar fields and shows target, source and resulting values for the selected field. Explicit target/source decisions override the policy, including blanks. Changing policy retains explicit decisions; closing, reopening, or restarting resets to the default.
+
+The source is deleted when the merge is applied. A source DMM ID not selected in the result is discarded, including when preserving a target DMM ID of zero. Identity, aliases, credits and other protected relationship semantics are unchanged.
+
+**Preview step** — review scalar fields before applying:
 
 | Key | Action |
 |-----|--------|
@@ -286,6 +290,8 @@ From Browser view, press `M` to open the manual actress merge modal. This merges
 | `t` / `h` / `←` | Keep the target value for this field |
 | `s` / `l` / `→` | Use the source value for this field |
 | `Space` | Toggle between target and source for this field |
+| `p` | Toggle fill-empty/preserve-target policy and reload preview |
+| `d` | Clear this field’s explicit choice and use the policy |
 | `Enter` | Apply the merge |
 | `r` | Go back to ID input |
 | `Esc` / `q` | Cancel and close |

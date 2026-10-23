@@ -13,6 +13,12 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergePreviewRequest:
     properties:
+      policy:
+        type: string
+      resolutions:
+        additionalProperties:
+          type: string
+        type: object
       source_id:
         example: 34
         type: integer
@@ -33,6 +39,12 @@ definitions:
         additionalProperties:
           type: string
         type: object
+      fields:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_database.ActressMergeField'
+        type: array
+      policy:
+        type: string
       proposed_merged:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress'
       source:
@@ -42,6 +54,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ActressMergeRequest:
     properties:
+      policy:
+        type: string
       resolutions:
         additionalProperties:
           type: string
@@ -2592,10 +2606,21 @@ definitions:
       favorites:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.FavoritesConfig'
     type: object
+  github_com_javinizer_javinizer-go_internal_database.ActressMergeField:
+    properties:
+      default_resolution:
+        type: string
+      field:
+        type: string
+      result_value: {}
+      source_value: {}
+      target_value: {}
+    type: object
   github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:
       aliases:
-        description: Pipe-separated
+        description: Pipe-separated alternate-name metadata; not trusted actress_aliases
+          resolver mappings
         type: string
       created_at:
         type: string
@@ -3235,7 +3260,8 @@ definitions:
   internal_api_actress.actressSearchResponse:
     properties:
       aliases:
-        description: Pipe-separated
+        description: Pipe-separated alternate-name metadata; not trusted actress_aliases
+          resolver mappings
         type: string
       created_at:
         type: string
@@ -3768,9 +3794,14 @@ paths:
       description: Get a paginated list of actresses with optional search query and
         sorting
       parameters:
-      - description: Search query
+      - description: Search names or DMM ID
         in: query
         name: q
+        type: string
+      - description: 'Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name,
+          japanese_name_only, missing_metadata'
+        in: query
+        name: filter
         type: string
       - default: name
         description: Sort column (id, dmm_id, japanese_name, first_name, last_name,

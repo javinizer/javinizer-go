@@ -737,8 +737,9 @@ func TestImportActresses_ExistingUpdated(t *testing.T) {
 
 	var summary importSummaryResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
-	assert.Equal(t, 1, summary.Imported)
-	assert.Equal(t, 0, summary.Skipped)
+	assert.Equal(t, 0, summary.Imported)
+	assert.Equal(t, 1, summary.Skipped)
+	assert.Equal(t, 1, summary.Protected)
 }
 
 func TestListActresses_EmptyDatabase(t *testing.T) {

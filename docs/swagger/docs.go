@@ -36,8 +36,14 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Search query",
+                        "description": "Search names or DMM ID",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name, japanese_name_only, missing_metadata",
+                        "name": "filter",
                         "in": "query"
                     },
                     {
@@ -4707,6 +4713,15 @@ const docTemplate = `{
                 "target_id"
             ],
             "properties": {
+                "policy": {
+                    "type": "string"
+                },
+                "resolutions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "source_id": {
                     "type": "integer",
                     "example": 34
@@ -4732,6 +4747,15 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "fields": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_database.ActressMergeField"
+                    }
+                },
+                "policy": {
+                    "type": "string"
+                },
                 "proposed_merged": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.Actress"
                 },
@@ -4750,6 +4774,9 @@ const docTemplate = `{
                 "target_id"
             ],
             "properties": {
+                "policy": {
+                    "type": "string"
+                },
                 "resolutions": {
                     "type": "object",
                     "additionalProperties": {
@@ -8291,11 +8318,25 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_database.ActressMergeField": {
+            "type": "object",
+            "properties": {
+                "default_resolution": {
+                    "type": "string"
+                },
+                "field": {
+                    "type": "string"
+                },
+                "result_value": {},
+                "source_value": {},
+                "target_value": {}
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_models.Actress": {
             "type": "object",
             "properties": {
                 "aliases": {
-                    "description": "Pipe-separated",
+                    "description": "Pipe-separated alternate-name metadata; not trusted actress_aliases resolver mappings",
                     "type": "string"
                 },
                 "created_at": {
@@ -9177,7 +9218,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "aliases": {
-                    "description": "Pipe-separated",
+                    "description": "Pipe-separated alternate-name metadata; not trusted actress_aliases resolver mappings",
                     "type": "string"
                 },
                 "created_at": {

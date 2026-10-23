@@ -5,10 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/afero"
+
+	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
 )
 
@@ -24,8 +28,8 @@ import (
 // created. Authentic ownership therefore rides an HMAC-SHA256 seal over the
 // manifest's canonical encoding, keyed by a Javinizer-local secret that lives
 // OUTSIDE the managed tree (the user cache dir, mode 0600 — never the
-// possibly-shared artifact filesystem, so a filesystem-level attacker cannot
-// read or mint seals). The seal binds every evidence field: token (replayed
+// possibly-shared artifact filesystem, provided the private-cache assumption
+// below holds). The seal binds every evidence field: token (replayed
 // seals from a sibling tree never match, since each tree's token differs),
 // hostname, PID, and both lifecycle stamps.
 //
@@ -35,9 +39,15 @@ import (
 // applies when the secret itself is unavailable: manifests are written
 // unsealed (warned) and every later verification refuses them.
 //
+// The cache directory and its ancestors must be trusted and private, including
+// when JAVINIZER_HOME overrides the location. POSIX owner/mode checks below are
+// necessary checks, not proof of privacy under NFSv4/SMB or other independent
+// ACLs. Administrators must keep those ACLs private too. Do not place the key
+// on storage accessible to other writers of the managed artifact tree.
+//
 // Cross-process scope matches the sweep's pre-existing hostname binding: only
 // a same-host Javinizer instance ever reclaimed a root, and the per-machine
-// secret file is readable by exactly that same local user — so one user's
+// secret file is intended to be readable by only that local user — so one user's
 // Javinizer processes seal and verify against one key durable across process
 // restarts.
 
@@ -53,15 +63,21 @@ const (
 // key (never the developer's real cache dir) and replay the loader's failure
 // legs deterministically.
 var (
-	artifactSweepSecretPath   = defaultArtifactSweepSecretPath
-	artifactSweepSecretKey    = defaultArtifactSweepSecretKey
-	artifactSweepUserCacheDir = os.UserCacheDir
-	artifactSweepUserHomeDir  = os.UserHomeDir
-	artifactSweepMkdirAll     = os.MkdirAll
-	artifactSweepCreateKey    = defaultArtifactSweepCreateKey
+	artifactSweepSecretPath     = defaultArtifactSweepSecretPath
+	artifactSweepSecretKey      = defaultArtifactSweepSecretKey
+	artifactSweepUserCacheDir   = os.UserCacheDir
+	artifactSweepUserHomeDir    = os.UserHomeDir
+	artifactSweepMkdirAll       = os.MkdirAll
+	artifactSweepCreateKey      = defaultArtifactSweepCreateKey
+	artifactSweepUnlinkVerified = fsutil.UnlinkVerified
+	artifactSweepStatKey        = func(f *os.File) (os.FileInfo, error) { return f.Stat() }
+	artifactSweepReadKey        = func(r io.Reader) ([]byte, error) {
+		return io.ReadAll(io.LimitReader(r, artifactStageSecretBytes+1))
+	}
 )
 
 type artifactSweepKeyFile interface {
+	Stat() (os.FileInfo, error)
 	Write(p []byte) (int, error)
 	Close() error
 }
@@ -121,28 +137,102 @@ func defaultArtifactSweepSecretKey() ([]byte, error) {
 		}
 		return nil, fmt.Errorf("create artifact sweep key %s: %w", path, createErr)
 	}
-	if _, writeErr := handle.Write(drawn); writeErr != nil {
+	// Requested mode is not evidence of the effective mode (for example on
+	// ACL-managed storage). Validate the opened inode before writing any secret.
+	// A create rejected before any complete secret was written is discarded
+	// (bound to this inode): no process can have observed a key from it, and
+	// leaving it would wedge every later load as corrupt once storage is fixed.
+	info, statErr := handle.Stat()
+	if statErr != nil {
 		_ = handle.Close()
+		return nil, fmt.Errorf("stat artifact sweep key %s: %w", path, statErr)
+	}
+	if err := validateArtifactSweepSecret(path, info); err != nil {
+		_ = handle.Close()
+		discardUnpublishedArtifactSweepKey(path, info)
+		return nil, err
+	}
+	if n, writeErr := handle.Write(drawn); writeErr != nil || n != len(drawn) {
+		if writeErr == nil {
+			writeErr = io.ErrShortWrite
+		}
+		if written, err := handle.Stat(); err == nil {
+			info = written
+		}
+		_ = handle.Close()
+		discardUnpublishedArtifactSweepKey(path, info)
 		return nil, fmt.Errorf("write artifact sweep key %s: %w", path, writeErr)
 	}
 	if closeErr := handle.Close(); closeErr != nil {
 		return nil, fmt.Errorf("close artifact sweep key %s: %w", path, closeErr)
 	}
-	return drawn, nil
+	// Revalidate the published path before using the key. A changed key or
+	// unsafe effective permissions during creation must fail closed too.
+	published, err := readArtifactSweepSecret(path)
+	if err != nil {
+		return nil, err
+	}
+	if !hmac.Equal(published, drawn) {
+		return nil, fmt.Errorf("artifact sweep key %s changed during creation", path)
+	}
+	return published, nil
+}
+
+// discardUnpublishedArtifactSweepKey removes a key file this process created
+// but never completed. The unlink is bound to the created inode through
+// fsutil.UnlinkVerified (vacate onto a claimed terminal, re-verify, unlink
+// only the terminal), so a substitute published at the path after the
+// identity check is preserved rather than removed by pathname.
+func discardUnpublishedArtifactSweepKey(path string, created os.FileInfo) {
+	current, err := os.Lstat(path)
+	if err != nil || !os.SameFile(created, current) {
+		return
+	}
+	if err := artifactSweepUnlinkVerified(afero.NewOsFs(), path, created); err != nil {
+		logging.Warnf("artifact sweep key %s: incomplete key not discarded: %v", path, err)
+	}
 }
 
 // readArtifactSweepSecret reads and validates the key file. A corrupt
 // (wrong-length) or unreadable file is a hard failure: sealing/verifying
-// against a degraded key would silently split the ownership ring.
+// against a degraded key would silently split the ownership ring. The key is
+// required to be a regular file and pass the platform policy. On POSIX it
+// is opened without following a final symlink, and ownership and permission
+// checks reject foreign or unsafe keys. Windows retains its existing private-
+// cache ACL assumption without verifying ACLs or rejecting symlinks.
 func readArtifactSweepSecret(path string) ([]byte, error) {
-	key, err := os.ReadFile(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|artifactSweepKeyReadFlags, 0)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := artifactSweepStatKey(f)
+	if err != nil {
+		return nil, fmt.Errorf("stat artifact sweep key %s: %w", path, err)
+	}
+	if err := validateArtifactSweepSecret(path, info); err != nil {
+		return nil, err
+	}
+	key, err := artifactSweepReadKey(f)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact sweep key %s: %w", path, err)
 	}
 	if len(key) != artifactStageSecretBytes {
 		return nil, fmt.Errorf("artifact sweep key %s corrupt (want %d bytes, got %d)", path, artifactStageSecretBytes, len(key))
 	}
 	return key, nil
+}
+
+// validateArtifactSweepSecret checks metadata from the already opened handle,
+// never a second path lookup. Both read and create must pass this policy.
+func validateArtifactSweepSecret(path string, info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("artifact sweep key %s is not a regular file (mode %v)", path, info.Mode())
+	}
+	if secure := secureArtifactSweepSecret; secure != nil {
+		return secure(path, info)
+	}
+	return nil
 }
 
 // sealArtifactStageManifest MACs the manifest's canonical encoding (the

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingScrape } from './pending-scrape.svelte';
 
-// Every test here isolates module state via vi.resetModules() + a fresh
-// dynamic import of the store graph — which now includes the paraglide
-// message barrel (apply-plan.ts is localized). Each re-import re-loads ~2k
-// compiled locale modules, so the stock 5s test timeout is insufficient;
-// the timeout is NOT a correctness signal for these tests.
-vi.setConfig({ testTimeout: 20_000 });
+// These tests isolate persisted store state, not translation rendering. Keep
+// the real message keys/text without reloading thousands of generated locale
+// modules after every vi.resetModules(); that otherwise hides state assertions
+// behind cold-import timeouts on constrained runners.
+vi.mock('$lib/paraglide/messages', async () => {
+	const { default: messages } = await import('../../../messages/en.json');
+	return Object.fromEntries(Object.entries(messages).map(([key, value]) => [key, () => value]));
+});
 
 function makeSnapshot(overrides: Partial<PendingScrape> = {}): PendingScrape {
 	return {

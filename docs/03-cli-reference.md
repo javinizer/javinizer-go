@@ -486,6 +486,9 @@ javinizer actress merge --target <id> --source <id> [flags]
 
 **Optional flags:**
 ```bash
+--policy string       # fill_empty (default) or preserve_target, including blanks
+--resolve stringToString # Explicit decisions, e.g. last_name=target,dmm_id=source
+--dry-run             # Show all five scalar outcomes without merging/deleting
 --non-interactive     # Do not prompt for per-field decisions
 --prefer string       # Global conflict preference in non-interactive mode: target|source (default target)
 -y, --yes             # Skip final confirmation prompt
@@ -498,6 +501,16 @@ Interactive conflict resolution (default):
 javinizer actress merge --target 12 --source 34
 ```
 
+Preserve the target's scalar fields, including intentional blanks, and inspect the outcome before merging:
+```bash
+javinizer actress merge --target 12 --source 34 --policy preserve_target --dry-run
+javinizer actress merge --target 12 --source 34 --policy preserve_target --resolve dmm_id=source --non-interactive
+```
+
+The policy covers only `dmm_id`, `first_name`, `last_name`, `japanese_name`, and `thumb_url`. The default `fill_empty` retains existing behavior: fill blank target strings and a zero DMM ID from the source, retaining other target values. `preserve_target` keeps those fields exactly, including blanks. Explicit `--resolve` choices override the policy, even for empty source/target values. `--prefer` still affects only nonempty conflicts in non-interactive mode; `--resolve` takes precedence.
+
+The source record is deleted after merging. A source DMM ID not selected in the outcome is discarded, including when preserving target DMM ID zero. Actor identity, alias ownership, credits, quarantine, origin and associations retain their existing guarded merge semantics; this is not an undo system.
+
 Non-interactive merge for scripts:
 ```bash
 javinizer actress merge --target 12 --source 34 --non-interactive --prefer source --yes
@@ -505,7 +518,7 @@ javinizer actress merge --target 12 --source 34 --non-interactive --prefer sourc
 
 **Interactive behavior:**
 1. Loads merge preview for target/source actresses.
-2. Prompts you for each conflicting field (`target` or `source` value).
+2. Shows all five scalar fields, including blanks, and prompts for explicit `target` or `source` decisions. Enter leaves the policy or supplied decision unchanged.
 3. Asks for final confirmation.
 4. Applies merge in one transaction: moves movie links, deduplicates associations, merges aliases, deletes source actress.
 
@@ -517,6 +530,50 @@ Export actresses to JSON, or import actresses from a JSON file:
 javinizer actress export > actresses.json
 javinizer actress import actresses.json
 ```
+
+Use `--overwrite-names` to update supplied nonempty `first_name`, `last_name`, and
+`japanese_name` on import-owned records. Empty or omitted names do not clear stored
+names. Without this flag, existing protected names retain the fill-empty policy.
+User-owned records and verified imported thumbnails remain protected. Existing
+DMM/local identity and credit ownership are not reassigned; previous canonical
+names are retained as legitimate aliases without taking another identity's claims.
+
+New identities created by the importer are managed for future `--overwrite-names`
+requests. On upgrade, existing records are conservatively treated as ambiguous:
+historical manual edits cannot be identified reliably. Ordinary reimports do not
+make those records eligible for name overwrites.
+
+After backing up the database and reviewing the selected records, use
+`--overwrite-names --overwrite-legacy-names` to overwrite supplied nonempty names
+on ambiguous import-owned records for this invocation only. This never enrolls
+legacy records permanently; future imports still need the explicit legacy flag.
+The legacy flag without `--overwrite-names` is rejected before importing any row.
+It cannot bypass user ownership, known revoked eligibility, or identity conflicts.
+
+Catalog/review name edits and merges revoke eligibility durably. Other non-import
+writes that change canonical names or origin conservatively revoke it too, so a
+revoked record is not necessarily proof of a manual edit. No-op and thumbnail-only
+edits preserve eligibility. The importer preserves existing eligibility during its
+own transactional writes; provenance is server-managed, not accepted from JSON.
+
+Scrape candidates and unknown-origin records without revoked eligibility retain normal
+promotion behavior, including supplied metadata; omitted names/thumbnails are
+retained in overwrite mode. Existing candidates are not enrolled as newly managed:
+a previously ambiguous candidate remains ambiguous after promotion, while known
+revocation remains protected. Default promotion and alias replacement are unchanged.
+
+With name overwrites enabled, user-owned identity fields remain protected, while inline `aliases` metadata keeps its existing replacement behavior (including clearing when omitted or empty). A row counted as `updated` may have only alias metadata changes; this does not mean protected names were overwritten.
+
+With `--overwrite-names`, a nonzero JSON `id` must refer to an existing local row,
+and a contradictory `id`/`dmm_id` pair is a conflict. Omit `id` (or use zero) when
+importing a portable catalogue into another installation. The default CLI retains
+its legacy local-ID import behavior. Each row is transactional; one failed row
+does not roll back other rows. The summary reports committed `Created`, `Updated`,
+`Unchanged`, `Protected`, and `Conflicted` counts, alongside the compatible totals
+`Imported` (created + updated), `Skipped` (unchanged + protected), and `Errors`
+(including conflicts).
+
+The inline `aliases` field (for example, `Stage A|Stage B`) is stored metadata only. Importing it does not create trusted `actress_aliases` mappings, participate in identity matching or candidate quarantine, or move movie credits. Curated `actress_aliases` mappings are separate resolver evidence and must be managed deliberately. The field is preserved in actress records and exports; not every UI displays it.
 
 ---
 

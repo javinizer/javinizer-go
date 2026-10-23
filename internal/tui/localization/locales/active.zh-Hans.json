@@ -711,5 +711,17 @@
   "TUIWorkers": {
     "description": "Running and total worker counts shown in the header",
     "other": "工作线程：{{.Running}}/{{.Total}}"
+  },
+  "TUIActressMergePolicy": {
+    "description": "TUIActressMergePolicy",
+    "other": "策略：{{.Policy}}（p：切换；d：使用策略）"
+  },
+  "TUIActressMergeResultValue": {
+    "description": "TUIActressMergeResultValue",
+    "other": "结果："
+  },
+  "TUIActressMergeSourceDeletion": {
+    "description": "TUIActressMergeSourceDeletion",
+    "other": "来源将被删除。未选用的来源 DMM ID 将被丢弃。"
   }
 }

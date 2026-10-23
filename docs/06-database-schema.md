@@ -78,7 +78,7 @@ Stores actress information.
 | last_name | TEXT | Last name (romanized) |
 | japanese_name | TEXT | Japanese name; indexed via `idx_actresses_japanese_name` |
 | thumb_url | TEXT | Thumbnail URL |
-| aliases | TEXT | Pipe-separated alternate names |
+| aliases | TEXT | Pipe-separated alternate-name metadata, not trusted `actress_aliases` resolver mappings |
 | created_at | DATETIME | Record creation |
 | updated_at | DATETIME | Last update |
 

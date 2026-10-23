@@ -25,11 +25,16 @@ type restrictedACLStageFS struct {
 	afero.Fs
 	chmodCalls      int
 	widenMarkerMode bool
+	chmodErr        error
 }
 
 func (f *restrictedACLStageFS) Chmod(path string, _ os.FileMode) error {
 	f.chmodCalls++
-	return &os.PathError{Op: "chmod", Path: path, Err: syscall.EPERM}
+	errno := f.chmodErr
+	if errno == nil {
+		errno = syscall.EPERM
+	}
+	return &os.PathError{Op: "chmod", Path: path, Err: errno}
 }
 
 func (f *restrictedACLStageFS) LstatIfPossible(path string) (os.FileInfo, bool, error) {
@@ -128,14 +133,30 @@ func TestArtifactStageACLDeferredPublicationAndCleanup(t *testing.T) {
 	}
 }
 
-func TestArtifactStageACLUnprovenPermissionsStillRetained(t *testing.T) {
+func TestArtifactStageACLInheritedWiderModeStillCleansOwnedRoot(t *testing.T) {
 	fs, parent := restrictedACLStageFixture(t)
 	fs.widenMarkerMode = true
 	root, err := allocateArtifactStage(fs, parent)
 	require.NoError(t, err)
 	writeArtifactStageManifest(fs, root)
+	manifest, authenticated := readArtifactStageAuthenticatedManifest(fs, root)
+	require.True(t, authenticated, "a refused chmod on an inherited ACL mode must not drop the ownership seal")
+	require.True(t, manifest.Directory.matchesPath(fs, root))
+	require.Equal(t, 1, fs.chmodCalls)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "leftover"), []byte("temporary payload"), 0o600))
+	(&artifactStage{fs: fs, root: root}).cleanup()
+	pr260AssertStageGone(t, fs, parent)
+}
+
+func TestArtifactStageUnexpectedChmodFailureStillRetained(t *testing.T) {
+	fs, parent := restrictedACLStageFixture(t)
+	fs.widenMarkerMode = true
+	fs.chmodErr = syscall.EIO
+	root, err := allocateArtifactStage(fs, parent)
+	require.NoError(t, err)
+	writeArtifactStageManifest(fs, root)
 	_, authenticated := readArtifactStageAuthenticatedManifest(fs, root)
-	require.False(t, authenticated, "inherited wider modes cannot bypass mode enforcement")
+	require.False(t, authenticated, "unexpected chmod failures still abort the marker")
 	require.Equal(t, 1, fs.chmodCalls)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "payload"), []byte("preserve"), 0o600))
 	(&artifactStage{fs: fs, root: root}).cleanup()

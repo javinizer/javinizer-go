@@ -720,7 +720,16 @@ export interface CollisionResolveRequest {
 
 export type CollisionPolicy = 'block' | 'auto_keep' | 'auto_alias';
 
+export type ActressFilter =
+	| 'missing_dmm'
+	| 'has_dmm'
+	| 'missing_thumbnail'
+	| 'missing_japanese_name'
+	| 'japanese_name_only'
+	| 'missing_metadata';
+
 export interface ActressListParams {
+	filter?: ActressFilter;
 	limit?: number;
 	offset?: number;
 	q?: string;
@@ -753,6 +762,7 @@ export interface CandidatePromotionRequest {
 }
 
 export type ActressMergeResolution = 'target' | 'source';
+export type ActressMergePolicy = 'fill_empty' | 'preserve_target';
 
 export interface ActressAliasGroup {
 	canonical: string;
@@ -762,6 +772,8 @@ export interface ActressAliasGroup {
 export interface ActressMergePreviewRequest {
 	target_id: number;
 	source_id: number;
+	policy?: ActressMergePolicy;
+	resolutions?: Record<string, ActressMergeResolution>;
 }
 
 export interface ActressMergeConflict {
@@ -771,7 +783,13 @@ export interface ActressMergeConflict {
 	default_resolution: ActressMergeResolution;
 }
 
+export interface ActressMergeField extends ActressMergeConflict {
+	result_value: string | number | boolean | null;
+}
+
 export interface ActressMergePreviewResponse {
+	policy: ActressMergePolicy;
+	fields: ActressMergeField[];
 	target: Actress;
 	source: Actress;
 	proposed_merged: Actress;
@@ -782,6 +800,7 @@ export interface ActressMergePreviewResponse {
 export interface ActressMergeRequest {
 	target_id: number;
 	source_id: number;
+	policy?: ActressMergePolicy;
 	resolutions?: Record<string, ActressMergeResolution>;
 }
 

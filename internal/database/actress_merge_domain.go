@@ -49,10 +49,19 @@ func normalizeMergeResolutions(resolutions map[string]string) (map[string]string
 		if err != nil {
 			return nil, err
 		}
+		if previous, exists := normalized[field]; exists && previous != normalizedDecision {
+			return nil, fmt.Errorf("%w: contradictory decisions for field %s", ErrActressMergeInvalidDecision, field)
+		}
 		normalized[field] = normalizedDecision
 	}
 
 	return normalized, nil
+}
+
+// NormalizeActressMergeResolutions returns validated canonical field decisions.
+// Callers adding defaults must normalize first so explicit choices retain precedence.
+func NormalizeActressMergeResolutions(resolutions map[string]string) (map[string]string, error) {
+	return normalizeMergeResolutions(resolutions)
 }
 
 // nonEmptyString returns true if the string has non-whitespace content.
@@ -221,6 +230,7 @@ const (
 )
 
 type mergeDecisions struct {
+	policy string
 	fields map[string]mergeResolution
 }
 
@@ -241,7 +251,7 @@ func (d mergeDecisions) sourceWins(field string) bool {
 }
 
 func (d mergeDecisions) targetWins(field string) bool {
-	return d.fields[field] == mergeResolutionTarget
+	return d.fields[field] == mergeResolutionTarget || (d.fields[field] == 0 && d.policy == MergePolicyPreserveTarget)
 }
 
 //nolint:unused // mergeActressValues validates raw resolutions before merging source into target.

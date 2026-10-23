@@ -45,6 +45,11 @@ type ApplyArtifactPublicationFencer interface {
 
 // ActressRepositoryInterface defines the contract for actress database operations
 type ActressRepositoryInterface interface {
+	ListFiltered(ctx context.Context, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	SearchFiltered(ctx context.Context, query, filter string, limit, offset int, sortBy, sortOrder string) ([]models.Actress, error)
+	CountFiltered(ctx context.Context, filter string) (int64, error)
+	CountSearchFiltered(ctx context.Context, query, filter string) (int64, error)
+
 	Create(ctx context.Context, actress *models.Actress) error
 	Update(ctx context.Context, actress *models.Actress) error
 	RenameNameFields(ctx context.Context, id uint, firstName, lastName, japaneseName string) error
@@ -75,6 +80,7 @@ type ActressRepositoryInterface interface {
 	SetUserOwned(ctx context.Context, id uint) error
 	UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error
 	ImportUpsert(ctx context.Context, incoming *models.Actress) error
+	ImportUpsertWithOptions(ctx context.Context, incoming *models.Actress, options ActressImportOptions) (*ActressImportResult, error)
 	DeleteStaleCandidates(ctx context.Context, olderThan time.Time) (int64, error)
 }
 

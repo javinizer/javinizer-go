@@ -105,8 +105,7 @@ func TestPromoteCandidateRepositoryFailuresPR260(t *testing.T) {
 
 func TestImportActresses_ImportUpsertError(t *testing.T) {
 	repo := mocks.NewMockActressRepositoryInterface(t)
-	repo.EXPECT().FindByJapaneseNameAndDMMID(mock.Anything, "", 1).Return(nil, database.ErrNotFound)
-	repo.EXPECT().ImportUpsert(mock.Anything, mock.AnythingOfType("*models.Actress")).Return(errors.New("import failed"))
+	repo.EXPECT().ImportUpsertWithOptions(mock.Anything, mock.AnythingOfType("*models.Actress"), database.ActressImportOptions{}).Return(nil, errors.New("import failed"))
 
 	router := gin.New()
 	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))

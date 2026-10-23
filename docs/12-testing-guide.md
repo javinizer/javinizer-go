@@ -1584,3 +1584,41 @@ func TestConcurrentThing(t *testing.T) {
 - `internal/update/wiring_test.go`
 
 It is **not** wired into `internal/worker/`, `internal/tui/`, or `internal/websocket/`, and `.github/workflows/test.yml` has no dedicated goleak enforcement step — goleak runs only as part of the normal `go test` invocations for the three packages above. The CI-level guard for concurrency correctness across `worker`, `tui`, `websocket`, and `api` is the separate [Race Detector Tests](#race-detector-tests) job.
+
+### Actress import workload regression and benchmarks
+
+`TestCLIImportRepresentativeWorkloads` covers fresh positive-DMM imports,
+unchanged reimports, metadata updates, fixed candidate-heavy and curated-alias-heavy
+catalogues, and DMM-less imports at 24 and 48 rows. It asserts bounded query and
+returned-evidence counts, stored identity metadata, quarantine stability, and
+unchanged existing credit ownership rather than wall-clock deadlines. The existing
+`TestImport*` and `TestCLIImportLookupPlansAndScaling` tests additionally cover
+lookup plans, cancellation, per-row rollback, index migration, and concurrency.
+
+Run synthetic on-disk SQLite benchmarks explicitly:
+
+```bash
+go test ./cmd/javinizer/commands/actress -run '^$' \
+  -bench '^BenchmarkCLIImportWorkloads$' -benchtime=1x -count=3
+JAVINIZER_BENCH_LARGE_IMPORT=1 go test ./cmd/javinizer/commands/actress \
+  -run '^$' -bench '^BenchmarkCLIImportFresh85000$' -benchtime=1x -count=1
+```
+
+Each operation imports an entire 1,000-row dataset (85,000 for the separately gated
+large benchmark) into a fresh temporary database. Database creation, migrations,
+fixture seeding, and assertions are excluded from the timer. Reimport/update cases
+start with the same rows already imported; update changes inline alias metadata.
+Candidate-heavy cases retain 32 candidates and their credits; alias-heavy adds
+128 curated mappings and a DMM-less canonical owner. Benchmark allocations cover
+the timed CLI loop, not fixture setup. No benchmark contacts a remote service or
+uses a real catalogue.
+
+These are not TrueNAS/network-storage measurements or JSON parsing benchmarks.
+Positive-DMM imports avoid scanning the growing positive-DMM catalogue, but still
+inspect relevant candidate and DMM-less evidence. DMM-less canonical fallback
+still scans previous identities: fresh imports have quadratic returned-row growth
+(`n*(n-1)/2` even without candidates). Fixed-candidate tests do not establish linear
+scaling when the candidate or alias population itself grows. Benchmark results
+should be compared on the same machine/filesystem and dataset; they are not CI
+pass/fail performance thresholds. Imports retain per-row transactions, not batch
+atomicity, and these tests do not introduce batching or change matching behavior.

@@ -3,8 +3,16 @@ import { confirmDialog } from '$lib/stores/dialog.svelte';
 import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { toastStore } from '$lib/stores/toast';
-import type { Actress, ActressUpsertRequest, ActressMergeResolution } from '$lib/api/types';
+import type {
+	Actress,
+	ActressUpsertRequest,
+	ActressMergeResolution,
+	ActressMergePolicy,
+	ActressMergeRequest,
+	ActressFilter,
+} from '$lib/api/types';
 import { formatActressName } from '$lib/utils/actress';
+import { loadActressSortPreferences, saveActressSortPreferences } from '../sort-preferences';
 import * as m from '$lib/paraglide/messages';
 
 export type ActressForm = {
@@ -18,6 +26,15 @@ export type ActressForm = {
 
 const DEFAULT_LIMIT = 20;
 
+class MergePreviewError extends Error {
+	readonly previewKey: string;
+
+	constructor(error: unknown, previewKey: string) {
+		super(error instanceof Error ? error.message : m.actresses_merge_preview_failed());
+		this.previewKey = previewKey;
+	}
+}
+
 export function createActressStore() {
 	const queryClient = useQueryClient();
 
@@ -30,6 +47,14 @@ export function createActressStore() {
 		'name',
 	);
 	let sortOrder = $state<'asc' | 'desc'>('asc');
+	let filter = $state<ActressFilter | ''>('');
+
+	function hydrateSortPreferences() {
+		const preferences = loadActressSortPreferences();
+		sortBy = preferences.sortBy;
+		sortOrder = preferences.sortOrder;
+		offset = 0;
+	}
 
 	let editingId = $state<number | null>(null);
 	let form = $state<ActressForm>(emptyForm());
@@ -39,7 +64,7 @@ export function createActressStore() {
 	const actressesQuery = createQuery(() => ({
 		queryKey: [
 			'actresses',
-			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder },
+			{ limit, offset, q: activeQuery, sort_by: sortBy, sort_order: sortOrder, filter },
 		],
 		queryFn: () =>
 			apiClient.listActresses({
@@ -48,6 +73,7 @@ export function createActressStore() {
 				q: activeQuery || undefined,
 				sort_by: sortBy,
 				sort_order: sortOrder,
+				filter: filter || undefined,
 			}),
 		placeholderData: (prev) => prev,
 	}));
@@ -120,6 +146,9 @@ export function createActressStore() {
 	let mergePrimaryId = $state<number | null>(null);
 	let mergeSourceQueue = $state<number[]>([]);
 	let mergeCurrentSourceId = $state<number | null>(null);
+	let mergeSession = $state(0);
+	let mergeInFlight = $state(false);
+	let mergePolicy = $state<ActressMergePolicy>('fill_empty');
 	let mergeResolutions = $state<Record<string, ActressMergeResolution>>({});
 	let mergeSummary = $state<{ success: number; failed: number; messages: string[] }>({
 		success: 0,
@@ -127,24 +156,42 @@ export function createActressStore() {
 		messages: [],
 	});
 
-	const mergePreviewQuery = createQuery(() => ({
-		queryKey: ['actress-merge-preview', mergePrimaryId, mergeCurrentSourceId],
-		queryFn: () =>
-			apiClient.previewActressMerge({
-				target_id: mergePrimaryId!,
-				source_id: mergeCurrentSourceId!,
-			}),
-		enabled: !!mergePrimaryId && !!mergeCurrentSourceId,
-	}));
+	const mergePreviewRequest = $derived({
+		target_id: mergePrimaryId!,
+		source_id: mergeCurrentSourceId!,
+		policy: mergePolicy,
+		resolutions: { ...mergeResolutions },
+	});
+	const mergePreviewKey = $derived(JSON.stringify([mergeSession, mergePreviewRequest]));
+	const mergePreviewQuery = createQuery(() => {
+		// Snapshot both the request and its identity. A late response must never be
+		// shown or applied after changing a pair, policy, override, or modal session.
+		const request = mergePreviewRequest;
+		const key = mergePreviewKey;
+		return {
+			queryKey: ['actress-merge-preview', key],
+			queryFn: async () => {
+				try {
+					return { preview: await apiClient.previewActressMerge(request), key };
+				} catch (error) {
+					throw new MergePreviewError(error, key);
+				}
+			},
+			enabled: showMergeModal && !!mergePrimaryId && !!mergeCurrentSourceId,
+		};
+	});
 
-	let mergePreview = $derived(mergePreviewQuery.data ?? null);
+	let mergePreview = $derived(
+		showMergeModal && mergePreviewQuery.data?.key === mergePreviewKey
+			? mergePreviewQuery.data.preview
+			: null,
+	);
 
 	const mergeActressMutation = createMutation(() => ({
-		mutationFn: (params: {
-			target_id: number;
-			source_id: number;
-			resolutions: Record<string, ActressMergeResolution>;
-		}) => apiClient.mergeActresses(params),
+		mutationFn: (params: ActressMergeRequest) => apiClient.mergeActresses(params),
+		onSettled: () => {
+			mergeInFlight = false;
+		},
 		onSuccess: (result, variables) => {
 			mergeSummary = {
 				...mergeSummary,
@@ -166,7 +213,10 @@ export function createActressStore() {
 			mergeSummary = {
 				...mergeSummary,
 				failed: mergeSummary.failed + 1,
-				messages: [...mergeSummary.messages, m.actresses_merge_failed({ source: variables.source_id, error: err.message })],
+				messages: [
+					...mergeSummary.messages,
+					m.actresses_merge_failed({ source: variables.source_id, error: err.message }),
+				],
 			};
 			mergeSourceQueue = mergeSourceQueue.slice(1);
 			queryClient.invalidateQueries({ queryKey: ['actress-merge-preview'] });
@@ -174,20 +224,14 @@ export function createActressStore() {
 		},
 	}));
 
-	$effect(() => {
-		const data = mergePreviewQuery.data;
-		if (data) {
-			untrack(() => {
-				mergeResolutions = { ...data.default_resolutions };
-			});
-		}
-	});
-
 	let lastPreviewErrorSourceId = $state<number | null>(null);
 
 	$effect(() => {
 		if (
+			showMergeModal &&
 			mergePreviewQuery.isError &&
+			mergePreviewQuery.error instanceof MergePreviewError &&
+			mergePreviewQuery.error.previewKey === mergePreviewKey &&
 			mergeCurrentSourceId &&
 			mergeCurrentSourceId !== lastPreviewErrorSourceId
 		) {
@@ -197,7 +241,10 @@ export function createActressStore() {
 				mergeSummary = {
 					...mergeSummary,
 					failed: mergeSummary.failed + 1,
-					messages: [...mergeSummary.messages, m.actresses_merge_skipped_preview_error({ id: mergeCurrentSourceId!, message })],
+					messages: [
+						...mergeSummary.messages,
+						m.actresses_merge_skipped_preview_error({ id: mergeCurrentSourceId!, message }),
+					],
 				};
 				mergeSourceQueue = mergeSourceQueue.slice(1);
 			});
@@ -225,14 +272,25 @@ export function createActressStore() {
 		};
 	}
 
-	function getDisplayName(actress: Actress, firstNameOrder: boolean, japaneseNames: boolean): string {
+	function getDisplayName(
+		actress: Actress,
+		firstNameOrder: boolean,
+		japaneseNames: boolean,
+	): string {
 		return formatActressName(actress, { firstNameOrder, japaneseNames });
 	}
 
-	function getActressLabelByID(id: number, firstNameOrder: boolean, japaneseNames: boolean): string {
+	function getActressLabelByID(
+		id: number,
+		firstNameOrder: boolean,
+		japaneseNames: boolean,
+	): string {
 		const actress = actresses.find((item) => item.id === id);
 		if (!actress) return m.actresses_actress_label({ id });
-		return m.actresses_actress_label_full({ id, name: getDisplayName(actress, firstNameOrder, japaneseNames) });
+		return m.actresses_actress_label_full({
+			id,
+			name: getDisplayName(actress, firstNameOrder, japaneseNames),
+		});
 	}
 
 	function isSelected(actress: Actress): boolean {
@@ -333,6 +391,7 @@ export function createActressStore() {
 
 	function applySort() {
 		offset = 0;
+		saveActressSortPreferences(undefined, { sortBy, sortOrder });
 	}
 
 	function toggleSortOrder() {
@@ -351,6 +410,8 @@ export function createActressStore() {
 	}
 
 	function resetMergeState() {
+		mergeSession += 1;
+		mergePolicy = 'fill_empty';
 		mergeSourceQueue = [];
 		mergeCurrentSourceId = null;
 		mergeResolutions = {};
@@ -359,12 +420,14 @@ export function createActressStore() {
 	}
 
 	function closeMergeModal() {
+		if (mergeInFlight || mergeActressMutation.isPending) return;
 		showMergeModal = false;
 		mergePrimaryId = null;
 		resetMergeState();
 	}
 
 	function startMergeSelected() {
+		if (mergeInFlight || mergeActressMutation.isPending) return;
 		if (selectedIds.length < 2) {
 			toastStore.warning(m.actresses_select_at_least_two());
 			return;
@@ -376,21 +439,34 @@ export function createActressStore() {
 	}
 
 	function resetMergeQueueAndPreview() {
-		if (!mergePrimaryId) return;
+		if (!mergePrimaryId || mergeInFlight || mergeActressMutation.isPending) return;
+		mergeSession += 1;
 		mergeSourceQueue = selectedIds.filter((id) => id !== mergePrimaryId);
 		advanceMergeQueue();
 	}
 
 	function formatMergeValue(value: unknown): string {
-		if (value === null || value === undefined || value === '') return m.actresses_empty_value();
+		if (value === null || value === undefined || (typeof value === 'string' && value.trim() === ''))
+			return m.actresses_empty_value();
 		return String(value);
 	}
 
-	function setResolution(field: string, decision: ActressMergeResolution) {
-		mergeResolutions = { ...mergeResolutions, [field]: decision };
+	function setResolution(field: string, decision: ActressMergeResolution | undefined) {
+		if (mergeInFlight || mergeActressMutation.isPending) return;
+		const next = { ...mergeResolutions };
+		if (decision) next[field] = decision;
+		else delete next[field];
+		mergeResolutions = next;
+	}
+
+	function setMergePolicy(policy: ActressMergePolicy) {
+		if (mergeInFlight || mergeActressMutation.isPending) return;
+		mergePolicy = policy;
 	}
 
 	function advanceMergeQueue() {
+		mergePolicy = 'fill_empty';
+		mergeResolutions = {};
 		if (!mergePrimaryId || mergeSourceQueue.length === 0) {
 			mergeCurrentSourceId = null;
 			return;
@@ -403,19 +479,26 @@ export function createActressStore() {
 		if (
 			!mergePrimaryId ||
 			!mergeCurrentSourceId ||
-			!mergePreviewQuery.data ||
+			!showMergeModal ||
+			!mergePreview ||
+			mergePreviewQuery.isFetching ||
+			mergePreviewQuery.isError ||
+			mergeInFlight ||
 			mergeActressMutation.isPending
 		)
 			return;
+		// Lock synchronously: the mutation observer updates on the next tick.
+		mergeInFlight = true;
 		mergeActressMutation.mutate({
 			target_id: mergePrimaryId,
 			source_id: mergeCurrentSourceId,
-			resolutions: mergeResolutions,
+			policy: mergePolicy,
+			resolutions: { ...mergeResolutions },
 		});
 	}
 
 	function skipCurrentMerge() {
-		if (!mergeCurrentSourceId || mergeActressMutation.isPending) return;
+		if (!mergeCurrentSourceId || mergeInFlight || mergeActressMutation.isPending) return;
 		mergeSummary = {
 			...mergeSummary,
 			messages: [...mergeSummary.messages, m.actresses_merge_skipped({ id: mergeCurrentSourceId })],
@@ -455,10 +538,19 @@ export function createActressStore() {
 		},
 		set sortBy(v: string) {
 			sortBy = v as typeof sortBy;
+			applySort();
 		},
 		get sortOrder() {
 			return sortOrder;
 		},
+		get filter() {
+			return filter;
+		},
+		set filter(v: ActressFilter | '') {
+			filter = v;
+			offset = 0;
+		},
+		hydrateSortPreferences,
 		get editingId() {
 			return editingId;
 		},
@@ -499,12 +591,18 @@ export function createActressStore() {
 			return showMergeModal;
 		},
 		set showMergeModal(v: boolean) {
+			if (mergeInFlight || mergeActressMutation.isPending) return;
+			if (!v) {
+				closeMergeModal();
+				return;
+			}
 			showMergeModal = v;
 		},
 		get mergePrimaryId() {
 			return mergePrimaryId;
 		},
 		set mergePrimaryId(v: number | null) {
+			if (mergeInFlight || mergeActressMutation.isPending) return;
 			mergePrimaryId = v;
 		},
 		get mergeSourceQueue() {
@@ -513,10 +611,14 @@ export function createActressStore() {
 		get mergeCurrentSourceId() {
 			return mergeCurrentSourceId;
 		},
+		get mergePolicy() {
+			return mergePolicy;
+		},
 		get mergeResolutions() {
 			return mergeResolutions;
 		},
 		set mergeResolutions(v: Record<string, ActressMergeResolution>) {
+			if (mergeInFlight || mergeActressMutation.isPending) return;
 			mergeResolutions = v;
 		},
 		get mergeSummary() {
@@ -527,6 +629,9 @@ export function createActressStore() {
 		},
 		get mergePreviewQuery() {
 			return mergePreviewQuery;
+		},
+		get mergePending() {
+			return mergeInFlight || mergeActressMutation.isPending;
 		},
 		get mergeActressMutation() {
 			return mergeActressMutation;
@@ -565,6 +670,7 @@ export function createActressStore() {
 		resetMergeQueueAndPreview,
 		formatMergeValue,
 		setResolution,
+		setMergePolicy,
 		applyCurrentMerge,
 		skipCurrentMerge,
 		refresh,

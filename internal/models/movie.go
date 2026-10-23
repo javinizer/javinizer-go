@@ -162,7 +162,7 @@ type Actress struct {
 	// ThumbEdited is a transient request signal: the client edited the
 	// thumbnail field for this actress. It is never persisted.
 	ThumbEdited          bool   `json:"thumb_edited,omitempty" gorm:"-"`
-	Aliases              string `json:"aliases"` // Pipe-separated
+	Aliases              string `json:"aliases"` // Pipe-separated alternate-name metadata; not trusted actress_aliases resolver mappings
 	Verified             bool   `json:"verified"`
 	Origin               string `json:"origin"`
 	NameKey              string `json:"name_key" gorm:"index"`

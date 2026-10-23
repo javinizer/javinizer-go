@@ -1,4 +1,13 @@
 {
+  "actresses_merge_policy": "統合フィールドの方針",
+  "actresses_merge_policy_fill_empty": "統合先の空欄を統合元の値で補完",
+  "actresses_merge_policy_preserve_target": "空欄を含めて統合先の値を保持",
+  "actresses_merge_policy_help": "各フィールドで統合先または統合元の値を選択しない限り、この方針が適用されます。統合前にすべての結果を確認してください。",
+  "actresses_merge_source_deleted": "統合後、統合元の女優 #{id} は削除されます。映画との関連付けと別名は統合先にまとめられます。",
+  "actresses_merge_discards_dmm": "DMM ID 0 を保持すると、統合元の DMM ID {id} は失われます。残す場合は統合元の値を選択してください。",
+  "actresses_merge_use_policy": "方針に従う（{decision}）",
+  "actresses_merge_result": "結果: {value}",
+  "actresses_merge_review_fields": "#{source} → #{target} の統合結果を確認",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "progress_batch_completed_with_skips": "適用 {count} 件、スキップ {skipped} 件、失敗 {failed} 件",
   "review_video_outcome_installed": "新しい動画を配置しました",
@@ -121,7 +130,7 @@
   "actresses_queue_remaining": "キュー: 残り {count} 件",
   "actresses_review_conflicts": "#{source} -> #{target} の競合を確認",
   "actresses_search_label": "女優を検索",
-  "actresses_search_placeholder": "英語名または日本語名で検索",
+  "actresses_search_placeholder": "英語名、日本語名、DMM IDで検索",
   "actresses_select_at_least_two": "マージするには2人以上の女優を選択してください",
   "actresses_select_for_merge_aria": "マージする女優を選択",
   "actresses_select_page": "ページを選択",
@@ -2705,5 +2714,13 @@
   "review_credit_review_before_apply": "まず現在の競合を確認してください。前回の処理設定を検証できない場合、再試行はできません。新しい処理を開始する前にジョブと設定を確認してください。",
   "review_credit_panel_title": "女優クレジットの競合",
   "review_credit_panel_guidance": "現在の各競合について取得値とカタログ値を比較し、利用可能な適切な解決方法を選択してください。競合を解決しても、処理の再試行や失敗したジョブの再開は自動では行われません。",
-  "review_credit_none_open": "最新の確認では、未解決の女優クレジットの競合はありませんでした。上の失敗は前回の処理の記録です。続行する前に、ジョブが再試行可能か確認してください。"
+  "review_credit_none_open": "最新の確認では、未解決の女優クレジットの競合はありませんでした。上の失敗は前回の処理の記録です。続行する前に、ジョブが再試行可能か確認してください。",
+  "actresses_filter_label": "女優を絞り込む",
+  "actresses_filter_all": "すべての女優",
+  "actresses_filter_missing_dmm": "DMM IDなし",
+  "actresses_filter_has_dmm": "DMM IDあり",
+  "actresses_filter_missing_thumbnail": "サムネイルなし",
+  "actresses_filter_missing_japanese_name": "日本語名なし",
+  "actresses_filter_japanese_name_only": "日本語名のみ",
+  "actresses_filter_missing_metadata": "メタデータ不足"
 }

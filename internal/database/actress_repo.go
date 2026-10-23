@@ -79,6 +79,11 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
 		}
 		canonicalChanged := actressCanonicalNameChanged(&current, actress.FirstName, actress.LastName, actress.JapaneseName)
+		// An explicit catalog rename takes ownership from a curated import.
+		// A stale import-owned caller must not undo a committed manual edit.
+		if canonicalChanged && current.Origin == ActressOriginImport || current.Origin == ActressOriginUser && actress.Origin == ActressOriginImport {
+			actress.Origin = ActressOriginUser
+		}
 		identityChanged := canonicalChanged || current.ThumbURL != actress.ThumbURL
 		catalogChanged := identityChanged || current.DMMID != actress.DMMID ||
 			current.Aliases != actress.Aliases || current.Verified != actress.Verified ||
@@ -160,10 +165,13 @@ func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, f
 		if err := tx.First(&current, id).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
+		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
+		if nameChanged && current.Origin == ActressOriginImport {
+			updates["origin"] = ActressOriginUser
+		}
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
-		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
 		if nameChanged {
 			if err := deleteActressTranslationsTx(tx, id); err != nil {
 				return err
@@ -411,8 +419,8 @@ func (r *ActressRepository) SearchPaged(ctx context.Context, query string, limit
 	var actresses []models.Actress
 
 	searchPattern := "%" + query + "%"
-	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC, id ASC").
 		Limit(limit).
 		Offset(offset).
@@ -434,8 +442,8 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 	}
 	searchPattern := "%" + query + "%"
 
-	dbq := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern)
+	dbq := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
 	}
@@ -452,8 +460,8 @@ func (r *ActressRepository) CountSearch(ctx context.Context, query string) (int6
 	var count int64
 	searchPattern := "%" + query + "%"
 	err := r.catalogQuery(ctx).Model(&models.Actress{}).
-		Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-			searchPattern, searchPattern, searchPattern).
+		Where(actressSearchCondition,
+			searchPattern, searchPattern, searchPattern, searchPattern).
 		Count(&count).Error
 	if err != nil {
 		return 0, wrapDBErr("count", "search actresses", err)
@@ -475,8 +483,8 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 	}
 
 	searchPattern := "%" + query + "%"
-	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
-		searchPattern, searchPattern, searchPattern).
+	err := r.catalogQuery(ctx).Where(actressSearchCondition,
+		searchPattern, searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC").
 		Limit(50).
 		Find(&actresses).Error
@@ -719,105 +727,249 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 	})
 }
 
-// ImportUpsert upserts a curated-import actress, skipping protected
-// canonical fields on rows that are user-owned or verified.
-func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.Actress) error {
-	if incoming == nil {
-		return fmt.Errorf("import upsert: incoming actress must not be nil")
-	}
-	existing, err := r.findImportMatch(ctx, incoming)
-	if err != nil {
-		return err
-	}
-	if existing == nil {
-		incoming.Verified = true
-		incoming.Origin = ActressOriginImport
-		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(incoming).Error; err != nil {
-				return wrapDBErr("create", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
-			}
-			return recomputeActressCandidateQuarantineTx(tx)
-		})
-	}
-	incoming.ID = existing.ID
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var previousIdentity models.Actress
-		if err := tx.First(&previousIdentity, incoming.ID).Error; err != nil {
-			return wrapDBErr("load", fmt.Sprintf("imported actress %d", incoming.ID), err)
-		}
-		incoming.CreatedAt = previousIdentity.CreatedAt
-		incoming.Verified = true
-		incoming.Origin = ActressOriginImport
-		if incoming.DMMID == 0 && previousIdentity.DMMID > 0 {
-			incoming.DMMID = previousIdentity.DMMID
-		}
-		promotingCandidate := !previousIdentity.Verified
-		if promotingCandidate {
-			incoming.AmbiguityQuarantined = false
-		}
-		if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
-			incoming.Verified = previousIdentity.Verified
-			incoming.Origin = previousIdentity.Origin
-			incoming.DMMID = previousIdentity.DMMID
-			// Keep the before-image intact for canonical-name reconciliation.
-			protectedIdentity := previousIdentity
-			fillEmptyActressFields(&protectedIdentity, incoming)
-			incoming.FirstName = protectedIdentity.FirstName
-			incoming.LastName = protectedIdentity.LastName
-			incoming.JapaneseName = protectedIdentity.JapaneseName
-			incoming.ThumbURL = protectedIdentity.ThumbURL
-		}
-		contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
-		if err != nil {
-			return err
-		}
-		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
-		if err != nil {
-			return err
-		}
-		if err := tx.Save(incoming).Error; err != nil {
-			return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
-		}
-		if actressCanonicalNameChanged(&previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName) {
-			if err := deleteActressTranslationsTx(tx, incoming.ID); err != nil {
-				return err
-			}
-			if err := refreshIdentitySnapshotCreditsTx(tx, incoming.ID, &previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName); err != nil {
-				return err
-			}
-		}
-		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
-			return err
-		}
-		if promotingCandidate {
-			if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
-				return err
-			}
-			if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
-				return err
-			}
-		}
-		// Re-imports can repair matching collisions left open by older imports,
-		// even when the canonical fields are already unchanged.
-		if err := reconcileActressCollisionsTx(tx, incoming.ID); err != nil {
-			return err
-		}
-		if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
-			return err
-		}
-		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
-	})
+// ActressImportOptions controls explicitly requested import behavior.
+type ActressImportOptions struct {
+	OverwriteNames       bool
+	OverwriteLegacyNames bool
 }
 
-func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *models.Actress) (*models.Actress, error) {
+// ActressImportResult reports the committed identity outcome, not preflight guesses.
+// Conflicted is returned with an error when stable identity or alias ownership conflicts.
+type ActressImportResult struct {
+	Outcome string `json:"outcome"`
+}
+
+// ErrActressImportIdentityConflict reports contradictory or ambiguous import references.
+var ErrActressImportIdentityConflict = errors.New("conflicting import identity")
+
+// ImportUpsert preserves the default canonical-field protection policy.
+func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.Actress) error {
+	_, err := r.ImportUpsertWithOptions(ctx, incoming, ActressImportOptions{})
+	return err
+}
+
+// ImportUpsertWithOptions changes supplied nonempty names only when explicitly
+// requested and the selected identity remains import-owned in the transaction.
+// With overwrite enabled, local IDs are references, never instructions to allocate or redirect identity.
+func (r *ActressRepository) ImportUpsertWithOptions(ctx context.Context, incoming *models.Actress, options ActressImportOptions) (*ActressImportResult, error) {
+	if incoming == nil {
+		return nil, fmt.Errorf("import upsert: incoming actress must not be nil")
+	}
+	if options.OverwriteLegacyNames && !options.OverwriteNames {
+		return nil, fmt.Errorf("import upsert: overwrite_legacy_names requires overwrite_names")
+	}
+	requested := *incoming
+	if options.OverwriteNames {
+		requested.FirstName = strings.TrimSpace(requested.FirstName)
+		requested.LastName = strings.TrimSpace(requested.LastName)
+		requested.JapaneseName = strings.TrimSpace(requested.JapaneseName)
+		if requested.DMMID < 0 {
+			return nil, fmt.Errorf("import upsert: negative DMM ID")
+		}
+	}
+	var committed models.Actress
+	var selectedID uint
+	outcome := &ActressImportResult{}
+	err := retryOnLocked(func() error {
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Each retry selects again, so concurrent manual edits or identity
+			// changes cannot turn a stale preflight match into authorization.
+			working := requested
+			incoming := &working
+			transactionRepo := NewActressRepository(&DB{DB: tx})
+			existing, err := transactionRepo.findImportMatch(ctx, incoming, options.OverwriteNames)
+			if err != nil {
+				return err
+			}
+			if selectedID != 0 && (existing == nil || existing.ID != selectedID) {
+				return fmt.Errorf("load imported actress %d: identity changed during retry: %w", selectedID, ErrActressImportIdentityConflict)
+			}
+			if existing != nil {
+				selectedID = existing.ID
+			}
+			if existing == nil {
+				if options.OverwriteNames && incoming.FirstName == "" && incoming.JapaneseName == "" {
+					return fmt.Errorf("import upsert: a new identity requires a name")
+				}
+				incoming.Verified = true
+				incoming.Origin = ActressOriginImport
+				if err := tx.Create(incoming).Error; err != nil {
+					return wrapDBErr("create", "imported actress", err)
+				}
+				if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+					return err
+				}
+				if err := restoreImportNameProvenanceTx(tx, incoming.ID, importNamesManaged, ActressOriginImport); err != nil {
+					return err
+				}
+				outcome.Outcome = "created"
+				committed = *incoming
+				return nil
+			}
+			incoming.ID = existing.ID
+			provenance, err := importNameProvenanceTx(tx, existing.ID)
+			if err != nil {
+				return err
+			}
+			protected := existing.Origin == ActressOriginUser || provenance == importNamesRevoked || (existing.Origin == ActressOriginImport && provenance == importNamesLegacy && !options.OverwriteLegacyNames)
+			if options.OverwriteNames && protected {
+				outcome.Outcome = "unchanged"
+				if importNamesDiffer(existing, incoming) {
+					outcome.Outcome = "protected"
+				}
+				if existing.Aliases != requested.Aliases {
+					// Inline alias metadata retains replacement semantics; protected
+					// identity fields and canonical alias ownership remain untouched.
+					if err := tx.Model(existing).Update("aliases", requested.Aliases).Error; err != nil {
+						return wrapDBErr("save", "imported actress aliases", err)
+					}
+					existing.Aliases = requested.Aliases
+					outcome.Outcome = "updated"
+				}
+				committed = *existing
+				return nil
+			}
+			previousIdentity := *existing
+			incoming.CreatedAt = previousIdentity.CreatedAt
+			incoming.Verified = true
+			incoming.Origin = ActressOriginImport
+			if incoming.DMMID == 0 && previousIdentity.DMMID > 0 {
+				incoming.DMMID = previousIdentity.DMMID
+			}
+			promotingCandidate := !previousIdentity.Verified
+			if promotingCandidate {
+				incoming.AmbiguityQuarantined = false
+			}
+			if options.OverwriteNames {
+				// Sparse references preserve omitted fields even for candidates or legacy origins.
+				fillEmptyActressFields(incoming, &previousIdentity)
+			}
+			if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
+				incoming.Verified = previousIdentity.Verified
+				incoming.Origin = previousIdentity.Origin
+				incoming.DMMID = previousIdentity.DMMID
+				// Keep the before-image intact for canonical-name reconciliation.
+				protectedIdentity := previousIdentity
+				fillEmptyActressFields(&protectedIdentity, incoming)
+				incoming.FirstName = protectedIdentity.FirstName
+				incoming.LastName = protectedIdentity.LastName
+				incoming.JapaneseName = protectedIdentity.JapaneseName
+				incoming.ThumbURL = protectedIdentity.ThumbURL
+			}
+			if options.OverwriteNames && previousIdentity.Origin == ActressOriginImport {
+				incoming.FirstName = previousIdentity.FirstName
+				incoming.LastName = previousIdentity.LastName
+				incoming.JapaneseName = previousIdentity.JapaneseName
+				incoming.DMMID = previousIdentity.DMMID
+				incoming.ThumbURL = previousIdentity.ThumbURL
+				if requested.FirstName != "" {
+					incoming.FirstName = requested.FirstName
+				}
+				if requested.LastName != "" {
+					incoming.LastName = requested.LastName
+				}
+				if requested.JapaneseName != "" {
+					incoming.JapaneseName = requested.JapaneseName
+				}
+			}
+			outcome.Outcome = "unchanged"
+			if !sameImportIdentity(&previousIdentity, incoming) {
+				outcome.Outcome = "updated"
+			} else if importNamesDiffer(&previousIdentity, &requested) {
+				outcome.Outcome = "protected"
+			}
+			contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
+			if err != nil {
+				return err
+			}
+			before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+			if err != nil {
+				return err
+			}
+			if err := tx.Save(incoming).Error; err != nil {
+				return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
+			}
+			if actressCanonicalNameChanged(&previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName) {
+				if err := deleteActressTranslationsTx(tx, incoming.ID); err != nil {
+					return err
+				}
+				if err := refreshIdentitySnapshotCreditsTx(tx, incoming.ID, &previousIdentity, incoming.FirstName, incoming.LastName, incoming.JapaneseName); err != nil {
+					return err
+				}
+			}
+			if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+				return err
+			}
+			if promotingCandidate {
+				if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
+					return err
+				}
+				if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
+					return err
+				}
+			}
+			// Re-imports can repair matching collisions left open by older imports,
+			// even when the canonical fields are already unchanged.
+			if err := reconcileActressCollisionsTx(tx, incoming.ID); err != nil {
+				return err
+			}
+			if err := recomputeActressCandidateQuarantineTx(tx); err != nil {
+				return err
+			}
+			if err := invalidateChangedMovieRenderInputsTx(tx, before, contentIDs); err != nil {
+				return err
+			}
+			if err := restoreImportNameProvenanceTx(tx, incoming.ID, provenance, previousIdentity.Origin); err != nil {
+				return err
+			}
+			committed = *incoming
+			return nil
+		})
+	})
+	if err != nil {
+		if errors.Is(err, ErrActressImportIdentityConflict) || errors.Is(err, ErrActressAliasOwnershipConflict) || errors.Is(err, ErrActressAliasAmbiguous) {
+			return &ActressImportResult{Outcome: "conflicted"}, err
+		}
+		return nil, err
+	}
+	*incoming = committed
+	return outcome, nil
+}
+
+func importNamesDiffer(existing, incoming *models.Actress) bool {
+	return incoming.FirstName != "" && incoming.FirstName != existing.FirstName || incoming.LastName != "" && incoming.LastName != existing.LastName || incoming.JapaneseName != "" && incoming.JapaneseName != existing.JapaneseName
+}
+
+func sameImportIdentity(a, b *models.Actress) bool {
+	return a.DMMID == b.DMMID && a.FirstName == b.FirstName && a.LastName == b.LastName && a.JapaneseName == b.JapaneseName && a.ThumbURL == b.ThumbURL && a.Aliases == b.Aliases && a.Origin == b.Origin && a.Verified == b.Verified && a.AmbiguityQuarantined == b.AmbiguityQuarantined
+}
+
+func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *models.Actress, strictOptions ...bool) (*models.Actress, error) {
+	strict := len(strictOptions) > 0 && strictOptions[0]
 	if incoming.ID > 0 {
 		var found models.Actress
 		err := r.GetDB().WithContext(ctx).First(&found, "id = ?", incoming.ID).Error
 		if err == nil {
+			if strict && incoming.DMMID > 0 && found.DMMID > 0 && incoming.DMMID != found.DMMID {
+				return nil, fmt.Errorf("local ID %d and DMM ID %d disagree: %w", incoming.ID, incoming.DMMID, ErrActressImportIdentityConflict)
+			}
+			if strict && incoming.DMMID > 0 && found.DMMID <= 0 {
+				var other models.Actress
+				err := r.GetDB().WithContext(ctx).First(&other, "dmm_id = ?", incoming.DMMID).Error
+				if err == nil {
+					return nil, fmt.Errorf("DMM ID %d belongs to another local identity: %w", incoming.DMMID, ErrActressImportIdentityConflict)
+				}
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil, err
+				}
+			}
 			return &found, nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, wrapDBErr("find", fmt.Sprintf("import match id %d", incoming.ID), err)
+		}
+		if strict {
+			return nil, fmt.Errorf("unknown local ID %d: %w", incoming.ID, ErrActressImportIdentityConflict)
 		}
 	}
 	if incoming.DMMID > 0 {
@@ -835,7 +987,7 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 		return nil, err
 	}
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("ambiguous import match for %s: %d identities share a canonical representation", incoming.FullName(), len(matches))
+		return nil, fmt.Errorf("ambiguous import match for %s: %d identities share a canonical representation: %w", incoming.FullName(), len(matches), ErrActressImportIdentityConflict)
 	}
 	if len(matches) == 1 {
 		return &matches[0], nil

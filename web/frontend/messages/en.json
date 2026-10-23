@@ -1,4 +1,13 @@
 {
+  "actresses_merge_policy": "Merge field policy",
+  "actresses_merge_policy_fill_empty": "Fill empty target fields from source",
+  "actresses_merge_policy_preserve_target": "Preserve target, including blanks",
+  "actresses_merge_policy_help": "The policy applies unless you choose a target or source value for a field. Review every resulting value before merging.",
+  "actresses_merge_source_deleted": "Source actress #{id} will be deleted after merging. Movie links and aliases will be combined into the target.",
+  "actresses_merge_discards_dmm": "Keeping DMM ID 0 discards the source DMM ID {id}. Choose the source value if you want to retain it.",
+  "actresses_merge_use_policy": "Use policy ({decision})",
+  "actresses_merge_result": "Result: {value}",
+  "actresses_merge_review_fields": "Review resulting fields for #{source} → #{target}",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "progress_batch_completed_with_skips": "Applied {count} files, skipped {skipped}, failed {failed}",
   "review_video_outcome_installed": "New video installed",
@@ -121,7 +130,7 @@
   "actresses_queue_remaining": "Queue: {count} remaining",
   "actresses_review_conflicts": "Review conflicts for #{source} -> #{target}",
   "actresses_search_label": "Search actresses",
-  "actresses_search_placeholder": "Search by English or Japanese name",
+  "actresses_search_placeholder": "Search by English or Japanese name, or DMM ID",
   "actresses_select_at_least_two": "Select at least 2 actresses to merge",
   "actresses_select_for_merge_aria": "Select actress for merge",
   "actresses_select_page": "Select Page",
@@ -2711,5 +2720,13 @@
   "review_credit_review_before_apply": "Check the current conflicts first. Retry is unavailable without verified attempt settings; review the job and settings before starting any new attempt.",
   "review_credit_panel_title": "Actress-credit conflicts",
   "review_credit_panel_guidance": "Compare the reported and catalog values for each current conflict, then choose the appropriate available resolution. Resolving conflicts does not automatically retry an operation or reopen a failed job.",
-  "review_credit_none_open": "No open actress-credit conflicts were found in the latest check. The failure above belongs to the previous attempt. Check the job’s retry availability before proceeding."
+  "review_credit_none_open": "No open actress-credit conflicts were found in the latest check. The failure above belongs to the previous attempt. Check the job’s retry availability before proceeding.",
+  "actresses_filter_label": "Filter actresses",
+  "actresses_filter_all": "All actresses",
+  "actresses_filter_missing_dmm": "Missing DMM ID",
+  "actresses_filter_has_dmm": "Has DMM ID",
+  "actresses_filter_missing_thumbnail": "Missing thumbnail",
+  "actresses_filter_missing_japanese_name": "Missing Japanese name",
+  "actresses_filter_japanese_name_only": "Japanese name only",
+  "actresses_filter_missing_metadata": "Missing metadata"
 }

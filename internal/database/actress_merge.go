@@ -34,6 +34,8 @@ type ActressMergeConflict struct {
 
 // ActressMergePreview holds the preview of a merge operation before execution.
 type ActressMergePreview struct {
+	Policy             string                          `json:"policy"`
+	Fields             []ActressMergeField             `json:"fields"`
 	Target             models.Actress                  `json:"target"`
 	Source             models.Actress                  `json:"source"`
 	ProposedMerged     models.Actress                  `json:"proposed_merged"`
@@ -352,6 +354,14 @@ func (m *actressMerger) loadPair(ctx context.Context, targetID, sourceID uint) (
 
 // PreviewMerge previews a merge between two actresses without modifying the database.
 func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uint) (*ActressMergePreview, error) {
+	return m.previewWithOptions(ctx, targetID, sourceID, ActressMergeOptions{})
+}
+
+func (m *actressMerger) previewWithOptions(ctx context.Context, targetID, sourceID uint, options ActressMergeOptions) (*ActressMergePreview, error) {
+	decisions, err := normalizeActressMergeOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	target, source, err := m.loadPair(ctx, targetID, sourceID)
 	if err != nil {
 		return nil, err
@@ -359,7 +369,7 @@ func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uin
 
 	conflicts := buildActressMergeConflicts(target, source)
 	defaultResolutions := defaultResolutionsFromConflicts(conflicts)
-	merged := mergeActressValuesResolved(target, source, mergeDecisions{})
+	merged := mergeActressValuesResolved(target, source, decisions)
 
 	canonicalName := canonicalActressName(&merged)
 	merged.Aliases, _, _ = mergeAliasValues(target.Aliases, collectActressAliasCandidates(source), canonicalName) // 3rd return (added aliases) not needed at call site
@@ -370,6 +380,8 @@ func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uin
 	}
 
 	return &ActressMergePreview{
+		Policy:             decisions.policy,
+		Fields:             actressMergeFields(target, source, &merged, decisions.policy),
 		Target:             *target,
 		Source:             *source,
 		ProposedMerged:     merged,
@@ -381,20 +393,22 @@ func (m *actressMerger) PreviewMerge(ctx context.Context, targetID, sourceID uin
 
 // PlanMerge validates and normalizes field decisions without modifying the database.
 func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, resolutions map[string]string) (*MergePlan, error) {
-	_, err := m.PreviewMerge(ctx, targetID, sourceID)
+	return m.planWithOptions(ctx, targetID, sourceID, ActressMergeOptions{Resolutions: resolutions})
+}
+
+func (m *actressMerger) planWithOptions(ctx context.Context, targetID, sourceID uint, options ActressMergeOptions) (*MergePlan, error) {
+	decisions, err := normalizeActressMergeOptions(options)
 	if err != nil {
 		return nil, err
 	}
 
-	normalizedResolutions, err := normalizeMergeResolutions(resolutions)
-	if err != nil {
+	if _, _, err := m.loadPair(ctx, targetID, sourceID); err != nil {
 		return nil, err
 	}
-
 	return &MergePlan{
 		TargetID:  targetID,
 		SourceID:  sourceID,
-		decisions: mergeDecisionsFromNormalized(normalizedResolutions),
+		decisions: decisions,
 	}, nil
 }
 
@@ -476,6 +490,11 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 					return ErrActressMergeUniqueConstraint
 				}
 				return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
+			}
+			// A manually merged identity must not inherit import-name eligibility,
+			// even when its canonical names happen to remain unchanged.
+			if err := revokeImportNameManagementTx(tx, targetID); err != nil {
+				return err
 			}
 			if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &previousTarget); err != nil {
 				return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", targetID), err)

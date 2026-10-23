@@ -117,11 +117,18 @@ var commandFlags = map[string][]flagSpec{
 	"history revert": {
 		{"scrape-ids", ""},
 	},
+	"actress import": {
+		{"overwrite-names", ""},
+		{"overwrite-legacy-names", ""},
+	},
 	"actress merge": {
 		{"target", ""},
 		{"source", ""},
 		{"non-interactive", ""},
 		{"prefer", ""},
+		{"policy", ""},
+		{"resolve", ""},
+		{"dry-run", ""},
 		{"yes", "y"},
 	},
 	"word import": {

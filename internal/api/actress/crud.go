@@ -92,7 +92,8 @@ func parseActressID(c *gin.Context) (uint, bool) {
 // @Description Get a paginated list of actresses with optional search query and sorting
 // @Tags actress
 // @Produce json
-// @Param q query string false "Search query"
+// @Param q query string false "Search names or DMM ID"
+// @Param filter query string false "Filter actresses: missing_dmm, has_dmm, missing_thumbnail, missing_japanese_name, japanese_name_only, missing_metadata"
 // @Param sort_by query string false "Sort column (id, dmm_id, japanese_name, first_name, last_name, created_at, updated_at, name)" default(name)
 // @Param sort_order query string false "Sort direction (asc, desc)" default(asc)
 // @Param limit query int false "Max results" default(50)
@@ -106,10 +107,17 @@ func listActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, offset := core.ParsePagination(c, 50, 500)
 		query := strings.TrimSpace(c.Query("q"))
+		filter := strings.TrimSpace(c.Query("filter"))
 		sortBy, sortOrder, err := parseSort(c)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
+		}
+		if filter != "" {
+			if _, ok := database.ValidActressFilter(filter); !ok {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: fmt.Sprintf("unsupported filter: %s", filter)})
+				return
+			}
 		}
 
 		var actresses []models.Actress
@@ -117,25 +125,41 @@ func listActresses(deps ActressDeps) gin.HandlerFunc {
 
 		repo := deps.ActressRepo
 		if query == "" {
-			total, err = repo.Count(c.Request.Context())
+			if filter != "" {
+				total, err = repo.CountFiltered(c.Request.Context(), filter)
+			} else {
+				total, err = repo.Count(c.Request.Context())
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = repo.ListSorted(c.Request.Context(), limit, offset, sortBy, sortOrder)
+			if filter != "" {
+				actresses, err = repo.ListFiltered(c.Request.Context(), filter, limit, offset, sortBy, sortOrder)
+			} else {
+				actresses, err = repo.ListSorted(c.Request.Context(), limit, offset, sortBy, sortOrder)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 		} else {
-			total, err = repo.CountSearch(c.Request.Context(), query)
+			if filter != "" {
+				total, err = repo.CountSearchFiltered(c.Request.Context(), query, filter)
+			} else {
+				total, err = repo.CountSearch(c.Request.Context(), query)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 
-			actresses, err = repo.SearchPagedSorted(c.Request.Context(), query, limit, offset, sortBy, sortOrder)
+			if filter != "" {
+				actresses, err = repo.SearchFiltered(c.Request.Context(), query, filter, limit, offset, sortBy, sortOrder)
+			} else {
+				actresses, err = repo.SearchPagedSorted(c.Request.Context(), query, limit, offset, sortBy, sortOrder)
+			}
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 				return
@@ -364,10 +388,13 @@ func deleteActress(deps ActressDeps) gin.HandlerFunc {
 }
 
 type actressesImportRequest struct {
-	Actresses []actressImportItem `json:"actresses"`
+	Actresses            []actressImportItem `json:"actresses"`
+	OverwriteNames       bool                `json:"overwrite_names"`
+	OverwriteLegacyNames bool                `json:"overwrite_legacy_names"`
 }
 
 type actressImportItem struct {
+	ID           uint   `json:"id"`
 	DMMID        int    `json:"dmm_id"`
 	FirstName    string `json:"first_name"`
 	LastName     string `json:"last_name"`
@@ -377,9 +404,14 @@ type actressImportItem struct {
 }
 
 type importSummaryResponse struct {
-	Imported int `json:"imported"`
-	Skipped  int `json:"skipped"`
-	Errors   int `json:"errors"`
+	Imported   int `json:"imported"`
+	Skipped    int `json:"skipped"`
+	Errors     int `json:"errors"`
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Unchanged  int `json:"unchanged"`
+	Protected  int `json:"protected"`
+	Conflicted int `json:"conflicted"`
 }
 
 func exportActresses(deps ActressDeps) gin.HandlerFunc {
@@ -431,16 +463,6 @@ func exportActresses(deps ActressDeps) gin.HandlerFunc {
 	}
 }
 
-func sameImportedActress(existing, incoming *models.Actress) bool {
-	return existing != nil && incoming != nil &&
-		existing.DMMID == incoming.DMMID &&
-		existing.FirstName == incoming.FirstName &&
-		existing.LastName == incoming.LastName &&
-		existing.JapaneseName == incoming.JapaneseName &&
-		existing.ThumbURL == incoming.ThumbURL &&
-		existing.Aliases == incoming.Aliases
-}
-
 func importActresses(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
@@ -451,8 +473,12 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 
+		if req.OverwriteLegacyNames && !req.OverwriteNames {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "overwrite_legacy_names requires overwrite_names"})
+			return
+		}
 		repo := deps.ActressRepo
-		var imported, skipped, errorsCount int
+		var summary importSummaryResponse
 
 		for _, item := range req.Actresses {
 			firstName := strings.TrimSpace(item.FirstName)
@@ -461,13 +487,14 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 			thumbURL := strings.TrimSpace(item.ThumbURL)
 			aliases := strings.TrimSpace(item.Aliases)
 
-			if firstName == "" && japaneseName == "" {
-				errorsCount++
+			// Preserve legacy default validation; sparse identity references are opt-in.
+			if firstName == "" && japaneseName == "" && (!req.OverwriteNames || (item.ID == 0 && item.DMMID == 0)) {
+				summary.Errors++
 				continue
 			}
 
 			if item.DMMID < 0 {
-				errorsCount++
+				summary.Errors++
 				continue
 			}
 
@@ -479,29 +506,34 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 				ThumbURL:     thumbURL,
 				Aliases:      aliases,
 			}
-			existing, err := repo.FindByJapaneseNameAndDMMID(c.Request.Context(), japaneseName, item.DMMID)
-			if err != nil && !database.IsNotFound(err) && !errors.Is(err, database.ErrInvalidLookup) {
-				errorsCount++
+			// The legacy API ignored local IDs. Honor them only for the new opt-in mode.
+			if req.OverwriteNames {
+				incoming.ID = item.ID
+			}
+			result, err := repo.ImportUpsertWithOptions(c.Request.Context(), incoming, database.ActressImportOptions{OverwriteNames: req.OverwriteNames, OverwriteLegacyNames: req.OverwriteLegacyNames})
+			if err != nil {
+				summary.Errors++
+				if result != nil && result.Outcome == "conflicted" {
+					summary.Conflicted++
+				}
 				continue
 			}
-			unchanged := existing != nil && sameImportedActress(existing, incoming)
-
-			if err := repo.ImportUpsert(c.Request.Context(), incoming); err != nil {
-				errorsCount++
-				continue
-			}
-			if unchanged && existing.Verified &&
-				(existing.Origin == database.ActressOriginUser || existing.Origin == database.ActressOriginImport) {
-				skipped++
-			} else {
-				imported++
+			switch result.Outcome {
+			case "created":
+				summary.Created++
+				summary.Imported++
+			case "updated":
+				summary.Updated++
+				summary.Imported++
+			case "unchanged":
+				summary.Unchanged++
+				summary.Skipped++
+			case "protected":
+				summary.Protected++
+				summary.Skipped++
 			}
 		}
 
-		c.JSON(http.StatusOK, importSummaryResponse{
-			Imported: imported,
-			Skipped:  skipped,
-			Errors:   errorsCount,
-		})
+		c.JSON(http.StatusOK, summary)
 	}
 }

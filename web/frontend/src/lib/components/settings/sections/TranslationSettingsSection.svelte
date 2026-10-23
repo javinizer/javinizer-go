@@ -3,6 +3,7 @@
 	import { formatDate } from '$lib/i18n/format';
 	import { RefreshCw, ChevronDown, Check } from 'lucide-svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import TranslationModelPicker from '$lib/components/settings/TranslationModelPicker.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
@@ -116,51 +117,32 @@
 					}}
 				/>
 
-				<div class="py-4 border-b border-border">
-					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-openai-model-select">{m.settings_translation_model_label()}</label>
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={fetchTranslationModels}
-							disabled={
-								fetchingTranslationModels ||
-								!(config.metadata.translation?.openai?.base_url ?? '').trim() ||
-								!(config.metadata.translation?.openai?.api_key ?? '').trim()
-							}
-						>
-							{#snippet children()}
-								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
-							{/snippet}
-						</Button>
-					</div>
-
-					{#if translationModelOptions.length > 0}
-						<select id="translation-openai-model-select" bind:value={config.metadata.translation!.openai!.model} class={selectClass}>
-							{#each translationModelOptions as modelName}
-								<option value={modelName}>{modelName}</option>
-							{/each}
-						</select>
-						<p class="text-xs text-muted-foreground mt-1">
-							{m.settings_translation_models_loaded({ url: config.metadata.translation?.openai?.base_url ?? '' })}
-						</p>
-					{/if}
-
-					<input
-						id="translation-openai-model-input"
-						type="text"
-						value={config.metadata.translation?.openai?.model ?? 'gpt-4o-mini'}
-						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
-							if (!config.metadata.translation!.openai) config.metadata.translation!.openai = {};
-							config.metadata.translation!.openai.model = e.currentTarget.value.trim();
-						}}
-						class="{inputClass} mt-3"
-						placeholder="gpt-4o-mini"
-					/>
-					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
-				</div>
+				<TranslationModelPicker
+					selectId="translation-openai-model-select"
+					inputId="translation-openai-model-input"
+					{inputClass}
+					{selectClass}
+					model={config.metadata.translation?.openai?.model}
+					defaultModel="gpt-4o-mini"
+					placeholder="gpt-4o-mini"
+					baseUrl={config.metadata.translation?.openai?.base_url ?? ''}
+					models={translationModelOptions}
+					fetching={fetchingTranslationModels}
+					fetchDisabled={
+						fetchingTranslationModels ||
+						!(config.metadata.translation?.openai?.base_url ?? '').trim() ||
+						!(config.metadata.translation?.openai?.api_key ?? '').trim()
+					}
+					onfetch={fetchTranslationModels}
+					onselect={(value) => {
+						config.metadata.translation!.openai!.model = value;
+					}}
+					oninput={(value) => {
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.openai) config.metadata.translation!.openai = {};
+						config.metadata.translation!.openai.model = value.trim();
+					}}
+				/>
 
 				<FormPasswordInput
 					label={m.settings_translation_api_key_label()}
@@ -189,50 +171,31 @@
 					}}
 				/>
 
-				<div class="py-4 border-b border-border">
-					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-openai_compatible-model-select">{m.settings_translation_model_label()}</label>
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={fetchTranslationModels}
-							disabled={
-								fetchingTranslationModels ||
-								!(config.metadata.translation?.['openai_compatible']?.base_url ?? '').trim()
-							}
-						>
-							{#snippet children()}
-								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
-							{/snippet}
-						</Button>
-					</div>
-
-					{#if translationModelOptions.length > 0}
-						<select id="translation-openai_compatible-model-select" bind:value={config.metadata.translation!['openai_compatible']!.model} class={selectClass}>
-							{#each translationModelOptions as modelName}
-								<option value={modelName}>{modelName}</option>
-							{/each}
-						</select>
-						<p class="text-xs text-muted-foreground mt-1">
-							{m.settings_translation_models_loaded({ url: config.metadata.translation?.['openai_compatible']?.base_url ?? '' })}
-						</p>
-					{/if}
-
-					<input
-						id="translation-openai_compatible-model-input"
-						type="text"
-						value={config.metadata.translation?.['openai_compatible']?.model ?? ''}
-						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
-							if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
-							config.metadata.translation!['openai_compatible'].model = e.currentTarget.value.trim();
-						}}
-						class="{inputClass} mt-3"
-						placeholder="llama3"
-					/>
-					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
-				</div>
+				<TranslationModelPicker
+					selectId="translation-openai_compatible-model-select"
+					inputId="translation-openai_compatible-model-input"
+					{inputClass}
+					{selectClass}
+					model={config.metadata.translation?.['openai_compatible']?.model}
+					defaultModel=""
+					placeholder="llama3"
+					baseUrl={config.metadata.translation?.['openai_compatible']?.base_url ?? ''}
+					models={translationModelOptions}
+					fetching={fetchingTranslationModels}
+					fetchDisabled={
+						fetchingTranslationModels ||
+						!(config.metadata.translation?.['openai_compatible']?.base_url ?? '').trim()
+					}
+					onfetch={fetchTranslationModels}
+					onselect={(value) => {
+						config.metadata.translation!['openai_compatible']!.model = value;
+					}}
+					oninput={(value) => {
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!['openai_compatible']) config.metadata.translation!['openai_compatible'] = {} as OpenAICompatibleTranslationConfigType;
+						config.metadata.translation!['openai_compatible'].model = value.trim();
+					}}
+				/>
 
 				<FormPasswordInput
 					label={m.settings_translation_openai_compatible_api_key_label()}
@@ -273,51 +236,32 @@
 					}}
 				/>
 
-				<div class="py-4 border-b border-border">
-					<div class="flex items-center justify-between mb-2 gap-2">
-						<label class="block text-sm font-medium" for="translation-anthropic-model-select">{m.settings_translation_model_label()}</label>
-						<Button
-							variant="outline"
-							size="sm"
-							onclick={fetchTranslationModels}
-							disabled={
-								fetchingTranslationModels ||
-								!(config.metadata.translation?.anthropic?.base_url ?? '').trim() ||
-								!(config.metadata.translation?.anthropic?.api_key ?? '').trim()
-							}
-						>
-							{#snippet children()}
-								<RefreshCw class={`h-4 w-4 mr-2 ${fetchingTranslationModels ? 'animate-spin' : ''}`} />
-								{fetchingTranslationModels ? m.settings_translation_fetching() : m.settings_translation_fetch_models()}
-							{/snippet}
-						</Button>
-					</div>
-
-					{#if translationModelOptions.length > 0}
-						<select id="translation-anthropic-model-select" bind:value={config.metadata.translation!.anthropic!.model} class={selectClass}>
-							{#each translationModelOptions as modelName}
-								<option value={modelName}>{modelName}</option>
-							{/each}
-						</select>
-						<p class="text-xs text-muted-foreground mt-1">
-							{m.settings_translation_models_loaded({ url: config.metadata.translation?.anthropic?.base_url ?? '' })}
-						</p>
-					{/if}
-
-					<input
-						id="translation-anthropic-model-input"
-						type="text"
-						value={config.metadata.translation?.anthropic?.model ?? ''}
-						oninput={(e) => {
-							if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
-							if (!config.metadata.translation!.anthropic) config.metadata.translation!.anthropic = {} as AnthropicTranslationConfigType;
-							config.metadata.translation!.anthropic.model = e.currentTarget.value.trim();
-						}}
-						class="{inputClass} mt-3"
-						placeholder="claude-sonnet-4-20250514"
-					/>
-					<p class="text-xs text-muted-foreground mt-1">{m.settings_translation_manual_override()}</p>
-				</div>
+				<TranslationModelPicker
+					selectId="translation-anthropic-model-select"
+					inputId="translation-anthropic-model-input"
+					{inputClass}
+					{selectClass}
+					model={config.metadata.translation?.anthropic?.model}
+					defaultModel=""
+					placeholder="claude-sonnet-4-20250514"
+					baseUrl={config.metadata.translation?.anthropic?.base_url ?? ''}
+					models={translationModelOptions}
+					fetching={fetchingTranslationModels}
+					fetchDisabled={
+						fetchingTranslationModels ||
+						!(config.metadata.translation?.anthropic?.base_url ?? '').trim() ||
+						!(config.metadata.translation?.anthropic?.api_key ?? '').trim()
+					}
+					onfetch={fetchTranslationModels}
+					onselect={(value) => {
+						config.metadata.translation!.anthropic!.model = value;
+					}}
+					oninput={(value) => {
+						if (!config.metadata.translation) config.metadata.translation = {} as TranslationConfigType;
+						if (!config.metadata.translation!.anthropic) config.metadata.translation!.anthropic = {} as AnthropicTranslationConfigType;
+						config.metadata.translation!.anthropic.model = value.trim();
+					}}
+				/>
 
 				<FormPasswordInput
 					label={m.settings_translation_api_key_label()}

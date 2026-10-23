@@ -157,14 +157,14 @@ func TestActressCommand_MergeInteractive(t *testing.T) {
 		"--source", strconv.FormatUint(uint64(source.ID), 10),
 		"--yes",
 	})
-	rootCmd.SetIn(strings.NewReader("s\n"))
+	rootCmd.SetIn(strings.NewReader("\ns\n\n\n\n"))
 
 	stdout, _ := captureOutput(t, func() {
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 	})
 
-	assert.Contains(t, stdout, "Detected 1 conflicting field")
+	assert.Contains(t, stdout, "Reviewing 5 scalar field")
 	assert.Contains(t, stdout, "Merged actress")
 
 	cfg, err := config.Load(configPath)
@@ -267,7 +267,7 @@ func TestActressImport_WithIDs(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	assert.Contains(t, stdout, "Imported: 2")
+	assert.Contains(t, stdout, "Imported: 1")
 
 	cfg, err := config.Load(configPath)
 	require.NoError(t, err)

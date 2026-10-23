@@ -711,5 +711,17 @@
   "TUIWorkers": {
     "description": "Running and total worker counts shown in the header",
     "other": "Workers: {{.Running}}/{{.Total}}"
+  },
+  "TUIActressMergePolicy": {
+    "description": "TUIActressMergePolicy",
+    "other": "Policy: {{.Policy}} (p: toggle; d: use policy)"
+  },
+  "TUIActressMergeResultValue": {
+    "description": "TUIActressMergeResultValue",
+    "other": "Result:"
+  },
+  "TUIActressMergeSourceDeletion": {
+    "description": "TUIActressMergeSourceDeletion",
+    "other": "Source is deleted. Any unselected source DMM ID is discarded."
   }
 }

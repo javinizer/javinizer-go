@@ -1,4 +1,13 @@
 {
+  "actresses_merge_policy": "合併欄位策略",
+  "actresses_merge_policy_fill_empty": "用來源值填入目標的空白欄位",
+  "actresses_merge_policy_preserve_target": "保留目標值，包括空值",
+  "actresses_merge_policy_help": "除非為某個欄位明確選擇目標值或來源值，否則將套用此策略。合併前請檢查所有結果值。",
+  "actresses_merge_source_deleted": "合併後將刪除來源女優 #{id}。影片關聯和別名將合併至目標記錄。",
+  "actresses_merge_discards_dmm": "保留 DMM ID 0 將捨棄來源 DMM ID {id}。若要保留該 ID，請選擇來源值。",
+  "actresses_merge_use_policy": "使用策略（{decision}）",
+  "actresses_merge_result": "結果：{value}",
+  "actresses_merge_review_fields": "檢查 #{source} → #{target} 的合併結果",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "progress_batch_completed_with_skips": "已套用 {count} 個，略過 {skipped} 個，失敗 {failed} 個",
   "review_video_outcome_installed": "已安裝新影片",
@@ -121,7 +130,7 @@
   "actresses_queue_remaining": "佇列：剩餘 {count} 項",
   "actresses_review_conflicts": "檢閱 #{source} → #{target} 的衝突",
   "actresses_search_label": "搜尋女優",
-  "actresses_search_placeholder": "以英文名稱或日文名稱搜尋",
+  "actresses_search_placeholder": "按英文名、日文名或 DMM ID 搜尋",
   "actresses_select_at_least_two": "請至少選取 2 位女優以合併",
   "actresses_select_for_merge_aria": "選取女優以合併",
   "actresses_select_page": "選取整頁",
@@ -2705,5 +2714,13 @@
   "review_credit_review_before_apply": "請先檢查目前衝突。沒有經過驗證的操作設定時無法重試；開始任何新操作前，請檢查工作和設定。",
   "review_credit_panel_title": "女優演職員資訊衝突",
   "review_credit_panel_guidance": "比較每項目前衝突的擷取值和目錄值，然後選擇適當的可用解決方式。解決衝突不會自動重試操作或重新開啟失敗工作。",
-  "review_credit_none_open": "最新檢查未發現未解決的女優演職員資訊衝突。上方的失敗記錄屬於之前的操作。繼續前請檢查工作是否可重試。"
+  "review_credit_none_open": "最新檢查未發現未解決的女優演職員資訊衝突。上方的失敗記錄屬於之前的操作。繼續前請檢查工作是否可重試。",
+  "actresses_filter_label": "篩選女優",
+  "actresses_filter_all": "所有女優",
+  "actresses_filter_missing_dmm": "缺少 DMM ID",
+  "actresses_filter_has_dmm": "有 DMM ID",
+  "actresses_filter_missing_thumbnail": "缺少縮圖",
+  "actresses_filter_missing_japanese_name": "缺少日文名",
+  "actresses_filter_japanese_name_only": "僅有日文名",
+  "actresses_filter_missing_metadata": "中繼資料不完整"
 }
