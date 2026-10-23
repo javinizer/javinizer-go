@@ -95,9 +95,19 @@ func TestNativeStagingModeProofRefusesUnknownAndSpecialBits(t *testing.T) {
 
 	file, err := os.Create(filepath.Join(t.TempDir(), "stage"))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = file.Close() })
 	for _, special := range []os.FileMode{os.ModeSetuid, os.ModeSetgid, os.ModeSticky} {
-		require.NoError(t, file.Chmod(0o600|special))
-		require.False(t, nativeStagingModeMatches(file, 0o600), "chmod must still clear special bits")
+		t.Run(special.String(), func(t *testing.T) {
+			require.NoError(t, file.Chmod(0o600|special))
+			info, err := file.Stat()
+			require.NoError(t, err)
+			require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			t.Logf("requested special bit %v; handle mode %v", special, info.Mode())
+			if info.Mode()&special == 0 {
+				t.Skipf("environment did not retain requested special bit %v", special)
+			}
+			require.False(t, nativeStagingModeMatches(file, 0o600), "chmod must still clear special bits present on the handle")
+		})
 	}
 	require.NoError(t, file.Chmod(0o600))
 	require.True(t, nativeStagingModeMatches(file, 0o600))
