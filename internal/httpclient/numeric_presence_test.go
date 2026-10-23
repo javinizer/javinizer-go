@@ -33,3 +33,16 @@ func TestScraperClientNumericPresence(t *testing.T) {
 		})
 	}
 }
+
+func TestNumericPresenceInitPreservesOptInExclusions(t *testing.T) {
+	var settings models.ScraperSettings
+	require.NoError(t, json.Unmarshal([]byte(`{"retry_count":0,"cookies":{"session":"not-automatic"},"use_flaresolverr":true}`), &settings))
+	result := InitScraperClient(&settings, nil, models.FlareSolverrConfig{Enabled: true, URL: "http://127.0.0.1:8191"})
+	require.Zero(t, result.Client.RetryCount)
+	require.Empty(t, result.Client.Header.Get("Cookie"))
+	require.Nil(t, result.FlareSolverr)
+	opted := InitScraperClient(&settings, nil, models.FlareSolverrConfig{}, WithScraperCookies(map[string]string{"session": "explicit"}))
+	require.Equal(t, "session=explicit", opted.Client.Header.Get("Cookie"))
+	require.Equal(t, "not-automatic", settings.Cookies["session"])
+	require.True(t, settings.UseFlareSolverr)
+}
