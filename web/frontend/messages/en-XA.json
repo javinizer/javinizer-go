@@ -1,4 +1,13 @@
 {
+  "actresses_merge_policy": "[ Merge field policy ]",
+  "actresses_merge_policy_fill_empty": "[ Fill empty target fields from source ]",
+  "actresses_merge_policy_preserve_target": "[ Preserve target, including blanks ]",
+  "actresses_merge_policy_help": "[ The policy applies unless you choose a target or source value for a field. Review every resulting value before merging. ]",
+  "actresses_merge_source_deleted": "[ Source actress #{id} will be deleted after merging. Movie links and aliases will be combined into the target. ]",
+  "actresses_merge_discards_dmm": "[ Keeping DMM ID 0 discards the source DMM ID {id}. Choose the source value if you want to retain it. ]",
+  "actresses_merge_use_policy": "[ Use policy ({decision}) ]",
+  "actresses_merge_result": "[ Result: {value} ]",
+  "actresses_merge_review_fields": "[ Review resulting fields for #{source} → #{target} ]",
   "review_retry_operation_unknown": "[Ţĥē ōŕīĝīñāļ āƥƥļŷ āţţēɱƥţ ōŕ şēţţīñĝş ċōūļď ñōţ ƀē vēŕīƒīēď, şō Ŕēţŕŷ Ƒāīļēď īş ďīşāƀļēď. Ŕēƒŕēşĥ ţĥē ĵōƀ, ŕēvīēŵ ţĥē şēţţīñĝş, ţĥēñ ūşē Āƥƥļŷ ţō şţāŕţ ā ñēŵ āţţēɱƥţ.]",
   "review_retry_storage_unavailable": "[The previous retry settings could not be replaced or removed, so no new operation was started. Free browser storage or restore access, then review the file operation and try Apply again.]",
   "$schema": "https://inlang.com/schema/inlang-message-format",

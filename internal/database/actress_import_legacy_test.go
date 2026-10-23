@@ -316,3 +316,44 @@ func TestImportDefaultUserCandidateCannotBecomeLegacyEligible(t *testing.T) {
 	require.Equal(t, "protected", result.Outcome)
 	require.Equal(t, in.FirstName, incoming.FirstName)
 }
+
+func TestImportProvenanceMergePoliciesAndExplicitResolutions(t *testing.T) {
+	for _, policy := range []string{MergePolicyFillEmpty, MergePolicyPreserveTarget} {
+		for _, resolution := range []string{"", MergeResolutionTarget, MergeResolutionSource} {
+			t.Run(policy+"/"+resolution, func(t *testing.T) {
+				db := newCreditTestDB(t)
+				repo := NewActressRepository(db)
+				target := models.Actress{FirstName: "Target"}
+				require.NoError(t, repo.ImportUpsert(t.Context(), &target))
+				source := models.Actress{FirstName: "Source", LastName: "Family"}
+				require.NoError(t, repo.ImportUpsert(t.Context(), &source))
+				options := ActressMergeOptions{Policy: policy}
+				if resolution != "" {
+					options.Resolutions = map[string]string{colFirstName: resolution, colLastName: resolution}
+				}
+				_, err := repo.MergeWithOptions(t.Context(), target.ID, source.ID, options)
+				require.NoError(t, err)
+				wantFirst, wantLast := "Target", ""
+				if resolution == MergeResolutionSource {
+					wantFirst, wantLast = "Source", "Family"
+				} else if resolution == "" && policy == MergePolicyFillEmpty {
+					wantLast = "Family"
+				}
+				before, err := repo.FindByID(t.Context(), target.ID)
+				require.NoError(t, err)
+				require.Equal(t, wantFirst, before.FirstName)
+				require.Equal(t, wantLast, before.LastName)
+				requireImportProvenance(t, db, target.ID, importNamesRevoked)
+				requireImportProvenance(t, db, source.ID, importNamesLegacy)
+				in := models.Actress{ID: target.ID, FirstName: "Forbidden", LastName: "Forbidden", Aliases: before.Aliases}
+				result, err := repo.ImportUpsertWithOptions(t.Context(), &in, ActressImportOptions{OverwriteNames: true, OverwriteLegacyNames: true})
+				require.NoError(t, err)
+				require.Equal(t, "protected", result.Outcome)
+				require.Equal(t, before.FirstName, in.FirstName)
+				require.Equal(t, before.LastName, in.LastName)
+				require.Equal(t, before.Origin, in.Origin)
+				requireImportProvenance(t, db, target.ID, importNamesRevoked)
+			})
+		}
+	}
+}

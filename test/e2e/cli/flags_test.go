@@ -126,6 +126,9 @@ var commandFlags = map[string][]flagSpec{
 		{"source", ""},
 		{"non-interactive", ""},
 		{"prefer", ""},
+		{"policy", ""},
+		{"resolve", ""},
+		{"dry-run", ""},
 		{"yes", "y"},
 	},
 	"word import": {

@@ -268,11 +268,13 @@
 	bind:mergePrimaryId={store.mergePrimaryId}
 	mergeSourceQueue={store.mergeSourceQueue}
 	mergeCurrentSourceId={store.mergeCurrentSourceId}
-	bind:mergeResolutions={store.mergeResolutions}
+	mergeResolutions={store.mergeResolutions}
+	mergePolicy={store.mergePolicy}
+	onSetMergePolicy={store.setMergePolicy}
 	mergePreview={store.mergePreview}
 	mergePreviewFetching={store.mergePreviewQuery.isFetching}
 	mergeSummary={store.mergeSummary}
-	mergePending={store.mergeActressMutation.isPending}
+	mergePending={store.mergePending}
 	getActressLabelByID={(id) => store.getActressLabelByID(id, firstNameOrder, japaneseNames)}
 	onCloseMergeModal={store.closeMergeModal}
 	onResetMergeQueueAndPreview={store.resetMergeQueueAndPreview}

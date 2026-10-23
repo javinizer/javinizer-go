@@ -1,4 +1,13 @@
 {
+  "actresses_merge_policy": "合併欄位策略",
+  "actresses_merge_policy_fill_empty": "用來源值填入目標的空白欄位",
+  "actresses_merge_policy_preserve_target": "保留目標值，包括空值",
+  "actresses_merge_policy_help": "除非為某個欄位明確選擇目標值或來源值，否則將套用此策略。合併前請檢查所有結果值。",
+  "actresses_merge_source_deleted": "合併後將刪除來源女優 #{id}。影片關聯和別名將合併至目標記錄。",
+  "actresses_merge_discards_dmm": "保留 DMM ID 0 將捨棄來源 DMM ID {id}。若要保留該 ID，請選擇來源值。",
+  "actresses_merge_use_policy": "使用策略（{decision}）",
+  "actresses_merge_result": "結果：{value}",
+  "actresses_merge_review_fields": "檢查 #{source} → #{target} 的合併結果",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "actresses_actress_created": "已建立女優",
   "actresses_actress_deleted": "已刪除女優",

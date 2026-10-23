@@ -13,7 +13,8 @@ import (
 
 func writeActressMergeError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, database.ErrActressMergeInvalidID),
+	case errors.Is(err, database.ErrActressMergeInvalidPolicy),
+		errors.Is(err, database.ErrActressMergeInvalidID),
 		errors.Is(err, database.ErrActressMergeSameID),
 		errors.Is(err, database.ErrActressMergeInvalidField),
 		errors.Is(err, database.ErrActressMergeInvalidDecision):
@@ -48,7 +49,7 @@ func previewActressMerge(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 
-		preview, err := deps.ActressRepo.PreviewMerge(c.Request.Context(), req.TargetID, req.SourceID)
+		preview, err := database.PreviewActressMerge(c.Request.Context(), deps.ActressRepo, req.TargetID, req.SourceID, database.ActressMergeOptions{Policy: req.Policy, Resolutions: req.Resolutions})
 		if err != nil {
 			writeActressMergeError(c, err)
 			return
@@ -65,6 +66,8 @@ func previewActressMerge(deps ActressDeps) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, contracts.ActressMergePreviewResponse{
+			Policy:             preview.Policy,
+			Fields:             preview.Fields,
 			Target:             preview.Target,
 			Source:             preview.Source,
 			ProposedMerged:     preview.ProposedMerged,
@@ -95,7 +98,7 @@ func mergeActresses(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 
-		result, err := deps.ActressRepo.Merge(c.Request.Context(), req.TargetID, req.SourceID, req.Resolutions)
+		result, err := database.ApplyActressMerge(c.Request.Context(), deps.ActressRepo, req.TargetID, req.SourceID, database.ActressMergeOptions{Policy: req.Policy, Resolutions: req.Resolutions})
 		if err != nil {
 			writeActressMergeError(c, err)
 			return

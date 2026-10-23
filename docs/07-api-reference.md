@@ -116,6 +116,12 @@ curl "http://localhost:8765/api/v1/actresses/search?q=Sakura"
 ```
 
 **Example - Merge preview:**
+Both merge endpoints accept optional `policy` (`fill_empty`, the backwards-compatible default, or `preserve_target`) and `resolutions` mapping scalar field names to `target` or `source`. Unknown policies/fields/decisions return 400. Explicit decisions override the policy, including intentional blank strings or DMM ID zero.
+
+Preview adds `policy` and `fields` alongside the existing `conflicts`, `default_resolutions`, and `proposed_merged` contract. `fields` contains all five resolvable scalars (`dmm_id`, `first_name`, `last_name`, `japanese_name`, `thumb_url`), each with `field`, `target_value`, `source_value`, `default_resolution` (policy alone) and `result_value` (including explicit decisions). Blank and zero values are included. Legacy conflicts remain limited to differing nonempty values.
+
+Execution recomputes decisions against transaction-current rows rather than persisting preview values. The source is deleted atomically with the merge; retaining target DMM ID zero may discard a positive source DMM ID. The policy does not freeze aliases, credits, actor identity, ownership, origin, quarantine or associations, whose existing protected semantics remain unchanged.
+
 ```bash
 curl -X POST http://localhost:8765/api/v1/actresses/merge/preview \
   -H "Content-Type: application/json" \
@@ -147,6 +153,8 @@ curl -b cookies.txt http://localhost:8765/api/v1/actresses/export -o actresses.j
 ```
 
 `GET /api/v1/actresses/export` streams the entire actress table as a JSON array with `Content-Type: application/json`. Rows are emitted in chunks of 1000 so large libraries (100k+ actresses) do not need to fit in memory. The output is a plain JSON array of actress objects, suitable for backup or migration.
+
+The inline `aliases` field (for example, `Stage A|Stage B`) is stored metadata only. Importing it does not create trusted `actress_aliases` mappings, participate in identity matching or candidate quarantine, or move movie credits. Curated `actress_aliases` mappings are separate resolver evidence and must be managed deliberately. The field is preserved in actress records and exports; not every UI displays it.
 
 **Example - Import actresses:**
 ```bash
