@@ -16,8 +16,17 @@ type Rating struct {
 	Votes int     `json:"votes"`
 }
 
-// ScraperResult represents the raw data returned by a scraper
+// CastNameEvidence preserves source display text for explicitly requested enrichment.
+// It is transient, never part of raw JSON or an identity binding.
+type CastNameEvidence struct {
+	SourceID       string
+	DisplayName    string
+	ManualOverride bool
+}
+
+// ScraperResult represents the raw data returned by a scraper.
 type ScraperResult struct {
+	CastNameEvidence []CastNameEvidence `json:"-"`
 	Source           string             `json:"source"`
 	SourceURL        string             `json:"source_url"`
 	Language         string             `json:"language"` // ISO 639-1 code: en, ja, zh, etc.
@@ -52,6 +61,9 @@ func (r *ScraperResult) Clone() *ScraperResult {
 		return nil
 	}
 	copied := *r
+	if r.CastNameEvidence != nil {
+		copied.CastNameEvidence = append([]CastNameEvidence{}, r.CastNameEvidence...)
+	}
 	if r.ReleaseDate != nil {
 		t := *r.ReleaseDate
 		copied.ReleaseDate = &t

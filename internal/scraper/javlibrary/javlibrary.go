@@ -3,6 +3,7 @@ package javlibrary
 import (
 	"context"
 	"fmt"
+	htmltext "html"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -513,7 +514,7 @@ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, lang
 	result.Label = s.extractField(html, "video_label")
 	result.Series = s.extractSeries(html)
 	result.Genres = s.extractGenres(html)
-	result.Actresses = s.extractActresses(html)
+	result.Actresses, result.CastNameEvidence = s.extractActressesWithEvidence(html)
 
 	// Description from video_review div
 	result.Description = s.extractDescription(html)
@@ -712,13 +713,14 @@ func (s *scraper) extractGenres(html string) []string {
 	return genres
 }
 
-// extractActresses extracts actress info from the video_cast div
-func (s *scraper) extractActresses(html string) []models.ActressInfo {
+// extractActressesWithEvidence extracts cast names and transient source metadata.
+func (s *scraper) extractActressesWithEvidence(html string) ([]models.ActressInfo, []models.CastNameEvidence) {
 	// Cast is in: <span class="star"><a href="..." rel="tag">ActressName</a></span>
 	re := regexp.MustCompile(`class="star"[^>]*><a([^>]*)>([^<]+)</a>`)
 	matches := re.FindAllStringSubmatch(html, -1)
 
 	var actresses []models.ActressInfo
+	var evidence []models.CastNameEvidence
 	seen := make(map[string]bool)
 	for _, m := range matches {
 		if len(m) > 2 {
@@ -732,6 +734,7 @@ func (s *scraper) extractActresses(html string) []models.ActressInfo {
 			}
 			if name != "" && !seen[key] {
 				seen[key] = true
+				evidence = append(evidence, models.CastNameEvidence{SourceID: castSourceID(m[1]), DisplayName: htmltext.UnescapeString(name), ManualOverride: overridden})
 				// Map the displayed script, not the page language: localized
 				// pages can still contain either native or romanized cast names.
 				// Preserve native text as supplied; do not infer romanization or
@@ -764,7 +767,7 @@ func (s *scraper) extractActresses(html string) []models.ActressInfo {
 			}
 		}
 	}
-	return actresses
+	return actresses, evidence
 }
 
 // extractDescription extracts the movie description from the page.

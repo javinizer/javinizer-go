@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/javinizer/javinizer-go/internal/catalogname"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/formatter"
@@ -65,7 +66,8 @@ func NewCommand() *cobra.Command {
 	})
 	scrapeCmd.Flags().StringSliceP("scrapers", "s", nil, "Comma-separated subset of enabled scrapers to use (e.g., 'r18dev,dmm'); scraper must be enabled in config.yaml")
 	scrapeCmd.Flags().BoolP("force", "f", false, "Force refresh metadata from scrapers (clear cache)")
-	scrapeCmd.Flags().String("output", "text", "Output format: 'text' (default) or 'json'. JSON mode requires --scrapers with exactly one scraper and is incompatible with --force. In JSON mode, stdout contains only the raw ScraperResult or error envelope; all logs go to stderr.")
+	scrapeCmd.Flags().String("output", "text", "Output format: 'text' (default) or 'json'. JSON mode requires --scrapers with exactly one scraper and is incompatible with --force. In JSON mode, stdout contains the raw ScraperResult (or the explicit --catalog-names enriched envelope) or an error envelope; all logs go to stderr.")
+	scrapeCmd.Flags().String("catalog-names", "", "Opt-in JavLibrary JSON name enrichment from an existing SQLite catalog file; emits raw, enriched and decisions without changing the catalog")
 	scrapeCmd.Flags().Bool("scrape-actress", false, "Enable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("no-scrape-actress", false, "Disable actress scraping (overrides config)")
 	scrapeCmd.Flags().Bool("browser", false, "Enable browser mode for DMM video pages (overrides config)")
@@ -93,6 +95,7 @@ func malformedValueFlag(args []string) string {
 		"--output":          {},
 		"--browser-timeout": {},
 		"--config":          {},
+		"--catalog-names":   {},
 	}
 	for i, arg := range args {
 		if _, ok := requiresValue[arg]; !ok {
@@ -260,6 +263,9 @@ func runScrape(cmd *cobra.Command, args []string, configFile string) error {
 	if outputFlag != "text" {
 		return fmt.Errorf("invalid output value: must be 'text' or 'json'")
 	}
+	if cmd.Flags().Changed("catalog-names") {
+		return fmt.Errorf("--catalog-names requires --output json and --scrapers javlibrary")
+	}
 	movie, results, err := Run(cmd.Context(), cmd, args, configFile, nil)
 	if err != nil {
 		return err
@@ -278,6 +284,20 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		return ErrJSONExit
 	}
 
+	catalogPath, _ := cmd.Flags().GetString("catalog-names")
+	if cmd.Flags().Changed("catalog-names") && (strings.TrimSpace(catalogPath) == "" || scrapersFlag[0] != "javlibrary") {
+		writeJSONError(cmd, unknownErrorEnvelope("--catalog-names requires a non-empty SQLite file path and --scrapers javlibrary"))
+		return ErrJSONExit
+	}
+	var catalog *catalogname.Snapshot
+	if catalogPath != "" {
+		var err error
+		catalog, err = catalogname.Load(cmd.Context(), catalogPath)
+		if err != nil {
+			writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to read name catalog: %v", err)))
+			return ErrJSONExit
+		}
+	}
 	id := args[0]
 
 	// B3: Respect JAVINIZER_CONFIG env var like initConfig() does.
@@ -377,7 +397,11 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		return ErrJSONExit
 	}
 
-	data, err := marshalScraperResult(result)
+	var output any = result
+	if catalog != nil {
+		output = enrichCatalogNames(result, catalog)
+	}
+	data, err := marshalScraperResult(output)
 	if err != nil {
 		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to marshal result: %v", err)))
 		return ErrJSONExit
