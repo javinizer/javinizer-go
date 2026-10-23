@@ -155,7 +155,12 @@ func TestClearDump_ConcurrentStatusKeepsErrorPairConsistent(t *testing.T) {
 		return nil
 	}
 	clearDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() { clearDone <- clearDumpResponse(h) }()
+	clearExited := make(chan struct{})
+	go func() {
+		defer close(clearExited)
+		clearDone <- clearDumpResponse(h)
+	}()
+	defer func() { unblock(); <-clearExited }()
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
@@ -172,8 +177,12 @@ func TestClearDump_ConcurrentStatusKeepsErrorPairConsistent(t *testing.T) {
 	const readers = 8
 	start := make(chan struct{})
 	errs := make(chan error, readers)
+	var readersDone sync.WaitGroup
+	defer readersDone.Wait()
 	for range readers {
+		readersDone.Add(1)
 		go func() {
+			defer readersDone.Done()
 			<-start
 			for range 100 {
 				w := dumpStatusRecorder(h)
