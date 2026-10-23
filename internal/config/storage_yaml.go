@@ -81,12 +81,32 @@ func mergeYAMLNode(dst, src *yaml.Node) {
 		}
 		mergeYAMLNode(dst.Content[0], src.Content[0])
 		pruneMetadataPriorityFields(dst, src)
+		reconcileJavLibraryNameOverrides(dst, src)
 		return
 	}
 
 	replacement := cloneYAMLNode(src)
 	applyNodeMetadataPreservingComments(dst, replacement)
 	*dst = *replacement
+}
+
+// Full Save preserves unknown YAML generally, but performer rules are an explicit
+// replacement map: a removed rule must not be resurrected from the old file.
+func reconcileJavLibraryNameOverrides(dst, src *yaml.Node) {
+	dstScraper := navigateToMapping(dst, "scrapers", "javlibrary")
+	if dstScraper == nil || dstScraper.Kind != yaml.MappingNode {
+		return
+	}
+	index := findMappingValueIndex(dstScraper, "actress_name_overrides")
+	if index == -1 {
+		return
+	}
+	rules := navigateToMapping(src, "scrapers", "javlibrary", "actress_name_overrides")
+	if rules == nil || rules.Kind != yaml.MappingNode || len(rules.Content) == 0 {
+		dstScraper.Content = append(dstScraper.Content[:index-1], dstScraper.Content[index+1:]...)
+		return
+	}
+	reconcileMappings(dstScraper.Content[index], rules, nil, nil, "scrapers.javlibrary.actress_name_overrides")
 }
 
 func navigateToMapping(root *yaml.Node, keys ...string) *yaml.Node {

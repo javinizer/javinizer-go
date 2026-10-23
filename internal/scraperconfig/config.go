@@ -426,6 +426,9 @@ type ScraperSettings struct {
 	APIKey                 string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	RespectRetryAfter      *bool             `yaml:"respect_retry_after,omitempty" json:"respect_retry_after,omitempty"`
 
+	// Optional JavLibrary-only, user-supplied performer name splits.
+	ActressNameOverrides ActressNameOverrides `yaml:"actress_name_overrides,omitempty" json:"actress_name_overrides,omitempty"`
+
 	rateLimitExplicit  bool `yaml:"-" json:"-"`
 	timeoutExplicit    bool `yaml:"-" json:"-"`
 	retryCountExplicit bool `yaml:"-" json:"-"`
@@ -442,6 +445,9 @@ type ScraperSettings struct {
 func (s ScraperSettings) MarshalYAML() (interface{}, error) {
 	result := make(map[string]any)
 
+	if len(s.ActressNameOverrides) > 0 {
+		result["actress_name_overrides"] = s.ActressNameOverrides
+	}
 	result["enabled"] = s.Enabled
 	result["language"] = s.Language
 	if s.Timeout != 0 || s.timeoutExplicit {
@@ -519,6 +525,7 @@ func (s *ScraperSettings) Clone() ScraperSettings {
 		cp.ScrapeActress = &val
 	}
 	cp.Cookies = maps.Clone(cp.Cookies)
+	cp.ActressNameOverrides = maps.Clone(cp.ActressNameOverrides)
 	if cp.ExtraPlaceholderHashes != nil {
 		slc := make([]string, len(cp.ExtraPlaceholderHashes))
 		copy(slc, cp.ExtraPlaceholderHashes)
@@ -541,8 +548,8 @@ func (s *ScraperSettings) Clone() ScraperSettings {
 // enabled/disabled choice must always be preserved.
 // Proxy and DownloadProxy are excluded because they are complex
 // structs where "nil means inherit global" is the desired behavior.
-// Cookies, ExtraPlaceholderHashes, and boolean fields with zero-value
-// semantics (UseFlareSolverr, UseBrowser, ScrapeBonusScreens) are
+// ActressNameOverrides, Cookies, ExtraPlaceholderHashes, and boolean fields
+// with zero-value semantics (UseFlareSolverr, UseBrowser, ScrapeBonusScreens) are
 // also excluded because their zero values are meaningful.
 func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
 	if defaults.Language != "" && s.Language == "" {
@@ -650,6 +657,10 @@ func (s *ScraperSettings) ShouldUseBrowser(globalEnabled bool) bool {
 func (s *ScraperSettings) Validate(scraperName string) error {
 	if s == nil {
 		return fmt.Errorf("%s: config is nil", scraperName)
+	}
+
+	if err := s.ActressNameOverrides.Validate(scraperName); err != nil {
+		return err
 	}
 
 	// Normalize language: trim whitespace and lowercase.

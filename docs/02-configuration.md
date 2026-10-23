@@ -205,6 +205,53 @@ scrapers:
     use_flaresolverr: false  # Enable to use global FlareSolverr for Cloudflare bypass
 ```
 
+#### Explicit cast-name splits
+
+JavLibrary mixes name-order conventions in English cast labels. A label alone does
+not reliably identify the given and family names, so Javinizer does not reverse
+all English names. To correct a known performer, configure an explicit mapping
+under that source's stable `vl_star.php?s=` performer ID:
+
+```yaml
+scrapers:
+  javlibrary:
+    language: en
+    actress_name_overrides:
+      aa6sc:
+        source_name: "Yorimoto Shiori"
+        first_name: "Shiori"
+        last_name: "Yorimoto"
+```
+
+This example is opt-in, not a built-in mapping. Both the performer ID and displayed
+`source_name` must match. Only whitespace is normalized; spelling and case must
+match. The supplied first/last fields must reconstruct the source label in either
+order. Explicit multi-word fields are supported without guessing their boundaries.
+Get the ID from the performer's cast link, not a movie ID or a DMM ID.
+
+The override applies to raw `scrape --output json` results as well as subsequent
+scrape processing, whenever the displayed label matches (regardless of page language). It performs no additional requests and changes no other source.
+Current relative links (`vl_star.php?s=...` or `/en/vl_star.php?s=...`, including
+other supported languages) are recognized. Missing or unexpected links, changed
+names, or unconfigured performers retain the existing parser behavior. Native
+Han/kana names still go to `japanese_name`; single-word stage names are unchanged.
+Mappings cannot rename a performer or supply identity identifiers.
+
+There are no default mappings. Set `actress_name_overrides: {}` or remove the field
+to clear them in a config file; an explicit empty object or null also clears them
+when replacing settings. This is a YAML/JSON configuration option, not a new
+per-performer settings form. Settings saves preserve it. It is rejected on other
+scrapers.
+
+This is not automatic name-order detection and does not repair historical rows.
+Verified database identities are not overwritten or promoted by a scrape. The
+existing resolver still prefers exact first/last matches, falling back to a unique
+reversed match only when no exact match exists. If both orders already identify
+different catalog entries, review those identities and any credit collisions
+before rescraping. User-owned credits, suppression, and name/order overrides retain
+their existing protections; this setting is not a request to merge or reassign them.
+
+
 ### JavDB Scraper
 
 JavDB can be useful as a supplemental source. It may require both proxy routing and FlareSolverr depending on your network/location.

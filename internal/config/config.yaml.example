@@ -174,6 +174,10 @@ scrapers:
     # Configure flaresolverr at scrapers.flaresolverr or at scraper level.
     javlibrary:
         enabled: false
+        # Optional guarded per-performer field splits; no default entries.
+        # See docs/02-configuration.md (Explicit cast-name splits).
+        # actress_name_overrides:
+        #     aa6sc: {source_name: "Yorimoto Shiori", first_name: "Shiori", last_name: "Yorimoto"}
         # Frontend scraper options:
         # language: en, ja, cn, tw
         language: ja  # Default Japanese
