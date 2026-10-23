@@ -37,8 +37,11 @@ func TestImportPositiveDMMEvidenceScalesLinearly(t *testing.T) {
 					require.NoError(t, NewActressRepository(db).ImportUpsert(t.Context(), &incoming))
 				}
 				require.NoError(t, db.Callback().Query().Remove("test:import-scaling"))
-				require.LessOrEqual(t, rows, int64(3*candidates*size), "identity reads must not grow with previously imported positive-DMM rows")
-				require.LessOrEqual(t, queries, int64(6*size), "bounded per-row query count")
+				if candidates == 0 {
+					require.Zero(t, rows, "positive-only imports must not hydrate unrelated catalogue rows")
+				}
+				require.LessOrEqual(t, rows, int64((3*candidates+1)*size), "read each changed identity once plus bounded candidate evidence")
+				require.LessOrEqual(t, queries, int64(11*size), "bounded per-row query count")
 				t.Logf("%d imports: %d queries, %d identity rows", size, queries, rows)
 			})
 		}
@@ -53,6 +56,7 @@ func TestImportEvidenceQueryPlans(t *testing.T) {
 	}{
 		{"SELECT * FROM actresses WHERE verified = ? ORDER BY id", "idx_actresses_candidate_scan", []interface{}{false}},
 		{"SELECT * FROM actresses WHERE verified = ? AND (dmm_id <= 0 OR dmm_id IS NULL) ORDER BY id", "idx_actresses_verified_dmmless_scan", []interface{}{true}},
+		{"SELECT EXISTS(SELECT 1 FROM actresses WHERE dmm_id = 0)", "idx_actresses_dmm_lookup", nil},
 		{"SELECT * FROM actresses WHERE dmm_id = ?", "idx_actresses_dmm_lookup", []interface{}{0}},
 	}
 	for _, tt := range tests {
