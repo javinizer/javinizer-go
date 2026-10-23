@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"maps"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/template"
 	"github.com/javinizer/javinizer-go/internal/worker/fscase"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/spf13/afero"
@@ -107,10 +109,11 @@ type jobConfig struct {
 // StartApply, Rescrape, Wait, markStarted) or JobRunner (Run, SetRunOptions).
 // BatchJob exposes only read accessors and attachLifecycleCallback().
 type BatchJob struct {
-	ID        models.JobID      `json:"id"`
-	mu        sync.RWMutex      `json:"-"`
-	lifecycle *JobLifecycle     `json:"-"` // Lifecycle state: status, timestamps, Done channel
-	results   resultstore.Store `json:"-"` // Result state: Results map, progress counters, files (sole result-state seam)
+	applyRetryFailures map[string]jobpersist.ApplyRetryFailure // protected by mu; never changes result revisions
+	ID                 models.JobID                            `json:"id"`
+	mu                 sync.RWMutex                            `json:"-"`
+	lifecycle          *JobLifecycle                           `json:"-"` // Lifecycle state: status, timestamps, Done channel
+	results            resultstore.Store                       `json:"-"` // Result state: Results map, progress counters, files (sole result-state seam)
 
 	// Retained on BatchJob (not mutex-protected state groups)
 	StartedAt          time.Time `json:"started_at"`
@@ -259,6 +262,7 @@ func (job *BatchJob) attachLifecycleCallback() {
 // snapshotForPersist — adding a new field changes
 // batchJobBase + batchJobSnapshot, not three separate methods.
 type batchJobSnapshot struct {
+	applyRetryFailures map[string]jobpersist.ApplyRetryFailure
 	batchJobBase
 
 	pruneVersion       uint64
@@ -291,6 +295,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 	defer job.mu.RUnlock()
 
 	return batchJobSnapshot{
+		applyRetryFailures: maps.Clone(job.applyRetryFailures),
 		pruneVersion:       job.pruneVersion,
 		envelopeGeneration: job.envelopeGeneration,
 		batchJobBase: batchJobBase{
@@ -334,6 +339,7 @@ func cloneTimePtr(src *time.Time) *time.Time {
 // GetStatus returns a thread-safe snapshot of the job's current status and results.
 func (job *BatchJob) GetStatus() *BatchJobStatus {
 	snapshot := job.snapshotFull()
+	projectApplyRetryFailures(&snapshot)
 	return &BatchJobStatus{
 		batchJobBase: snapshot.batchJobBase,
 		Results:      snapshot.results,

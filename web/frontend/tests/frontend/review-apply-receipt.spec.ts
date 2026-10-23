@@ -76,6 +76,8 @@ async function mockAPI(context: BrowserContext, update = false) {
 		generation: 0,
 		reply: 'accepted' as Reply,
 		posts: [] as (OrganizeRequest | UpdateRequest)[],
+		videoReviews: [] as OrganizeRequest[],
+		videoReviewError: false,
 		unexpected: [] as string[],
 	};
 	// Keep the frontend-only suite offline, including its otherwise reconnecting WS.
@@ -84,6 +86,17 @@ async function mockAPI(context: BrowserContext, update = false) {
 		const request = route.request();
 		const path = new URL(request.url()).pathname;
 		const method = request.method();
+		if (method === 'POST' && path === `/api/v1/batch/${JOB_ID}/video-collisions`) {
+			state.videoReviews.push(request.postDataJSON() as OrganizeRequest);
+			if (state.videoReviewError)
+				return route.fulfill({
+					status: 503,
+					json: { error: 'Synthetic video review unavailable' },
+				});
+			return route.fulfill({
+				json: { items: [], new: 1, replaced: 0, skipped: 0, unresolved: 0, same_file: 0 },
+			});
+		}
 		if (method === 'POST' && path === `/api/v1/batch/${JOB_ID}/${update ? 'update' : 'organize'}`) {
 			state.posts.push(request.postDataJSON() as OrganizeRequest | UpdateRequest);
 			// On rejected/unknown responses, this newer GET could belong to another tab.
@@ -160,6 +173,30 @@ async function configure(page: Page, operation: string) {
 	await page.getByRole('checkbox', { name: /Skip Media Download/ }).check();
 }
 
+test('failed video review blocks Apply without creating a receipt until an explicit successful refresh', async ({
+	page,
+	context,
+}) => {
+	const state = await mockAPI(context);
+	state.videoReviewError = true;
+	await page.goto(`/review/${JOB_ID}?view=detail`);
+	await configure(page, 'move');
+	await expect(
+		page.getByRole('alert').filter({ hasText: 'Synthetic video review unavailable' }),
+	).toBeVisible();
+	await expect(apply(page)).toBeDisabled();
+	expect(state.posts).toEqual([]);
+	expect(await recovery(page)).toBeNull();
+	state.videoReviewError = false;
+	await page.getByRole('button', { name: 'Review / refresh destinations', exact: true }).click();
+	await expect(apply(page)).toBeEnabled();
+	await apply(page).click();
+	await expect(retry(page)).toBeEnabled();
+	expect(state.posts).toHaveLength(1);
+	expect(JSON.parse((await recovery(page))!)).toMatchObject({ acceptedApplyGeneration: 1 });
+	expect(state.unexpected).toEqual([]);
+});
+
 for (const operation of ['move', 'copy', 'hardlink', 'softlink']) {
 	test(`accepted ${operation} receipt preserves original controls through retry, reload, and another retry`, async ({
 		page,
@@ -183,6 +220,12 @@ for (const operation of ['move', 'copy', 'hardlink', 'softlink']) {
 			operation === 'hardlink' ? 'hard' : operation === 'softlink' ? 'soft' : undefined,
 		);
 		expect(original).not.toHaveProperty('expected_apply_generation');
+		expect(state.videoReviews.length).toBeGreaterThan(0);
+		expect(state.videoReviews.at(-1)).toMatchObject({
+			destination: DESTINATION,
+			operation_mode: 'organize',
+			copy_only: operation !== 'move',
+		});
 		expect(JSON.parse((await recovery(page))!)).toMatchObject({
 			acceptedApplyGeneration: 1,
 			organizeOperation: operation,

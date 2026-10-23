@@ -506,6 +506,7 @@ See `.env.example` for Docker Compose configuration.
 | [Template System](./docs/04-template-system.md) | Output naming templates |
 | [Genre Management](./docs/05-genre-management.md) | Genre replacement rules |
 | [User Guide](./docs/14-user-guide.md) | Web UI workflows |
+| [Existing Video Destinations](./docs/video-collision-policy.md) | Review, skip, replace, recovery, and Undo |
 | [Architecture](./docs/16-architecture.md) | System architecture overview |
 | [Development](./docs/09-development.md) | Contributing and dev setup |
 | [Testing](./docs/12-testing-guide.md) | Testing practices and coverage |

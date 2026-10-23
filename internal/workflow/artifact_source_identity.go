@@ -147,7 +147,7 @@ func (s *artifactStage) deferredSourceProof() fsutil.VerifiedSourceProof {
 		if !admitted.matches(fs, path, info) {
 			return fmt.Errorf("%w: %s", errArtifactSourceChanged, path)
 		}
-		return nil
+		return s.verifyReviewedPayload(path, info)
 	}
 }
 

@@ -6,6 +6,7 @@ import type {
 	Movie,
 	ProgressMessage,
 	UpdateRequest,
+	ReviewApplyOverrides,
 } from '$lib/api/types';
 
 /**
@@ -68,6 +69,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 		setOrganizeStatus: [] as string[],
 		setOrganizeProgress: [] as number[],
 		toastSuccess: [] as string[],
+		toastInfo: [] as string[],
 		toastError: [] as string[],
 		navigateBrowse: 0,
 	};
@@ -98,7 +100,8 @@ function makeDeps(overrides: DepsOverrides = {}) {
 		clearWebSocketMessages: () => {},
 		toastSuccess: (message: string) => calls.toastSuccess.push(message),
 		toastError: (message: string) => calls.toastError.push(message),
-		toastInfo: () => {},
+		toastInfo: (message: string) => calls.toastInfo.push(message),
+		recordApplySuccess: vi.fn(),
 		navigateBrowse: () => {
 			calls.navigateBrowse++;
 		},
@@ -109,7 +112,9 @@ function makeDeps(overrides: DepsOverrides = {}) {
 				// will re-evaluate status and finalize.
 				return currentJob ?? makeJob('organizing');
 			},
-			organizeBatchJob: overrides.organizeBatchJob ?? vi.fn(async () => ({ apply_generation: (currentJob?.apply_generation ?? 0) + 1 })),
+			organizeBatchJob:
+				overrides.organizeBatchJob ??
+				vi.fn(async () => ({ apply_generation: (currentJob?.apply_generation ?? 0) + 1 })),
 			updateBatchJob:
 				overrides.updateBatchJob ?? (async (_jobId: string, _request?: UpdateRequest) => undefined),
 		},
@@ -281,6 +286,108 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		controller.cleanup();
 	});
 
+	it.each([
+		['skipped', 'skipped'],
+		['replaced', 'replaced'],
+		['installed', 'success'],
+		['same-file', 'success'],
+	] as const)(
+		'reconciles a resumed failed row from REST-only %s retry completion',
+		async (outcome, expectedStatus) => {
+			const source = '/src/retried.mp4';
+			const job = makeJob('organizing');
+			job.apply_generation = 2;
+			job.results[source] = {
+				file_path: source,
+				result_id: 'retry-result',
+				status: 'failed',
+				error: 'late video collision',
+				movie: { id: 'MOV-1', title: 'Synthetic' },
+			} as FileResult;
+			const clearApplyRecovery = vi.fn();
+			const { deps, calls, fileStatuses } = makeDeps({ job, clearApplyRecovery });
+			const controller = createOrganizeController(deps);
+			controller.resumePolling({
+				jobId: 'job-1',
+				operation: 'organize',
+				preApplyGeneration: 1,
+				acceptedApplyGeneration: 2,
+				destination: '/out',
+				operationMode: 'organize',
+				skipNfo: true,
+				skipDownload: true,
+				organizeOperation: 'copy',
+				failed: { [source]: 'late video collision' },
+				succeeded: [],
+				eligibleFilePaths: [source],
+			});
+			expect(fileStatuses.get(source)?.status).toBe('failed');
+			job.status = 'completed';
+			job.results[source].status = 'completed';
+			job.results[source].video_outcome = outcome;
+			delete job.results[source].error;
+			await vi.advanceTimersByTimeAsync(15);
+			expect(fileStatuses.get(source)).toEqual({ status: expectedStatus });
+			expect(deps.recordApplySuccess).toHaveBeenCalledWith(source);
+			expect(clearApplyRecovery).toHaveBeenCalled();
+			if (outcome === 'skipped') {
+				expect(calls.toastInfo).toEqual([expect.stringContaining('1 file(s) skipped')]);
+				expect(calls.toastSuccess).toHaveLength(0);
+			} else {
+				expect(calls.toastInfo).toHaveLength(0);
+				expect(calls.toastSuccess).toEqual([expect.stringContaining('completed successfully')]);
+			}
+			await controller.retryFailed();
+			expect(deps.api.organizeBatchJob).not.toHaveBeenCalled();
+			const remainingPath = '/src/still-failed.mp4';
+			fileStatuses.set(remainingPath, { status: 'failed', error: 'another failure' });
+			await controller.retryFailed();
+			expect(deps.api.organizeBatchJob).toHaveBeenCalledExactlyOnceWith(
+				'job-1',
+				expect.objectContaining({ retry_file_paths: [remainingPath] }),
+			);
+			controller.cleanup();
+		},
+	);
+
+	it('freezes video review receipts across retries and never retries skipped files', async () => {
+		const source = '/src/failed.mp4';
+		const skipped = '/src/skipped.mp4';
+		const overrides: ReviewApplyOverrides = {
+			video_collision_policy: 'fail',
+			video_collision_decisions: {
+				[source]: {
+					source,
+					destination: '/out/video.mp4',
+					policy: 'replace',
+					review_token: 'server-snapshot',
+				},
+			},
+		};
+		const requests: Array<{ overrides?: ReviewApplyOverrides; retry_file_paths?: string[] }> = [];
+		const job = makeJob('organizing');
+		const { deps, fileStatuses } = makeDeps({
+			job,
+			organizeBatchJob: vi.fn((_id, request) => {
+				requests.push(request);
+				return Promise.resolve({ apply_generation: requests.length });
+			}),
+		});
+		const controller = createOrganizeController(deps);
+		await controller.organizeAll(false, false, overrides);
+		job.apply_generation = 1;
+		overrides.video_collision_decisions![source].review_token = 'client-mutated';
+		fileStatuses.set(source, { status: 'failed' });
+		fileStatuses.set(skipped, { status: 'skipped' });
+		await controller.retryFailed();
+		expect(requests).toHaveLength(2);
+		expect(requests[1].overrides?.video_collision_decisions?.[source].review_token).toBe(
+			'server-snapshot',
+		);
+		expect(requests[1].retry_file_paths).toEqual([source]);
+		controller.cleanup();
+	});
+
 	it('does not retry a path after a success event removes it from recovery', async () => {
 		const firstPath = '/src/already-succeeded.mp4';
 		const requests: Array<{ retry_file_paths?: string[] }> = [];
@@ -315,6 +422,74 @@ describe('organize-controller pollOnce terminal-success branches', () => {
 		expect(requests).toHaveLength(2);
 		expect(requests[1].retry_file_paths).toEqual([secondPath]);
 		expect(requests[1].retry_file_paths).not.toContain(firstPath);
+		controller.cleanup();
+	});
+
+	it.each(['skipped', 'replaced', 'installed', 'same-file'] as const)(
+		'does not clear a failed row from an unrelated generation with outcome %s',
+		async (outcome) => {
+			const source = '/src/failed.mp4';
+			const job = makeJob('organizing');
+			job.results[source] = {
+				file_path: source,
+				result_id: 'result-1',
+				status: 'completed',
+				movie: { id: 'MOV-1', title: 'Synthetic' },
+			} as FileResult;
+			const { deps, calls, fileStatuses } = makeDeps({ job });
+			const controller = createOrganizeController(deps);
+			await controller.organizeAll();
+			fileStatuses.set(source, { status: 'failed', error: 'current apply failure' });
+			job.apply_generation = 2;
+			job.status = 'completed';
+			job.results[source].video_outcome = outcome;
+			await vi.advanceTimersByTimeAsync(15);
+
+			expect(fileStatuses.get(source)).toEqual({
+				status: 'failed',
+				error: 'current apply failure',
+			});
+			expect(deps.recordApplySuccess).not.toHaveBeenCalled();
+			expect(calls.setOrganizeStatus).not.toContain('completed');
+			expect(calls.toastSuccess).toHaveLength(0);
+			controller.cleanup();
+		},
+	);
+
+	it('preserves a current-generation WebSocket failure against scrape-completed REST data', async () => {
+		const source = '/src/failed-writeback.mp4';
+		const job = makeJob('organizing');
+		job.results[source] = {
+			file_path: source,
+			result_id: 'result-1',
+			status: 'completed',
+			movie: { id: 'MOV-1', title: 'Synthetic' },
+		} as FileResult;
+		const { deps, calls, fileStatuses } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+		const request = controller.organizeAll();
+		job.apply_generation = 1;
+		await request;
+		await vi.advanceTimersByTimeAsync(10);
+		controller.handleWebSocketMessage({
+			job_id: 'job-1',
+			file_index: 0,
+			file_path: source,
+			status: 'failed',
+			progress: 0,
+			error: 'apply write-back skipped',
+			apply_generation: 1,
+			message: 'Failed to organize',
+		} satisfies ProgressMessage);
+		job.status = 'completed';
+		await vi.advanceTimersByTimeAsync(15);
+
+		expect(fileStatuses.get(source)).toEqual({
+			status: 'failed',
+			error: 'apply write-back skipped',
+		});
+		expect(deps.recordApplySuccess).not.toHaveBeenCalled();
+		expect(calls.toastSuccess).toHaveLength(0);
 		controller.cleanup();
 	});
 

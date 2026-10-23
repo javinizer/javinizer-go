@@ -222,3 +222,21 @@ func TestListJobsUseCase_NoopCountError_Propagates(t *testing.T) {
 	assert.Nil(t, out)
 	assert.Contains(t, err.Error(), "failed to retrieve noop counts")
 }
+
+func TestListJobsUseCase_RetryLedgerCountsAgreeWithResults(t *testing.T) {
+	jobRepo := mocks.NewMockJobRepositoryInterface(t)
+	opRepo := mocks.NewMockBatchFileOperationRepositoryInterface(t)
+	deps := newTestAPIDeps(t, jobRepo, opRepo)
+	row, err := jobpersist.Encode(jobpersist.Snapshot{ID: "retry-list", TotalFiles: 1, Completed: 1, Results: map[string]*resultstore.MovieResult{"a": {ResultID: "r1", Revision: 3, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-123"}}}, ApplyRetryFailures: map[string]jobpersist.ApplyRetryFailure{"a": {ResultID: "r1", Revision: 3, Error: "fenced"}}})
+	require.NoError(t, err)
+	jobRepo.On("List", mock.Anything).Return([]models.Job{*row}, nil)
+	for _, method := range []string{"CountByBatchJobIDs", "CountRevertedByBatchJobIDs", "CountNoOpByBatchJobIDs"} {
+		opRepo.On(method, mock.Anything, []string{"retry-list"}).Return(map[string]int64{}, nil)
+	}
+	out, err := ListJobsUseCase(context.Background(), deps, ListJobsInput{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, out.Jobs, 1)
+	require.Zero(t, out.Jobs[0].Completed)
+	require.Equal(t, 1, out.Jobs[0].Failed)
+	require.Equal(t, models.JobStatusFailed, out.Jobs[0].Results["a"].Status)
+}

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingScrape } from './pending-scrape.svelte';
 
-// Every test here isolates module state via vi.resetModules() + a fresh
-// dynamic import of the store graph — which now includes the paraglide
-// message barrel (apply-plan.ts is localized). Each re-import re-loads ~2k
-// compiled locale modules, so the stock 5s test timeout is insufficient;
-// the timeout is NOT a correctness signal for these tests.
-vi.setConfig({ testTimeout: 20_000 });
+// These tests isolate persisted store state, not translation rendering. Keep
+// the real message keys/text without reloading thousands of generated locale
+// modules after every vi.resetModules(); that otherwise hides state assertions
+// behind cold-import timeouts on constrained runners.
+vi.mock('$lib/paraglide/messages', async () => {
+	const { default: messages } = await import('../../../messages/en.json');
+	return Object.fromEntries(Object.entries(messages).map(([key, value]) => [key, () => value]));
+});
 
 function makeSnapshot(overrides: Partial<PendingScrape> = {}): PendingScrape {
 	return {
@@ -15,6 +17,7 @@ function makeSnapshot(overrides: Partial<PendingScrape> = {}): PendingScrape {
 		applyPlan: {
 			version: 1,
 			video_operation: 'organize',
+			video_collision_policy: 'fail',
 			destination: '/out',
 			nfo_output: 'write',
 			media_policy: 'missing',
@@ -142,6 +145,39 @@ describe('pendingScrape store', () => {
 		const after = await loadStore();
 		expect(after.getPendingScrape()).toEqual(makeSnapshot());
 	});
+
+	it('defaults a saved plan without a collision policy to fail', async () => {
+		const legacy = makeSnapshot();
+		delete legacy.applyPlan!.video_collision_policy;
+		const before = await loadStore();
+		before.setPendingScrape(legacy);
+		expect(before.getPendingScrape()).toEqual(makeSnapshot());
+		sessionStorage.setItem('javinizer_pending_scrape', JSON.stringify(legacy));
+
+		const hydrated = await loadStore();
+		expect(hydrated.getPendingScrape()).toEqual(makeSnapshot());
+		expect(JSON.parse(sessionStorage.getItem('javinizer_pending_scrape')!)).toEqual(makeSnapshot());
+
+		const refreshed = await loadStore();
+		expect(refreshed.getPendingScrape()).toEqual(makeSnapshot());
+		expect(legacy.applyPlan).not.toHaveProperty('video_collision_policy');
+	});
+
+	it.each(['fail', 'skip', 'replace'] as const)(
+		'preserves explicit %s collision policy through sessionStorage',
+		async (policy) => {
+			const snap = makeSnapshot();
+			snap.applyPlan!.video_collision_policy = policy;
+			const before = await loadStore();
+			before.setPendingScrape(snap);
+			expect(before.getPendingScrape()).toEqual(snap);
+			expect(JSON.parse(sessionStorage.getItem('javinizer_pending_scrape')!)).toEqual(snap);
+
+			const after = await loadStore();
+			expect(after.getPendingScrape()).toEqual(snap);
+			expect(JSON.parse(sessionStorage.getItem('javinizer_pending_scrape')!)).toEqual(snap);
+		},
+	);
 
 	it('clear prevents refresh resurrection', async () => {
 		const before = await loadStore();

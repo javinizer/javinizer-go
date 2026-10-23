@@ -373,3 +373,14 @@ func TestRebase_ListEndpointClearsStaleCroppedPoster(t *testing.T) {
 	assert.Equal(t, "https://example.com/poster.jpg", r.Movie.PosterURL,
 		"remote poster_url fallback must be preserved")
 }
+
+func TestPersistedRetryFailureAppearsInListWithoutChangingDomain(t *testing.T) {
+	raw := `{"domain":{"/source/a.mp4":{"result_id":"retry-r1","revision":7,"status":"completed","movie":{"id":"ABC-123"}}},"apply_retry_failures":{"/source/a.mp4":{"result_id":"retry-r1","revision":7,"error":"persist skipped Apply receipt: witness unresolved"}}}`
+	job := &models.Job{ID: "retry-ledger", Results: raw}
+	results := parseAndConvertJobResults(job, afero.NewMemMapFs())
+	require.Equal(t, models.JobStatusFailed, results["/source/a.mp4"].Status)
+	require.Equal(t, "APPLY_RECEIPT_PERSIST_FAILED", results["/source/a.mp4"].ErrorCode)
+	require.Equal(t, raw, job.Results)
+	job.Excluded = `{"/source/a.mp4":true}`
+	require.Equal(t, models.JobStatusCompleted, parseAndConvertJobResults(job, afero.NewMemMapFs())["/source/a.mp4"].Status)
+}

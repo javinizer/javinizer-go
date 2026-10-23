@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -74,37 +75,16 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 
-			// Pre-check for deprecated aliases using the parsed map to avoid
-			// unnecessary double-decode in the common (no-alias) case.
-			hasAliases := false
+			// ScraperSettings handles numeric presence and legacy aliases. Keep
+			// unknown-field validation here because custom decoding bypasses
+			// json.Decoder.DisallowUnknownFields on the outer decoder.
 			for k := range scraperRaw {
-				if k == "request_delay" || k == "max_retries" {
-					hasAliases = true
-					break
+				if !scraperSettingsYAMLKeys[strings.ToLower(k)] {
+					return fmt.Errorf("unknown field %q in scraper %q", k, key)
 				}
 			}
-
-			if hasAliases {
-				// Decode without strict mode, then apply aliases,
-				// then validate remaining keys.
-				if err := json.Unmarshal(rawVal, &ss); err != nil {
-					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
-				}
-				s.applyJSONAliases(scraperRaw, &ss)
-
-				// Validate keys manually.
-				for k := range scraperRaw {
-					if !scraperSettingsYAMLKeys[k] {
-						return fmt.Errorf("unknown field %q in scraper %q", k, key)
-					}
-				}
-			} else {
-				// Single strict decode (no alias handling needed).
-				decoder := json.NewDecoder(bytes.NewReader(rawVal))
-				decoder.DisallowUnknownFields()
-				if err := decoder.Decode(&ss); err != nil {
-					return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
-				}
+			if err := json.Unmarshal(rawVal, &ss); err != nil {
+				return fmt.Errorf("failed to decode config for scraper %q: %w", key, err)
 			}
 			_, explicitEnabled := scraperRaw["enabled"]
 			ss.SetEnabledPresence(explicitEnabled)
@@ -114,23 +94,6 @@ func (s *ScrapersConfig) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
-}
-
-// applyJSONAliases handles deprecated JSON aliases request_delay→rate_limit
-// and max_retries→retry_count.
-func (s *ScrapersConfig) applyJSONAliases(raw map[string]json.RawMessage, ss *models.ScraperSettings) {
-	if rd, ok := raw["request_delay"]; ok && ss.RateLimit == 0 {
-		var v int
-		if err := json.Unmarshal(rd, &v); err == nil {
-			ss.RateLimit = v
-		}
-	}
-	if mr, ok := raw["max_retries"]; ok && ss.RetryCount == 0 {
-		var v int
-		if err := json.Unmarshal(mr, &v); err == nil {
-			ss.RetryCount = v
-		}
-	}
 }
 
 func (s *ScrapersConfig) marshalScrapersMap(effective bool) map[string]any {

@@ -11,6 +11,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 	"github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -34,6 +35,22 @@ func resolveOrganizeApplyConfig(
 	skipNFO := req.SkipNFO
 	skipDownload := req.SkipDownload
 	forceRenameFile := false
+	videoPolicy := req.VideoCollisionPolicy
+	decisions := req.VideoCollisionDecisions
+	if req.Overrides != nil {
+		if req.Overrides.VideoCollisionPolicy != nil {
+			if req.VideoCollisionPolicy != "" && req.VideoCollisionPolicy != *req.Overrides.VideoCollisionPolicy {
+				return worker.ApplyPhaseConfig{}, fmt.Errorf("contradictory video_collision_policy")
+			}
+			videoPolicy = *req.Overrides.VideoCollisionPolicy
+		}
+		if len(req.Overrides.VideoCollisionDecisions) > 0 {
+			if len(decisions) > 0 {
+				return worker.ApplyPhaseConfig{}, fmt.Errorf("video collision decisions must be supplied once")
+			}
+			decisions = req.Overrides.VideoCollisionDecisions
+		}
+	}
 	jobStatus := job.GetStatus()
 	planAware := jobStatus != nil && jobStatus.ApplyPlan != nil
 	if planAware {
@@ -55,6 +72,21 @@ func resolveOrganizeApplyConfig(
 		skipNFO = projection.SkipNFO
 		skipDownload = projection.SkipDownload
 		forceRenameFile = projection.ForceRenameFile
+		if videoPolicy == "" {
+			videoPolicy = projection.VideoCollisionPolicy
+		}
+	}
+	videoPolicy, policyErr := videocollision.Normalize(videoPolicy)
+	if policyErr != nil {
+		return worker.ApplyPhaseConfig{}, policyErr
+	}
+	for source, decision := range decisions {
+		if _, err := videocollision.Normalize(decision.Policy); err != nil {
+			return worker.ApplyPhaseConfig{}, err
+		}
+		if source != filepath.Clean(decision.Source) || decision.Destination == "" {
+			return worker.ApplyPhaseConfig{}, fmt.Errorf("invalid video collision decision path")
+		}
 	}
 	resolved, seamErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 		OperationMode: func() string {
@@ -83,22 +115,53 @@ func resolveOrganizeApplyConfig(
 	logging.Infof("Organize job %s: copy_only=%v operation_mode=%q link_mode=%q destination=%q", job.GetID(), req.CopyOnly, operationInput, req.LinkMode, destination)
 	applyOpts := factory.NewApplyConfig(
 		workflow.OrganizeOptions{
-			MoveFiles:       !req.CopyOnly,
-			LinkMode:        resolved.LinkMode,
-			ForceUpdate:     false,
-			ForceRenameFile: forceRenameFile,
-			Skip:            !effectiveMode.RequiresOrganize(),
+			VideoCollisionPolicy:    videoPolicy,
+			VideoCollisionDecisions: decisions,
+			VideoCollisionScope:     job.GetID(),
+			MoveFiles:               !req.CopyOnly,
+			LinkMode:                resolved.LinkMode,
+			ForceUpdate:             false,
+			ForceRenameFile:         forceRenameFile,
+			Skip:                    !effectiveMode.RequiresOrganize(),
 		},
 		workflow.MergeOptions{ForceOverwrite: true},
 		destination,
 	)
+	applyOpts.OrganizeOptions.VideoCollisionSelectedSources = map[string]bool{}
+	if jobStatus != nil {
+		for source := range jobStatus.Results {
+			applyOpts.OrganizeOptions.VideoCollisionSelectedSources[filepath.Clean(source)] = true
+		}
+	}
 	applyOpts.GenerateNFO = !skipNFO
 	applyOpts.ForceNFO = planAware && !skipNFO
 	applyOpts.Download = !skipDownload
 	applyOpts.RetryFilePaths = append([]string(nil), req.RetryFilePaths...)
 	applyOpts.ExpectedApplyGeneration = req.ExpectedApplyGeneration
+	if jobStatus != nil {
+		generation := jobStatus.ApplyGeneration
+		applyOpts.OrganizeOptions.VideoCollisionGeneration = generation
+		if applyOpts.ExpectedApplyGeneration == nil {
+			applyOpts.ExpectedApplyGeneration = &generation
+		}
+	}
 	applyOpts.OperationModeOverride = resolved.OperationMode
-	applyGenerationRef := wireApplyProgressCallbacks(&applyOpts, job, false /* isUpdate */, newOrganizeBroadcastSink(snap.RT()))
+	sink := newOrganizeBroadcastSink(snap.RT())
+	applyGenerationRef := wireApplyProgressCallbacks(&applyOpts, job, false, sink)
+	skippedCount := new(atomic.Int64)
+	complete := applyOpts.OnPhaseComplete
+	applyOpts.OnPhaseComplete = func(organized, failed int) {
+		skipped := int(skippedCount.Load())
+		if skipped == 0 {
+			complete(organized, failed)
+			return
+		}
+		sink(stampJobCountsForApply(&websocket.ProgressMessage{JobID: job.GetID(), Status: websocket.ProgressStatusOrganizeCompleted, Progress: 100, Message: fmt.Sprintf("Applied %d files, %d skipped, %d failed", organized-skipped, skipped, failed), MessageCode: "BATCH_COMPLETED_WITH_SKIPS", MessageArgs: map[string]any{"count": organized - skipped, "skipped": skipped, "failed": failed}}, job, applyGenerationRef))
+	}
+	applyOpts.OnFileSkipped = func(filePath string) {
+		skippedCount.Add(1)
+		sink(stampJobCountsForApply(&websocket.ProgressMessage{JobID: job.GetID(), FilePath: filePath, Status: websocket.ProgressStatus("skipped"), Progress: 100}, job, applyGenerationRef))
+	}
 	applyOpts.PostApplyFunc = makeOrganizePostApplyAuditHook(deps, job, applyGenerationRef)
 
 	return applyOpts, nil
@@ -314,10 +377,16 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 		status = websocket.ProgressStatus("updated")
 	}
 	return func(filePath string) {
+		fileStatus := status
+		if snapshot := job.GetStatus(); snapshot != nil {
+			if result := snapshot.Results[filePath]; result != nil && result.VideoOutcome == "replaced" {
+				fileStatus = websocket.ProgressStatus("replaced")
+			}
+		}
 		sink(stampJobCountsForApply(&websocket.ProgressMessage{
 			JobID:    job.GetID(),
 			FilePath: filePath,
-			Status:   status,
+			Status:   fileStatus,
 			Progress: 100,
 		}, job, generationRef...))
 	}

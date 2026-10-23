@@ -179,6 +179,93 @@ it.each(
 		expect(state.canRetryFailed).toBe(false);
 	},
 );
+it.each(['skip', 'replace'] as const)(
+	'retries only late-collision failures using fresh %s review decisions',
+	async (policy) => {
+		let current = fixture();
+		const succeeded = '/synthetic/already-succeeded.mp4';
+		current.results[succeeded] = {
+			...structuredClone(current.results[filePath]),
+			file_path: succeeded,
+			result_id: 'succeeded',
+		};
+		current.total_files = 2;
+		vi.spyOn(apiClient, 'getBatchJob').mockImplementation(async () => structuredClone(current));
+		const item = {
+			source: filePath,
+			destination: '/synthetic/output/movie.mp4',
+			kind: 'file',
+			source_size: 5,
+			destination_size: 7,
+			review_token: 'fresh-generation-one',
+		};
+		const review = vi
+			.spyOn(apiClient, 'reviewVideoCollisions')
+			.mockImplementation(async (_id, request) => {
+				const decision = request.overrides?.video_collision_decisions?.[filePath];
+				const resolved = decision?.review_token === item.review_token && decision.policy === policy;
+				return {
+					items: [item],
+					new: 0,
+					replaced: resolved && policy === 'replace' ? 1 : 0,
+					skipped: resolved && policy === 'skip' ? 1 : 0,
+					unresolved: resolved ? 0 : 1,
+					same_file: 0,
+				};
+			});
+		let attempts = 0;
+		const apply = vi
+			.spyOn(apiClient, 'organizeBatchJob')
+			.mockImplementation(async (_id, request) => {
+				attempts++;
+				if (attempts === 1) {
+					current = markForeignFailure(current);
+					delete current.results[filePath].error_code;
+					current.results[filePath].video_collision = {
+						code: 'VIDEO_COLLISION_REFRESHED',
+						collision: item,
+					};
+					current.results[succeeded].video_outcome = 'installed';
+					return { message: 'started', apply_generation: 1 };
+				}
+				expect(request.copy_only).toBe(true);
+				expect(request.destination).toBe('/synthetic/output');
+				expect(request.retry_file_paths).toEqual([filePath]);
+				expect(request.expected_apply_generation).toBe(1);
+				expect(request.overrides?.video_collision_decisions).toEqual({
+					[filePath]: {
+						source: filePath,
+						destination: item.destination,
+						policy,
+						review_token: item.review_token,
+					},
+				});
+				current.apply_generation = 2;
+				current.status = 'organized';
+				current.failed = 0;
+				current.results[filePath].status = 'completed';
+				current.results[filePath].video_outcome = policy === 'skip' ? 'skipped' : 'replaced';
+				return { message: 'started', apply_generation: 2 };
+			});
+		const { state } = await mount();
+		state.organizeOperation = 'copy';
+		await state.organizeAll(true, true);
+		await waitFor(() => expect(state.organizing).toBe(false), { timeout: 5000 });
+		await state.reviewVideoCollisions();
+		await state.decideVideoCollision(item, policy);
+		expect(state.videoCollisionBlocked).toBe(false);
+		state.organizeOperation = 'move';
+		state.destinationPath = '/must-not-change-original-settings';
+		await state.retryFailed();
+		expect(apply).toHaveBeenCalledTimes(2);
+		expect(review.mock.calls.at(-1)?.[1].retry_file_paths).toEqual([filePath]);
+		await waitFor(() => expect(state.organizing).toBe(false), { timeout: 5000 });
+		expect(state.fileStatuses.get(filePath)?.status).toBe(
+			policy === 'skip' ? 'skipped' : 'replaced',
+		);
+	},
+);
+
 const updateFlags = [
 	{ force_overwrite: true, preserve_nfo: false },
 	{ force_overwrite: false, preserve_nfo: true },

@@ -73,18 +73,11 @@ type scraper struct {
 // New creates a new JavDB scraper.
 // newScraper creates a new JavDB scraper.
 func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfig, globalFlareSolverr models.FlareSolverrConfig) *scraper {
-	configForHTTP := &models.ScraperSettings{
-		Enabled:         settings.Enabled,
-		Timeout:         settings.Timeout,
-		RateLimit:       settings.RateLimit,
-		RetryCount:      settings.RetryCount,
-		UserAgent:       settings.UserAgent,
-		Proxy:           settings.Proxy,
-		DownloadProxy:   settings.DownloadProxy,
-		UseFlareSolverr: settings.UseFlareSolverr,
-	}
+	// Preserve decoded numeric presence without opting in to automatic cookies.
+	configForHTTP := settings.Clone()
+	configForHTTP.Cookies = nil
 
-	client, flaresolverr, err := httpclient.FromScraperSettings(configForHTTP, globalProxy, globalFlareSolverr,
+	client, flaresolverr, err := httpclient.FromScraperSettings(&configForHTTP, globalProxy, globalFlareSolverr,
 		httpclient.WithHeaders(httpclient.StandardHTMLHeaders()),
 		httpclient.WithHeaders(httpclient.UserAgentHeader(settings.UserAgent)),
 	).BuildWithFlareSolverr()
