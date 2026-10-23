@@ -632,7 +632,7 @@ jobs:
         go test -short -count=1 -v -covermode=atomic
         -coverprofile=coverage-primary-undo-macos.out
         ./internal/history ./internal/fsutil ./internal/models ./internal/database ./internal/workflow
-        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging)'
+        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging|TestDarwinExclusiveRename|TestDarwinUnsupportedEINVALDoesNotTriggerCopy|TestDarwinVerifiedSubstitutionAndRestore)'
 
     - name: Archive native Darwin primary Undo coverage
       if: ${{ !env.ACT }}

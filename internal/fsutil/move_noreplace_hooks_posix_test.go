@@ -1,4 +1,4 @@
-//go:build darwin || freebsd || openbsd || netbsd || dragonfly || solaris
+//go:build freebsd || openbsd || netbsd || dragonfly || solaris
 
 package fsutil
 
