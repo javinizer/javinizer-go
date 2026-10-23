@@ -77,11 +77,23 @@ func (b *ReplacementBatch) Preflight(destinations []string) error {
 // pre-existing regular file was journaled; an absent destination is tracked as
 // created and removed on rollback.
 func (b *ReplacementBatch) BeforePublish(ctx context.Context, destination string, allowReplace bool) (bool, error) {
+	return b.BeforePublishChecked(ctx, destination, allowReplace, nil)
+}
+
+// BeforePublishChecked verifies a destination under its lock, including the
+// taken-aside backup, before allowing publication to proceed.
+func (b *ReplacementBatch) BeforePublishChecked(ctx context.Context, destination string, allowReplace bool, verify func(string) error) (bool, error) {
 	leg := &replacementBatchLeg{destination: filepath.Clean(destination)}
 	leg.releaseLock = fsutil.SharedDestLocks().Acquire(leg.destination)
 	info, err := lstatBackupCandidate(b.fs, leg.destination)
 	if os.IsNotExist(err) {
 		if _, parentErr := b.fs.Stat(filepath.Dir(leg.destination)); os.IsNotExist(parentErr) {
+			if verify != nil {
+				if verifyErr := verify(leg.destination); verifyErr != nil {
+					leg.release()
+					return false, verifyErr
+				}
+			}
 			b.legs = append(b.legs, leg)
 			return false, nil
 		}
@@ -96,6 +108,12 @@ func (b *ReplacementBatch) BeforePublish(ctx context.Context, destination string
 		// The marker acquisition is a blocking boundary. Reclassify while the
 		// process lock is still held before moving any bytes aside.
 		info, err = lstatBackupCandidate(b.fs, leg.destination)
+	}
+	if verify != nil {
+		if verifyErr := verify(leg.destination); verifyErr != nil {
+			leg.release()
+			return false, verifyErr
+		}
 	}
 	if os.IsNotExist(err) {
 		b.legs = append(b.legs, leg)
@@ -139,11 +157,16 @@ func (b *ReplacementBatch) BeforePublish(ctx context.Context, destination string
 		leg.release()
 		return false, fmt.Errorf("set aside staged replacement destination %s: %w", destination, err)
 	}
+	var verifyErr error
+	if verify != nil {
+		verifyErr = verify(leg.backup)
+	}
 	facts, err := captureReplacementBackupFacts(b.fs, leg.backup)
 	if err == nil {
 		err = b.recorder.RecordReplacement(ctx, b.opID, leg.destination, leg.backup, facts)
 	}
 	if err != nil {
+		err = errors.Join(err, verifyErr)
 		restored, restoreErr := restoreAsideBackup(b.fs, leg.destination, leg.backup)
 		leg.release()
 		if restoreErr != nil || !restored {
@@ -153,7 +176,7 @@ func (b *ReplacementBatch) BeforePublish(ctx context.Context, destination string
 	}
 	leg.replaced = true
 	b.legs = append(b.legs, leg)
-	return true, nil
+	return true, verifyErr
 }
 
 // YieldToLockedPublisher releases the in-process lock when the publisher has

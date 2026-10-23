@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/panicutil"
 	"github.com/javinizer/javinizer-go/internal/progress"
+	"github.com/javinizer/javinizer-go/internal/videocollision"
 	"github.com/javinizer/javinizer-go/internal/worker/fanout"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -392,6 +393,10 @@ func clearPriorCreditGateError(current, baseline *resultstore.MovieResult) {
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
 	wf := inputs.WF
 	persister := inputs.persister
+	cfg.OrganizeOptions.VideoCollisionSelectedSources = make(map[string]bool, len(inputs.Results))
+	for source := range inputs.Results {
+		cfg.OrganizeOptions.VideoCollisionSelectedSources[filepath.Clean(source)] = true
+	}
 
 	defer func() {
 		// Extraction keeps the recovery arm testable: fanout workers forward
@@ -668,7 +673,8 @@ func retryWritebackClearedFailure(inputs applyPhaseInputs, outcome applyFileOutc
 		return false
 	}
 	current, err := reader.GetMovieResult(outcome.FilePath)
-	return err == nil && current != nil && current.Status == models.JobStatusCompleted
+	return err == nil && current != nil && current.Status == models.JobStatusCompleted &&
+		(inputs.ApplyRetryFailurePending == nil || !inputs.ApplyRetryFailurePending(outcome.FilePath, current))
 }
 
 // countRemainingApplyFailures returns the failures that remain after this apply
@@ -843,6 +849,7 @@ func buildApplyCmd(
 		OperationMode:          cfg.OperationModeOverride,
 	}
 
+	applyCmd.Organize.VideoCollisionScope = string(inputs.JobID)
 	applyCmd.GenerateNFO = cfg.GenerateNFO && (inputs.NFOEnabled || cfg.ForceNFO)
 
 	afc := &ApplyFileContext{
@@ -902,6 +909,10 @@ func interpretApplyResult(
 	if applyErr != nil {
 		errMsg := applyErr.Error()
 		errorCode := ""
+		var videoConflict *videocollision.ConflictError
+		if errors.As(applyErr, &videoConflict) {
+			errorCode = videoConflict.Code
+		}
 		if errors.Is(applyErr, downloader.ErrPosterRecropRequired) {
 			errorCode = downloader.PosterRecropRequiredCode
 		}
@@ -1000,6 +1011,12 @@ func interpretApplyResult(
 					current.ErrorCode = ""
 				}
 				clearPriorCreditGateError(current, afc.MovieResult)
+				current.VideoOutcome = ""
+				current.VideoCollision = nil
+				if videoConflict != nil {
+					conflict := *videoConflict
+					current.VideoCollision = &conflict
+				}
 				current.Status = fileStatus
 				current.Error = errMsg
 				current.StartedAt = startTime
@@ -1071,6 +1088,47 @@ func interpretApplyResult(
 		return outcome
 	}
 
+	if result != nil && result.VideoOutcome == "skipped" {
+		aliasID, canonicalID := applyFamilyKeyIDs(afc)
+		unlock := applyFamilyLock(inputs, aliasID, canonicalID)
+		defer unlock()
+		var writeErr error
+		if mid := strings.TrimSpace(movie.ID); mid != "" && inputs.PromoteWitnessFn != nil && inputs.PromoteWitnessFn(mid) {
+			writeErr = fmt.Errorf("promote witness for %s unresolved", mid)
+		} else if writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
+			writeErr = fmt.Errorf("result identity changed during Apply")
+		} else {
+			writeErr = inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+				if applyWritebackIdentityMismatch(movie, current) {
+					return nil, nil, fmt.Errorf("result identity changed during Apply")
+				}
+				current.VideoOutcome = "skipped"
+				current.VideoCollision = nil
+				current.Status = models.JobStatusCompleted
+				current.Error, current.ErrorCode = "", ""
+				return current, prov, nil
+			})
+		}
+		if writeErr != nil {
+			outcome.Failed = true
+			outcome.ErrorMsg = fmt.Sprintf("persist skipped Apply receipt: %v", writeErr)
+			if inputs.RecordApplyRetryFailure != nil && afc != nil {
+				inputs.RecordApplyRetryFailure(filePath, afc.MovieResult, outcome.ErrorMsg)
+			}
+			if cfg.OnFileFailed != nil {
+				cfg.OnFileFailed(filePath, outcome.ErrorMsg)
+			}
+			return outcome
+		}
+		if cfg.OnFileSkipped != nil {
+			cfg.OnFileSkipped(filePath)
+		}
+		auditCtx, cancel := historyAuditContext()
+		defer cancel()
+		recordHistory(auditCtx, inputs.HistoryRepo, models.History{MovieID: movie.ID, BatchJobID: jobIDPtr(inputs.JobID), Operation: models.HistoryOpOrganize, OriginalPath: filePath, Status: models.HistoryStatusSkipped, Metadata: organizeMetadata(inputs.OperationMode, result)})
+		outcome.Success = true
+		return outcome
+	}
 	if result != nil && result.Movie != nil {
 		// codex r37 P2: lock BOTH identity keys — edits hold the matcher alias.
 		aliasID, canonicalID := applyFamilyKeyIDs(afc)
@@ -1089,6 +1147,11 @@ func interpretApplyResult(
 						if applyWritebackIdentityMismatch(movie, current) {
 							logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
 							return current, prov, nil
+						}
+						current.VideoOutcome = result.VideoOutcome
+						current.VideoCollision = nil
+						if current.ErrorCode == "VIDEO_COLLISION_STALE" || current.ErrorCode == "VIDEO_COLLISION_UNRESOLVED" || current.ErrorCode == "VIDEO_COLLISION_REFRESHED" {
+							current.ErrorCode = ""
 						}
 						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
 						clearPriorCreditGateError(current, afc.MovieResult)

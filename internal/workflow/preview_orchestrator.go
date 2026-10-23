@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -136,7 +137,36 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 
 	encodingInfo := organizer.DetectPathEncodingInfo(sourcePath, destination)
 
-	return runner.executePreview(ctx, movie, fileResults, destination, operationMode, skipNFO, skipDownload, sharedEngine, strategy, encodingInfo), nil
+	preview := runner.executePreview(ctx, movie, fileResults, destination, operationMode, skipNFO, skipDownload, sharedEngine, strategy, encodingInfo)
+	if operationMode.RequiresOrganize() {
+		for _, match := range fileResults {
+			if _, err := lstatArtifactSource(o.fs, match.Path); os.IsNotExist(err) {
+				continue
+			}
+			plan, err := strategy.Plan(match, movie, destination, false)
+			if err != nil {
+				return nil, err
+			}
+			encoded := plan.EncodePaths(encodingInfo)
+			if collision := videoContainerCollision(o.fs, plan, match.Path, encoded.TargetPath); collision != nil {
+				preview.VideoCollisions = append(preview.VideoCollisions, *collision)
+				continue
+			}
+			collision, err := inspectVideoCollision(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan))
+			if err != nil {
+				return nil, err
+			}
+			if collision != nil {
+				preview.VideoCollisions = append(preview.VideoCollisions, *collision)
+			}
+			siblings, err := inspectMultipartVideoCollisions(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan), cmd.VideoCollisionSelectedSources)
+			if err != nil {
+				return nil, err
+			}
+			preview.VideoCollisions = append(preview.VideoCollisions, siblings...)
+		}
+	}
+	return preview, nil
 }
 
 // mediaPathsResult holds the resolved media paths for a preview operation.

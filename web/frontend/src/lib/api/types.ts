@@ -113,7 +113,33 @@ export type ScalarMergeStrategy =
 export type ArrayMergeStrategy = 'merge' | 'replace';
 export type MergePreset = 'conservative' | 'gap-fill' | 'aggressive';
 
+export type VideoCollisionPolicy = 'fail' | 'skip' | 'replace';
+export interface VideoCollisionDecision {
+	source: string;
+	destination: string;
+	policy: VideoCollisionPolicy;
+	review_token: string;
+}
+export interface VideoCollision {
+	selected_source?: string;
+	source: string;
+	destination: string;
+	source_size: number;
+	destination_size: number;
+	kind: string;
+	review_token?: string;
+}
+export interface VideoCollisionReport {
+	items: VideoCollision[];
+	new: number;
+	replaced: number;
+	skipped: number;
+	unresolved: number;
+	same_file: number;
+}
+
 export interface BatchApplyPlan {
+	video_collision_policy?: VideoCollisionPolicy;
 	version: 1;
 	video_operation: VideoOperation;
 	destination?: string;
@@ -127,6 +153,8 @@ export interface BatchApplyPlan {
 }
 
 export interface ReviewApplyOverrides {
+	video_collision_policy?: VideoCollisionPolicy;
+	video_collision_decisions?: Record<string, VideoCollisionDecision>;
 	operation_mode?: OperationMode;
 	destination?: string;
 	skip_nfo?: boolean;
@@ -408,6 +436,8 @@ export type FileResultErrorCode =
 	| 'credit_status_unavailable';
 
 export interface FileResult {
+	video_collision?: { code: string; collision: VideoCollision };
+	video_outcome?: 'installed' | 'replaced' | 'skipped' | 'same-file';
 	result_id: string;
 	file_path: string;
 	movie_id: string;
@@ -830,6 +860,8 @@ export interface UpdateRequest {
 }
 
 export interface OrganizeRequest {
+	video_collision_policy?: VideoCollisionPolicy;
+	video_collision_decisions?: Record<string, VideoCollisionDecision>;
 	expected_apply_generation?: number;
 	overrides?: ReviewApplyOverrides;
 	destination: string;
@@ -858,6 +890,7 @@ export interface OrganizePreviewRequest {
 }
 
 export interface OrganizePreviewResponse {
+	video_collisions?: VideoCollision[];
 	folder_name: string;
 	file_name: string;
 	subfolder_path?: string; // Subfolder hierarchy relative to destination (e.g. "Studio/2025")
@@ -1368,7 +1401,7 @@ export interface HistoryRecord {
 	operation: 'scrape' | 'organize' | 'download' | 'nfo';
 	original_path: string;
 	new_path: string;
-	status: 'success' | 'failed' | 'reverted';
+	status: 'success' | 'failed' | 'reverted' | 'skipped';
 	error_message: string;
 	metadata: string;
 	dry_run: boolean;

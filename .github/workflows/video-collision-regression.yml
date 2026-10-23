@@ -1,0 +1,35 @@
+name: Video collision regression
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/workflow/**'
+      - 'internal/organizer/**'
+      - 'internal/downloader/**'
+      - 'internal/worker/**'
+      - 'internal/api/batch/**'
+      - 'internal/api/contracts/**'
+      - 'internal/applyplan/**'
+      - 'internal/fsutil/**'
+      - 'internal/history/**'
+      - 'internal/videocollision/**'
+      - '.github/workflows/video-collision-regression.yml'
+permissions:
+  contents: read
+jobs:
+  native-filesystem:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.2'
+      - name: Current revision native race regressions
+        run: go test -race -count=1 -timeout=10m ./internal/workflow ./internal/organizer ./internal/worker ./internal/worker/jobpersist ./internal/worker/resultstore ./internal/api/batch ./internal/downloader ./internal/applyplan ./internal/videocollision -run 'TestIssue277|TestVideoCollision|TestReplacementBatch|TestStagedVideo'

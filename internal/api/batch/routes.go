@@ -30,6 +30,7 @@ func RegisterRoutes(protected *gin.RouterGroup, rt *core.APIRuntime) {
 		batch.POST("/:id/results/:resultId/preview", previewOrganize(rt))
 		batch.POST("/:id/results/:resultId/display-title-preview", previewDisplayTitle(rt))
 		batch.POST("/:id/results/:resultId/rescrape", rescrapeBatchMovie(rt))
+		batch.POST("/:id/video-collisions", videoCollisionReview(rt))
 		batch.POST("/:id/organize", organizeJob(rt))
 		batch.POST("/:id/update", updateBatchJob(rt))
 	}

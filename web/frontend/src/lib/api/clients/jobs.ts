@@ -168,6 +168,13 @@ export class JobClient extends BaseClient {
 		});
 	}
 
+	async reviewVideoCollisions(jobId: string, request: OrganizeRequest) {
+		return this.request<import('../types').VideoCollisionReport>(
+			`/api/v1/batch/${jobId}/video-collisions`,
+			{ method: 'POST', body: JSON.stringify(request) },
+		);
+	}
+
 	async organizeBatchJob(jobId: string, request: OrganizeRequest): Promise<OrganizeResponse> {
 		return this.request<OrganizeResponse>(`/api/v1/batch/${jobId}/organize`, {
 			method: 'POST',
@@ -267,7 +274,11 @@ export class ScraperClient extends BaseClient {
 	}
 
 	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<ScrapeMovieResult> {
-		const response = await this.request<{ movie: Movie; translation_warning?: string; translation_warning_code?: TranslationWarningCode }>(`/api/v1/movies/${id}/rescrape`, {
+		const response = await this.request<{
+			movie: Movie;
+			translation_warning?: string;
+			translation_warning_code?: TranslationWarningCode;
+		}>(`/api/v1/movies/${id}/rescrape`, {
 			method: 'POST',
 			body: JSON.stringify(req),
 		});

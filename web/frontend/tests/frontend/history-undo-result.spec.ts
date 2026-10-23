@@ -37,6 +37,8 @@ async function setup(page: Page, outcomes: Array<'failure' | 'success' | 'skippe
 			json = { current: 'fixture', latest: 'fixture', update_available: false, source: 'disabled' };
 		else if (url.pathname === '/api/v1/batch' && request.method() === 'GET') json = { jobs: [] };
 		else if (url.pathname === '/api/v1/jobs' && request.method() === 'GET') json = { jobs: [] };
+		else if (url.pathname === `/api/v1/batch/${jobId}` && request.method() === 'GET')
+			json = { id: jobId, status: 'completed', results: {} };
 		else if (url.pathname === `/api/v1/jobs/${jobId}`)
 			json = {
 				id: jobId,

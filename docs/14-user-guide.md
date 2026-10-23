@@ -94,6 +94,8 @@ The standard two-phase workflow used by the web UI's "Scrape & Organize" button:
 1. **Scrape** — Fetch metadata from configured scrapers, save to database, and present results for review
 2. **Organize** — Apply the selected operation mode: move/rename files, write NFO, and download artwork
 
+Before Apply, **Video destination review** lists occupied video paths and sizes. Resolve each collision with **Skip entire Apply** or **Replace reviewed video**, or exclude unresolved work. The default is to refuse collisions; NFO/artwork overwrite settings do not authorize video replacement. See [Existing Video Destinations](video-collision-policy.md) for reload/retry, multipart, recovery, and Undo behavior.
+
 The operation mode determines what happens during step 2. With `metadata-artwork` mode, step 2 writes NFO and downloads artwork but skips all file operations.
 
 ## Update Metadata Workflow

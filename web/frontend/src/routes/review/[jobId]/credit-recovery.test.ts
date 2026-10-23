@@ -92,6 +92,14 @@ beforeEach(async () => {
 		configurable: true,
 		value: () => [],
 	});
+	vi.spyOn(apiClient, 'reviewVideoCollisions').mockResolvedValue({
+		items: [],
+		new: 1,
+		replaced: 0,
+		skipped: 0,
+		unresolved: 0,
+		same_file: 0,
+	});
 	vi.spyOn(apiClient, 'previewOrganize').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'getExistingNFO').mockResolvedValue({} as never);
 	vi.spyOn(apiClient, 'previewDisplayTitle').mockResolvedValue({
@@ -122,6 +130,25 @@ afterEach(() => {
 	clients.splice(0).forEach((c) => c.clear());
 	vi.restoreAllMocks();
 });
+it('keeps unsaved metadata drafts out of automatic destination review', async () => {
+	vi.spyOn(apiClient, 'getBatchJob').mockResolvedValue(original());
+	const writes = vi.spyOn(apiClient, 'updateBatchMovie');
+	mount();
+	await waitFor(() => expect(observedReview.state?.job).toBeTruthy());
+	const state = observedReview.state!;
+	state.editedMovies.set(filePath, {
+		...original().results[filePath].movie!,
+		title: 'Unsaved title',
+	});
+	vi.mocked(apiClient.reviewVideoCollisions).mockClear();
+	await state.reviewVideoCollisions();
+	expect(writes).not.toHaveBeenCalled();
+	expect(apiClient.reviewVideoCollisions).not.toHaveBeenCalled();
+	expect(state.editedMovies.get(filePath)?.title).toBe('Unsaved title');
+	expect(state.videoCollisionError).toMatch(/Save metadata changes/);
+	expect(state.videoCollisionBlocked).toBe(true);
+});
+
 function mount() {
 	const client = new QueryClient({
 		defaultOptions: {
@@ -155,7 +182,7 @@ it.each(['credit_conflict', 'credit_status_unavailable'] as const)(
 		await waitFor(() => expect(view.getByRole('button', { name: /Keep catalog/ })).toBeTruthy());
 		const organize = view.getAllByRole('button', { name: /Organize.*1.*file/i });
 		expect(organize.length).toBeGreaterThan(0);
-		expect((organize[0] as HTMLButtonElement).disabled).toBe(false);
+		await waitFor(() => expect((organize[0] as HTMLButtonElement).disabled).toBe(false));
 		await fireEvent.click(organize[0]);
 		await waitFor(() => expect(apply).toHaveBeenCalledOnce());
 		await waitFor(() => expect(view.getByRole('button', { name: /Retry Failed/i })).toBeTruthy());

@@ -11,12 +11,22 @@ import (
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 )
 
+// ApplyRetryFailure records a receipt-publication failure independently of the
+// protected domain row. Its identity/revision binding prevents stale failures
+// from being projected onto a later edit, rescrape, or successful Apply.
+type ApplyRetryFailure struct {
+	ResultID string `json:"result_id"`
+	Revision uint64 `json:"revision"`
+	Error    string `json:"error"`
+}
+
 // JobResultsEnvelope wraps domain results and provenance data for persistence.
 // The Results text column stores this envelope instead of
 // a raw map[string]*MovieResult.
 type JobResultsEnvelope struct {
-	Domain     map[string]*resultstore.MovieResult    `json:"domain"`
-	Provenance map[string]*resultstore.ProvenanceData `json:"provenance,omitempty"`
+	ApplyRetryFailures map[string]ApplyRetryFailure           `json:"apply_retry_failures,omitempty"`
+	Domain             map[string]*resultstore.MovieResult    `json:"domain"`
+	Provenance         map[string]*resultstore.ProvenanceData `json:"provenance,omitempty"`
 	// CurrentPhase mirrors JobLifecycle's phase marker at persist time
 	// (POSTER-WRITE-HARDENING D16): "" idle, "scrape"/"apply" while Running.
 	CurrentPhase    string `json:"current_phase,omitempty"`
@@ -29,6 +39,7 @@ type JobResultsEnvelope struct {
 // *models.Job. It intentionally excludes worker-only fields (PersistError,
 // IsDeleted, ResultIndex) that are not persisted in the database.
 type Snapshot struct {
+	ApplyRetryFailures    map[string]ApplyRetryFailure
 	ID                    string
 	PruneVersion          uint64
 	EnvelopeGeneration    uint64
@@ -71,10 +82,11 @@ func Encode(snapshot Snapshot) (*models.Job, error) {
 	}
 
 	envelope := JobResultsEnvelope{
-		Domain:          snapshot.Results,
-		Provenance:      snapshot.Provenance,
-		CurrentPhase:    snapshot.CurrentPhase,
-		ApplyGeneration: snapshot.ApplyGeneration,
+		ApplyRetryFailures: snapshot.ApplyRetryFailures,
+		Domain:             snapshot.Results,
+		Provenance:         snapshot.Provenance,
+		CurrentPhase:       snapshot.CurrentPhase,
+		ApplyGeneration:    snapshot.ApplyGeneration,
 	}
 	resultsJSON, err := MarshalFn(envelope)
 	if err != nil {
@@ -189,6 +201,7 @@ func Decode(dbJob *models.Job) (Snapshot, []error) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to parse results for job %s: %w", dbJob.ID, err))
 		} else {
+			snapshot.ApplyRetryFailures = parsed.ApplyRetryFailures
 			snapshot.Results = parsed.Results
 			snapshot.Provenance = parsed.Provenance
 			snapshot.CurrentPhase = parsed.CurrentPhase
