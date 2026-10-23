@@ -1630,10 +1630,28 @@ its separate nonpositive-or-NULL verified-owner rules. Curated/inline aliases ar
 as canonical identity keys. Quarantine selects only relevant DMM-less owners,
 while still inspecting the candidate and curated-alias populations. Fixed-candidate
 tests do not establish linear scaling when those populations themselves grow.
-Quarantine still runs once per imported row, not once per batch; mass promotion
-from a candidate population proportional to the import size can remain quadratic.
-`TestCLIImportGrowingCandidatePopulation` and `BenchmarkCLIImportGrowingCandidates`
-characterize 32, 256 and 1,024 background candidates with a fixed import count.
+Quarantine now checks a persisted revision inside each caller transaction. A
+known-clean graph skips hydration; relevant raw/application mutations invalidate
+it through SQL triggers. A dirty graph runs exactly one unchanged oracle pass,
+then consumes only the revision observed before the pass. NameKey and quarantine
+writes can leave a newer revision pending for the next invocation; the gate does
+not silently run to a fixed point. Startup retains an unconditional repair pass.
+Migration 25 starts dirty, and missing revision state fails closed. INSERT/UPDATE
+OR REPLACE victim handling follows the actual actress uniqueness constraints;
+new unique constraints require revisiting that contract and its query-plan tests.
+
+This is not batching. Candidate promotion, missing-DMM owner changes, aliases,
+credits and collisions still invalidate the full graph. Conflict-bearing actress
+updates conservatively invalidate even when values are unchanged, so reimports
+and metadata updates are not promised a speedup. Mass promotion from a candidate
+population proportional to import size can remain quadratic.
+`TestCLIImportGrowingCandidatePopulation` covers 8, 32 and 128 fresh positive
+imports against 32, 256 and 1,024 settled background candidates: zero actress
+rows hydrated, with bounded read queries per import. Its 100-import benchmark
+uses the same candidate populations. `TestCLIImportCandidatePromotionStillReconciles`
+explicitly retains the full-pass cost for a changing graph. The doubly opt-in
+`BenchmarkCLIImportStaticCandidates85000` imports 85k positives with 1,024 fixed
+candidates; it does not establish mass-promotion, reimport or DMM-less throughput.
 Clean-catalogue 85k results must not be used to claim candidate-rich throughput.
 `TestCanonicalIndex*` covers differential equivalence, raw writes, rollback,
 reopen/migration, Unicode, live eligibility and concurrent renames.
@@ -1647,3 +1665,12 @@ the canonical index without weakening its all-identities ownership check.
 Benchmark results should be compared on the same machine/filesystem and dataset; they are not CI
 pass/fail performance thresholds. Imports retain per-row transactions, not batch
 atomicity, and these tests do not introduce batching or change matching behavior.
+
+`TestQuarantineGate*` covers single-pass differential behavior, public import
+outcomes, credits/projections/render generations, all invalidation classes,
+NULL-safe eligibility, REPLACE victims, same-transaction repeated mutations,
+raw external writers and snapshot retries, migration rollback/down/reopen,
+revision overflow (including outer OR IGNORE/REPLACE) and error rollback.
+Revision integrity uses explicit SQL ABORT because outer conflict policies can
+suppress ordinary CHECK failures inside triggers. Timing remains opt-in and must use a
+separately coordinated serial slot; deterministic row/query guards run in CI.
