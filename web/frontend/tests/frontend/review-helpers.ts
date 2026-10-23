@@ -1,4 +1,4 @@
-import type { BatchJobResponse, FileResult, Movie, ScraperInfo } from '$lib/api/types';
+import type { BatchJobResponse, FileResult, Movie, ScraperInfo, VideoCollisionReport, OrganizeRequest } from '$lib/api/types';
 
 const JOB_ID = 'mock-job-001';
 
@@ -152,9 +152,23 @@ export async function setupMockRoutes(page: import('@playwright/test').Page): Pr
 
 		if (method === 'POST' && new URL(url).pathname === `/api/v1/batch/${JOB_ID}/video-collisions`) {
 			// Grid interactions need a stable review layout, not a late proxy-error banner.
-			await route.fulfill({
-				json: { items: [], new: 5, replaced: 0, skipped: 0, unresolved: 0, same_file: 0 },
-			});
+			const body = route.request().postDataJSON() as OrganizeRequest;
+			const job = buildBatchJob(excluded);
+			const destination = (body?.overrides?.destination ?? body?.destination ?? job.destination ?? '/output').replace(/\/$/, '');
+			const items = Object.values(job.results)
+				.filter(result => !excluded[result.file_path])
+				.filter(result => !body?.retry_file_paths?.length || body.retry_file_paths.includes(result.file_path))
+				.map(result => ({
+					source: result.file_path,
+					destination: `${destination}/${result.movie_id}.mp4`,
+					source_size: 1024,
+					destination_size: 0,
+					kind: 'new',
+				}));
+			const report: VideoCollisionReport = {
+				items, new: items.length, replaced: 0, skipped: 0, unresolved: 0, same_file: 0,
+			};
+			await route.fulfill({ json: report });
 		} else if (method === 'GET' && url.includes(`/batch/${JOB_ID}`)) {
 			await route.fulfill({ json: buildBatchJob(excluded) });
 		} else if (method === 'POST' && url.includes('/batch-exclude')) {
