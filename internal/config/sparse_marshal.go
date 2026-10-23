@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scraperconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -329,7 +330,7 @@ func stripFreeFormNulls(n *yaml.Node, path string) {
 }
 
 func isSourceAuthoritativeFreeFormMap(path string) bool {
-	if path == "output.download_proxy.profiles" {
+	if path == "output.download_proxy.profiles" || path == "scrapers.javlibrary.actress_name_overrides" {
 		return true
 	}
 	return strings.HasPrefix(path, "scrapers.") &&
@@ -350,12 +351,14 @@ func buildScraperSettingsSchema() *yaml.Node {
 
 func buildScraperSettingsSchemaWith(marshal yamlMarshalFunc, parse yamlParseFunc) *yaml.Node {
 	s := models.ScraperSettings{
-		Enabled:    true,
-		Language:   "xx",
-		Timeout:    1,
-		RateLimit:  1,
-		RetryCount: 1,
-		UserAgent:  "xx",
+		// Schema-only sample: makes removed rules known, never a runtime default.
+		ActressNameOverrides: scraperconfig.ActressNameOverrides{"xx": {SourceName: "xx yy", FirstName: "yy", LastName: "xx"}},
+		Enabled:              true,
+		Language:             "xx",
+		Timeout:              1,
+		RateLimit:            1,
+		RetryCount:           1,
+		UserAgent:            "xx",
 		Proxy: &models.ProxyConfig{
 			Enabled:        true,
 			Profile:        "xx",

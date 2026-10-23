@@ -91,7 +91,7 @@ func newScraper(settings *models.ScraperSettings, globalProxy *models.ProxyConfi
 		proxyOverride: settings.Proxy,
 		downloadProxy: settings.DownloadProxy,
 		rateLimiter:   ratelimit.NewLimiter(time.Duration(settings.RateLimit) * time.Millisecond),
-		settings:      *settings,
+		settings:      settings.Clone(),
 	}
 }
 
@@ -715,16 +715,23 @@ func (s *scraper) extractGenres(html string) []string {
 // extractActresses extracts actress info from the video_cast div
 func (s *scraper) extractActresses(html string) []models.ActressInfo {
 	// Cast is in: <span class="star"><a href="..." rel="tag">ActressName</a></span>
-	re := regexp.MustCompile(`class="star"[^>]*><a[^>]*>([^<]+)</a>`)
+	re := regexp.MustCompile(`class="star"[^>]*><a([^>]*)>([^<]+)</a>`)
 	matches := re.FindAllStringSubmatch(html, -1)
 
 	var actresses []models.ActressInfo
 	seen := make(map[string]bool)
 	for _, m := range matches {
-		if len(m) > 1 {
-			name := strings.TrimSpace(m[1])
-			if name != "" && !seen[name] {
-				seen[name] = true
+		if len(m) > 2 {
+			name := strings.TrimSpace(m[2])
+			override, overridden := s.castNameOverride(m[1], name)
+			key := name
+			if overridden {
+				// Do not discard a configured performer just because another
+				// source ID has the same displayed name.
+				key += "\x00" + override.FirstName + "\x00" + override.LastName
+			}
+			if name != "" && !seen[key] {
+				seen[key] = true
 				// Map the displayed script, not the page language: localized
 				// pages can still contain either native or romanized cast names.
 				// Preserve native text as supplied; do not infer romanization or
@@ -733,6 +740,10 @@ func (s *scraper) extractActresses(html string) []models.ActressInfo {
 					return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana)
 				}) {
 					actresses = append(actresses, models.ActressInfo{JapaneseName: name})
+					continue
+				}
+				if overridden {
+					actresses = append(actresses, override)
 					continue
 				}
 				// Preserve the existing romanized token order. The source does
