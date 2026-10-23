@@ -996,25 +996,29 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 }
 
 func (r *ActressRepository) findImportMatchesByCanonicalUnion(ctx context.Context, incoming *models.Actress) ([]models.Actress, error) {
-	incomingKeys := canonicalActressRepresentationKeys(incoming)
-	if len(incomingKeys) == 0 {
+	keys := sortedCanonicalActressKeys(incoming)
+	if len(keys) == 0 {
 		return nil, nil
 	}
-	query := r.GetDB().WithContext(ctx)
-	// Exact positive-DMM ownership is handled before this fallback. A different
-	// positive DMM identity must never be claimed by a name-only match.
+	predicate := ""
+	// Preserve legacy eligibility: positive DMM fallback accepts exactly zero,
+	// whereas a name-only import can match any canonical identity.
 	if incoming.DMMID > 0 {
-		query = query.Where("dmm_id = ?", 0)
-	}
-	var actresses []models.Actress
-	if err := query.Find(&actresses).Error; err != nil {
-		return nil, wrapDBErr("find", fmt.Sprintf("import canonical union %s", incoming.FullName()), err)
-	}
-	matches := make([]models.Actress, 0, 2)
-	for i := range actresses {
-		if exactActressNamesMatch(incoming, &actresses[i]) {
-			matches = append(matches, actresses[i])
+		// A positive-only catalogue has no eligible fallback owner. Avoid
+		// hydrating its deferred keys until a lookup actually needs them.
+		// Read eligibility in this transaction, never from cached metadata.
+		var eligible bool
+		if err := r.GetDB().WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM actresses WHERE dmm_id = 0)").Scan(&eligible).Error; err != nil {
+			return nil, wrapDBErr("find", "import zero-DMM eligibility", err)
 		}
+		if !eligible {
+			return nil, nil
+		}
+		predicate = "dmm_id = 0"
+	}
+	matches, err := canonicalActressesByKeysTx(r.GetDB().WithContext(ctx), keys, predicate)
+	if err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("import canonical union %s", incoming.FullName()), err)
 	}
 	return matches, nil
 }
@@ -1027,19 +1031,6 @@ func canonicalActressRepresentationKeys(actress *models.Actress) map[string]stru
 		}
 	}
 	return keys
-}
-
-func exactActressNamesMatch(left, right *models.Actress) bool {
-	leftKeys := canonicalActressRepresentationKeys(left)
-	if len(leftKeys) == 0 {
-		return false
-	}
-	for key := range canonicalActressRepresentationKeys(right) {
-		if _, ok := leftKeys[key]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func fillEmptyActressFields(existing, incoming *models.Actress) {

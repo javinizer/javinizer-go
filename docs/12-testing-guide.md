@@ -1589,7 +1589,8 @@ It is **not** wired into `internal/worker/`, `internal/tui/`, or `internal/webso
 
 `TestCLIImportRepresentativeWorkloads` covers fresh positive-DMM imports,
 unchanged reimports, metadata updates, fixed candidate-heavy and curated-alias-heavy
-catalogues, and DMM-less imports at 24 and 48 rows. It asserts bounded query and
+catalogues, DMM-less imports/reimports/updates, and mixed DMM/DMM-less
+catalogues with aliases at 24 and 48 rows. It asserts bounded query and
 returned-evidence counts, stored identity metadata, quarantine stability, and
 unchanged existing credit ownership rather than wall-clock deadlines. The existing
 `TestImport*` and `TestCLIImportLookupPlansAndScaling` tests additionally cover
@@ -1601,7 +1602,7 @@ Run synthetic on-disk SQLite benchmarks explicitly:
 go test ./cmd/javinizer/commands/actress -run '^$' \
   -bench '^BenchmarkCLIImportWorkloads$' -benchtime=1x -count=3
 JAVINIZER_BENCH_LARGE_IMPORT=1 go test ./cmd/javinizer/commands/actress \
-  -run '^$' -bench '^BenchmarkCLIImportFresh85000$' -benchtime=1x -count=1
+  -run '^$' -bench '^BenchmarkCLIImport(Fresh|DMMless)85000$' -benchtime=1x -count=1
 ```
 
 Each operation imports an entire 1,000-row dataset (85,000 for the separately gated
@@ -1614,11 +1615,35 @@ the timed CLI loop, not fixture setup. No benchmark contacts a remote service or
 uses a real catalogue.
 
 These are not TrueNAS/network-storage measurements or JSON parsing benchmarks.
-Positive-DMM imports avoid scanning the growing positive-DMM catalogue, but still
-inspect relevant candidate and DMM-less evidence. DMM-less canonical fallback
-still scans previous identities: fresh imports have quadratic returned-row growth
-(`n*(n-1)/2` even without candidates). Fixed-candidate tests do not establish linear
-scaling when the candidate or alias population itself grows. Benchmark results
-should be compared on the same machine/filesystem and dataset; they are not CI
+Canonical matching uses a persisted normalized-key index for both positive-DMM
+fallback and DMM-less imports. Transactional SQL-trigger dirty queues cover raw
+writers and refresh changed canonical representations with the existing Unicode
+normalization. Migration 24 seeds a one-time backfill; changes to normalization
+rules require a future rebuild migration. Positive imports probe exact-zero DMM
+eligibility using its existing index and skip canonical-key hydration when no
+fallback owner exists. This defers, rather than removes, index construction:
+fresh-positive benchmarks separately report `first-name-ns/op` for the first
+name-only import and `warm-name-ns/op` for the same lookup after hydration. These
+additional metrics are outside the main import timer and allocation measurement.
+Negative and NULL DMM IDs do not qualify for positive fallback; quarantine retains
+its separate nonpositive-or-NULL verified-owner rules. Curated/inline aliases are not imported
+as canonical identity keys. Quarantine selects only relevant DMM-less owners,
+while still inspecting the candidate and curated-alias populations. Fixed-candidate
+tests do not establish linear scaling when those populations themselves grow.
+Quarantine still runs once per imported row, not once per batch; mass promotion
+from a candidate population proportional to the import size can remain quadratic.
+`TestCLIImportGrowingCandidatePopulation` and `BenchmarkCLIImportGrowingCandidates`
+characterize 32, 256 and 1,024 background candidates with a fixed import count.
+Clean-catalogue 85k results must not be used to claim candidate-rich throughput.
+`TestCanonicalIndex*` covers differential equivalence, raw writes, rollback,
+reopen/migration, Unicode, live eligibility and concurrent renames.
+`BenchmarkCLIImportDMMlessScaling` compares 250, 500 and 1,000-row datasets.
+`BenchmarkCLICanonicalRenameImport` uses the same sizes for overwrite-enabled
+canonical renames with a curated alias on every identity; half use positive DMM
+references and half explicit local IDs. It verifies alias retargeting and immutable
+identity IDs, separately from metadata-only updates. Alias-owner proof also uses
+the canonical index without weakening its all-identities ownership check.
+
+Benchmark results should be compared on the same machine/filesystem and dataset; they are not CI
 pass/fail performance thresholds. Imports retain per-row transactions, not batch
 atomicity, and these tests do not introduce batching or change matching behavior.

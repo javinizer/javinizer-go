@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -24,13 +26,13 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = db.Close() })
 	require.NoError(tb, db.RunMigrationsOnStartup(tb.Context()))
-	if kind == "candidate-heavy" || kind == "alias-heavy" {
+	if kind == "candidate-heavy" || kind == "alias-heavy" || kind == "mixed-alias" {
 		owner := models.Actress{Verified: true, JapaneseName: "Fixture canonical"}
 		require.NoError(tb, db.Create(&owner).Error)
 		for i := 0; i < 32; i++ {
 			candidate := models.Actress{DMMID: 900000 + i, JapaneseName: fmt.Sprintf("Fixture stage %d", i)}
 			require.NoError(tb, db.Create(&candidate).Error)
-			if kind == "alias-heavy" {
+			if kind == "alias-heavy" || kind == "mixed-alias" {
 				for j := 0; j < 4; j++ {
 					name := fmt.Sprintf("Fixture alias %d %d", i, j)
 					if j == 0 {
@@ -50,11 +52,11 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 	records := make([]models.Actress, size)
 	for i := range records {
 		records[i] = models.Actress{DMMID: 10000 + i, FirstName: fmt.Sprintf("Synthetic%06d", i), LastName: "Workload", JapaneseName: fmt.Sprintf("合成%06d", i)}
-		if kind == "dmmless" {
+		if strings.HasPrefix(kind, "dmmless") || (strings.HasPrefix(kind, "mixed") && i%2 == 0) {
 			records[i].DMMID = 0
 		}
 	}
-	if kind == "reimport" || kind == "update" {
+	if strings.HasSuffix(kind, "reimport") || strings.HasSuffix(kind, "update") {
 		// Seed a separate slice: the measured input must still model ID-less JSON,
 		// not reuse the database IDs written back by the initial import.
 		seedRecords := append([]models.Actress(nil), records...)
@@ -62,7 +64,7 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 		require.Equal(tb, size, imported)
 		require.Zero(tb, skipped)
 		require.Zero(tb, failures)
-		if kind == "update" {
+		if strings.HasSuffix(kind, "update") {
 			for i := range records {
 				records[i].Aliases = "Metadata only"
 			}
@@ -75,11 +77,16 @@ func importWorkload(tb testing.TB, kind string, size int, disk bool) (*database.
 func expectedImportWorkload(tb testing.TB, db *database.DB, kind string, records []models.Actress) []models.Actress {
 	tb.Helper()
 	expected := append([]models.Actress(nil), records...)
-	if kind == "reimport" || kind == "update" {
+	var all []models.Actress
+	require.NoError(tb, db.Find(&all).Error)
+	byName := make(map[string][]models.Actress)
+	for _, a := range all {
+		byName[a.JapaneseName] = append(byName[a.JapaneseName], a)
+	}
+	if strings.HasSuffix(kind, "reimport") || strings.HasSuffix(kind, "update") {
 		for i := range expected {
 			require.Zero(tb, records[i].ID, "reimport and update must match ID-less inputs")
-			var matches []models.Actress
-			require.NoError(tb, db.Where("japanese_name = ?", expected[i].JapaneseName).Find(&matches).Error)
+			matches := byName[expected[i].JapaneseName]
 			require.Len(tb, matches, 1)
 			require.NotZero(tb, matches[0].ID, "the fixture must already exist in the database")
 			expected[i].ID = matches[0].ID
@@ -91,16 +98,21 @@ func expectedImportWorkload(tb testing.TB, db *database.DB, kind string, records
 func assertImportedWorkload(tb testing.TB, db *database.DB, kind string, expected, records []models.Actress) {
 	tb.Helper()
 	seenIDs := make(map[uint]bool, len(expected))
+	var all []models.Actress
+	require.NoError(tb, db.Find(&all).Error)
+	byName := make(map[string][]models.Actress)
+	for _, a := range all {
+		byName[a.JapaneseName] = append(byName[a.JapaneseName], a)
+	}
 	for i, record := range expected {
-		var matches []models.Actress
 		// Locate by an immutable fixture name, never an ID returned by import.
-		require.NoError(tb, db.Where("japanese_name = ?", record.JapaneseName).Find(&matches).Error)
+		matches := byName[record.JapaneseName]
 		require.Len(tb, matches, 1)
 		stored := matches[0]
 		require.NotZero(tb, stored.ID)
 		require.False(tb, seenIDs[stored.ID], "each fixture must retain a distinct identity")
 		seenIDs[stored.ID] = true
-		if kind == "reimport" || kind == "update" {
+		if strings.HasSuffix(kind, "reimport") || strings.HasSuffix(kind, "update") {
 			require.NotZero(tb, record.ID)
 			require.Equal(tb, record.ID, stored.ID, "existing identity IDs must be preserved")
 		}
@@ -116,7 +128,7 @@ func assertImportedWorkload(tb testing.TB, db *database.DB, kind string, expecte
 }
 
 func TestCLIImportRepresentativeWorkloads(t *testing.T) {
-	for _, kind := range []string{"fresh", "reimport", "update", "candidate-heavy", "alias-heavy", "dmmless"} {
+	for _, kind := range []string{"fresh", "reimport", "update", "candidate-heavy", "alias-heavy", "dmmless", "mixed-alias", "dmmless-reimport", "dmmless-update"} {
 		for _, size := range []int{24, 48} {
 			t.Run(fmt.Sprintf("%s/%d", kind, size), func(t *testing.T) {
 				db, records := importWorkload(t, kind, size, false)
@@ -127,12 +139,12 @@ func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 				var creditsBefore []models.MovieCredit
 				require.NoError(t, db.Where("dmm_id >= ? OR japanese_name = ?", 800000, "Fixture canonical").Order("id").Find(&before).Error)
 				require.NoError(t, db.Order("id").Find(&creditsBefore).Error)
-				if kind == "candidate-heavy" || kind == "alias-heavy" {
+				if kind == "candidate-heavy" || kind == "alias-heavy" || kind == "mixed-alias" {
 					require.Len(t, before, 34)
 					require.Len(t, creditsBefore, 32)
 					for _, candidate := range before {
 						if !candidate.Verified {
-							require.Equal(t, kind == "alias-heavy", candidate.AmbiguityQuarantined)
+							require.Equal(t, kind == "alias-heavy" || kind == "mixed-alias", candidate.AmbiguityQuarantined)
 						}
 					}
 				}
@@ -149,7 +161,7 @@ func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 				imported, skipped, failures := importActressRecords(t.Context(), database.NewActressRepository(db), records)
 				require.NoError(t, db.Callback().Query().Remove("test:workload"))
 				require.Zero(t, failures)
-				if kind == "reimport" {
+				if strings.HasSuffix(kind, "reimport") {
 					require.Equal(t, size, skipped)
 					require.Zero(t, imported)
 				} else {
@@ -157,15 +169,11 @@ func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 					require.Zero(t, skipped)
 				}
 				require.LessOrEqual(t, queries, int64(20*size), "query count remains bounded per row")
-				// Positive-DMM imports may inspect fixed candidate/DMM-less evidence, not
-				// the growing positive-DMM catalogue. DMM-less canonical matching still
-				// scans prior identities; explicitly characterize that quadratic limit.
+				// Imports inspect fixed candidate evidence and changed identities,
+				// never the growing positive-DMM or DMM-less catalogue.
 				bound := int64(5 * size)
-				if kind == "candidate-heavy" || kind == "alias-heavy" {
+				if kind == "candidate-heavy" || kind == "alias-heavy" || kind == "mixed-alias" {
 					bound = int64(36 * size)
-				}
-				if kind == "dmmless" {
-					bound = int64(size * (size - 1) / 2)
 				}
 				require.LessOrEqual(t, identityRows, bound)
 				require.LessOrEqual(t, aliasRows, int64(128*size))
@@ -186,7 +194,7 @@ func TestCLIImportRepresentativeWorkloads(t *testing.T) {
 // -benchtime=1x -count=3. Setup/migrations and assertions are outside the timer.
 // Each operation imports a whole dataset into a fresh temporary on-disk SQLite DB.
 func BenchmarkCLIImportWorkloads(b *testing.B) {
-	for _, kind := range []string{"fresh", "reimport", "update", "candidate-heavy", "alias-heavy", "dmmless"} {
+	for _, kind := range []string{"fresh", "reimport", "update", "candidate-heavy", "alias-heavy", "dmmless", "mixed-alias", "dmmless-reimport", "dmmless-update"} {
 		b.Run(kind, func(b *testing.B) { benchmarkCLIImport(b, kind, 1000) })
 	}
 }
@@ -201,6 +209,7 @@ func BenchmarkCLIImportFresh85000(b *testing.B) {
 
 func benchmarkCLIImport(b *testing.B, kind string, size int) {
 	b.ReportAllocs()
+	var cold, warm time.Duration
 	for n := 0; n < b.N; n++ {
 		b.StopTimer()
 		db, records := importWorkload(b, kind, size, true)
@@ -213,7 +222,7 @@ func benchmarkCLIImport(b *testing.B, kind string, size int) {
 		imported, skipped, failures := importActressRecords(b.Context(), database.NewActressRepository(db), records)
 		b.StopTimer()
 		require.Zero(b, failures)
-		if kind == "reimport" {
+		if strings.HasSuffix(kind, "reimport") {
 			require.Equal(b, size, skipped)
 			require.Zero(b, imported)
 		} else {
@@ -227,7 +236,52 @@ func benchmarkCLIImport(b *testing.B, kind string, size int) {
 		require.NoError(b, db.Order("id").Find(&creditsAfter).Error)
 		require.Equal(b, before, after, "unrelated identities and quarantine must be unchanged")
 		require.Equal(b, creditsBefore, creditsAfter, "credits must not migrate")
+		if kind == "fresh" {
+			// Deferred maintenance is not free: report the first name-only lookup
+			// separately, then the identical warm lookup, outside import timing.
+			var persistedBefore models.Actress
+			require.NoError(b, db.First(&persistedBefore, records[0].ID).Error)
+			for attempt := 0; attempt < 2; attempt++ {
+				probe := models.Actress{JapaneseName: expected[0].JapaneseName}
+				start := time.Now()
+				err := database.NewActressRepository(db).ImportUpsert(b.Context(), &probe)
+				elapsed := time.Since(start)
+				require.NoError(b, err)
+				require.Equal(b, records[0].ID, probe.ID)
+				require.Equal(b, expected[0].DMMID, probe.DMMID)
+				var persistedAfter models.Actress
+				require.NoError(b, db.First(&persistedAfter, records[0].ID).Error)
+				// Public import intentionally saves its matched row; only its
+				// update timestamp may change during these name-only probes.
+				require.False(b, persistedAfter.UpdatedAt.Before(persistedBefore.UpdatedAt))
+				persistedAfter.UpdatedAt = persistedBefore.UpdatedAt
+				require.Equal(b, persistedBefore, persistedAfter)
+				if attempt == 0 {
+					cold += elapsed
+				} else {
+					warm += elapsed
+				}
+			}
+		}
 		require.NoError(b, db.Close())
 	}
 	b.ReportMetric(float64(size), "rows/op")
+	if kind == "fresh" {
+		b.ReportMetric(float64(cold.Nanoseconds())/float64(b.N), "first-name-ns/op")
+		b.ReportMetric(float64(warm.Nanoseconds())/float64(b.N), "warm-name-ns/op")
+	}
+}
+
+// Compare bounded baseline sizes and linear scaling with identical fixtures.
+func BenchmarkCLIImportDMMlessScaling(b *testing.B) {
+	for _, size := range []int{250, 500, 1000} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) { benchmarkCLIImport(b, "dmmless", size) })
+	}
+}
+
+func BenchmarkCLIImportDMMless85000(b *testing.B) {
+	if os.Getenv("JAVINIZER_BENCH_LARGE_IMPORT") != "1" {
+		b.Skip("set JAVINIZER_BENCH_LARGE_IMPORT=1")
+	}
+	benchmarkCLIImport(b, "dmmless", 85000)
 }
