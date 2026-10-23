@@ -13,7 +13,7 @@ import (
 // WITHOUT replacing an occupied destination: when dst is taken the publish
 // fails with ErrPublishCollision and the existing bytes are never touched.
 // OsFs routes to the kernel primitive (renameat2(RENAME_NOREPLACE) on Linux —
-// publish_noreplace_linux.go; a hard-link publish elsewhere on POSIX —
+// publish_noreplace_linux.go; renameatx_np(RENAME_EXCL) on Darwin; hard links on other POSIX —
 // publish_noreplace_otherposix.go); virtual filesystems take the shared
 // classify-then-rename leg (publish_noreplace.go).
 //
@@ -155,7 +155,7 @@ func publishNoReplaceFallback(src, dst string) error {
 			return publishCollision(dst)
 		}
 		if linkUnsupportedClass(err) {
-			return fmt.Errorf("no-replace publish %s -> %s: %w; link(2): %w — volume may lack hard-link support (FUSE/shfs-class) or EPERM may reflect protected_hardlinks policy; organize to a native-filesystem path (Unraid: bind-mount /mnt/diskN/...), or local staging plus external sync", src, dst, ErrPublishNoReplaceUnsupported, err)
+			return fmt.Errorf("no-replace publish %s -> %s: %w; link(2): %w — hard-link operation refused at this source/destination pair; filesystem support or access policy may be responsible", src, dst, ErrPublishNoReplaceUnsupported, err)
 		}
 		return fmt.Errorf("no-replace publish %s -> %s: %w: %w", src, dst, ErrPublishNoReplaceLinkFailed, err)
 	}

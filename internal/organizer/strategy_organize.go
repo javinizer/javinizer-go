@@ -290,7 +290,7 @@ func mapNoReplaceRefusal(err error, dst string) error {
 	case fsutil.PublishCompleted(err):
 		return fmt.Errorf("published to destination but source cleanup refused (both files preserved): %s: %w", dst, err)
 	case errors.Is(err, fsutil.ErrPublishNoReplaceUnsupported):
-		return fmt.Errorf("destination volume cannot express an atomic no-clobber write (no-replace unsupported): %s: %w", dst, err)
+		return fmt.Errorf("filesystem cannot express an atomic no-clobber write (no-replace unsupported): %s: %w", dst, err)
 	case errors.Is(err, fsutil.ErrPublishCollision):
 		return fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
 	default:

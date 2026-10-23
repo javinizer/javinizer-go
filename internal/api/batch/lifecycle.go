@@ -335,7 +335,8 @@ func listBatchJobs(rt *core.APIRuntime) gin.HandlerFunc {
 			Offset: offset,
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			logging.Errorf("Failed to list batch jobs: %v", err)
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "failed to list jobs"})
 			return
 		}
 
