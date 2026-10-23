@@ -98,6 +98,9 @@ func TestWebCommandReportsListenFailure(t *testing.T) {
 // request body. Keep that body unfinished to exercise the real shutdown timeout
 // deterministically, rather than guessing when a request became active.
 func TestWebCommandReportsShutdownDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exercises the production 10-second graceful shutdown deadline")
+	}
 	path, _ := lifecycleConfig(t)
 	t.Setenv("JAVINIZER_SETUP_SECRET", "fixture-bootstrap-secret")
 	reserved, err := net.Listen("tcp", "127.0.0.1:0")
