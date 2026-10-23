@@ -95,7 +95,11 @@ func translateWithGooglePaid(ctx context.Context, httpClient httpclient.HTTPClie
 	translateURL := baseURL + "/language/translate/v2?key=" + url.QueryEscape(apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, translateURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		// Request construction errors may include the URL and its API key.
+		return nil, &translationError{
+			Kind:    TranslationErrorProvider,
+			Message: "google paid translation request construction failed",
+		}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
