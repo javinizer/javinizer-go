@@ -182,11 +182,7 @@ func TestDumpSyntheticSuccessAndRetryControls(t *testing.T) {
 	t.Setenv("JAVINIZER_R18DEV_DUMP_URL", "https://offline.invalid/dump.sql.gz")
 	for range 2 {
 		require.Equal(t, http.StatusAccepted, startShutdownTestDownload(h, context.Background(), false).Code)
-		select {
-		case <-h.done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("synthetic import did not finish")
-		}
+		awaitFixtureDone(t, h)
 		require.Empty(t, h.lastError)
 		require.FileExists(t, path)
 		require.True(t, h.rt.WaitBackgroundTasks(time.Second))
