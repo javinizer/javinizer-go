@@ -47,10 +47,6 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 		return fmt.Errorf("get sql database handle: %w", err)
 	}
 
-	if err := ensureMigrationHashTable(sqlDB); err != nil {
-		return fmt.Errorf("ensure migration hash table: %w", err)
-	}
-
 	migrationLocker, err := newStartupMigrationLocker(db.dsn, db.fs)
 	if err != nil {
 		return fmt.Errorf("initialize startup migration lock: %w", err)
@@ -64,6 +60,10 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 			err = fmt.Errorf("release startup migration lock: %w", unlockErr)
 		}
 	}()
+
+	if err := ensureMigrationHashTable(ctx, sqlDB); err != nil {
+		return fmt.Errorf("ensure migration hash table: %w", err)
+	}
 
 	provider, err := goose.NewProvider(
 		goose.DialectSQLite3,
