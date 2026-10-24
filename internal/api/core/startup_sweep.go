@@ -35,9 +35,13 @@ func startStartupSweep(rt *APIRuntime, fs afero.Fs, repo database.BatchFileOpera
 		return
 	}
 
-	rt.EnsureRuntime()
+	// Startup repair may still be releasing database resources after observing
+	// cancellation. Join its worker before Shutdown returns to DB-close callers.
+	done := rt.TrackServerTask()
+	if done == nil {
+		return
+	}
 	ctx := rt.ServerCtx()
-	done := rt.TrackBackgroundTask()
 	go func() {
 		defer done()
 		history.SweepOnStartupWithContext(ctx, fs, repo)

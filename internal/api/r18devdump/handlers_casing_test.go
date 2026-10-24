@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -21,7 +20,7 @@ const casingDump = "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n
 
 func assertCasingInstalled(t *testing.T, h *dumpHandler, path string) {
 	t.Helper()
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr)
 	assert.Empty(t, kind)
