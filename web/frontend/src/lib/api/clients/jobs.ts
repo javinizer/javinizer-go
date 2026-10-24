@@ -37,6 +37,8 @@ import type {
 	FieldOverrideRequest,
 	FieldOverrideResponse,
 	ExistingNFOResponse,
+	ActressNameOverrideResponse,
+	SaveActressNameOverrideRequest,
 } from '../types';
 import { BaseClient, type RequestOptions } from './common';
 
@@ -259,6 +261,31 @@ export class FileClient extends BaseClient {
 
 // ScraperClient handles standalone scrape and scraper metadata endpoints.
 export class ScraperClient extends BaseClient {
+	private nameOverridePath(sourceID: string): string {
+		if (!/^[A-Za-z0-9]{1,64}$/.test(sourceID)) {
+			throw new Error('Invalid JAVLibrary source ID');
+		}
+		return `/api/v1/scrapers/javlibrary/name-overrides/${encodeURIComponent(sourceID)}`;
+	}
+
+	async getNameOverride(
+		sourceID: string,
+		options?: RequestOptions,
+	): Promise<ActressNameOverrideResponse> {
+		return this.request<ActressNameOverrideResponse>(this.nameOverridePath(sourceID), options);
+	}
+
+	async saveNameOverride(
+		sourceID: string,
+		rule: SaveActressNameOverrideRequest,
+	): Promise<ActressNameOverrideResponse> {
+		return this.request<ActressNameOverrideResponse>(this.nameOverridePath(sourceID), {
+			method: 'PUT',
+			body: JSON.stringify(rule),
+			timeoutMs: 15000,
+		});
+	}
+
 	async getAvailableScrapers(): Promise<AvailableScrapersResponse> {
 		return this.request<AvailableScrapersResponse>('/api/v1/scrapers');
 	}

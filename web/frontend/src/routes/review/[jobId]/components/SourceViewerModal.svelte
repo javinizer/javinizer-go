@@ -3,10 +3,11 @@
 	import { fade, scale, slide } from 'svelte/transition';
 	import { Check, ChevronRight, Columns3, LoaderCircle, Minus, X } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
-	import type { ScraperResult } from '$lib/api/types';
+	import type { CastNameProvenance, ScraperResult } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
-	import { formatActressName } from '$lib/utils/actress';
+	import { canCorrectSourceName, sourceCastNames } from '$lib/utils/source-cast';
+	import SourceNameCorrectionModal from './SourceNameCorrectionModal.svelte';
 	import { createConfigQuery } from '$lib/query/queries';
 	import * as m from '$lib/paraglide/messages';
 
@@ -36,11 +37,8 @@
 			key: 'actresses',
 			label: m.review_field_actresses(),
 			kind: 'list',
-			get: (r) =>
-				r.actresses
-					?.filter((a) => (a.first_name ?? '') !== '' || (a.last_name ?? '') !== '' || (a.japanese_name ?? '') !== '')
-					.map((a) => formatActressName(a, { firstNameOrder, japaneseNames }))
-					.join(', ') ?? ''
+			get: (r) => sourceCastNames(r, { firstNameOrder, japaneseNames })
+				.map((entry) => entry.displayName).join(', ')
 		},
 		{ key: 'genres', label: m.review_field_genres(), kind: 'list', get: (r) => r.genres?.filter(Boolean).join(', ') ?? '' },
 		{ key: 'poster_url', label: m.review_field_poster_url(), kind: 'url', get: (r) => r.poster_url ?? '' },
@@ -86,9 +84,14 @@
 
 	let focusedKey = $state<string>(FIELDS[0].key);
 	let applyingSource = $state<string | null>(null);
+	let correctingName = $state<CastNameProvenance | null>(null);
 
 	$effect(() => {
 		if (!pendingField) applyingSource = null;
+	});
+
+	$effect(() => {
+		if (!show) correctingName = null;
 	});
 
 	function close() {
@@ -152,7 +155,7 @@
 	function sourceCandidates(field: FieldDef) {
 		const seen = new Set<string>();
 		return results
-			.map((r) => ({ source: r.source ?? 'unknown', value: valueOf(field, r) }))
+			.map((r) => ({ source: r.source ?? 'unknown', value: valueOf(field, r), result: r }))
 			.filter((c) => {
 				if (!c.value) return false;
 				if (seen.has(c.source)) return false;
@@ -162,7 +165,7 @@
 	}
 
 	function handleKey(e: KeyboardEvent) {
-		if (!show) return;
+		if (!show || correctingName) return;
 		if (e.key === 'Escape') {
 			close();
 			return;
@@ -186,6 +189,7 @@
 	<div
 		class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
 		use:portalToBody
+		inert={correctingName !== null}
 		in:fade|local={{ duration: 140 }}
 		out:fade|local={{ duration: 120 }}
 		role="presentation"
@@ -408,9 +412,9 @@
 																{isMonospace ? 'font-mono text-xs' : ''}
 																{isClamped ? 'line-clamp-4' : ''}"
 															>
-																{c.value}
+																{focusedField.key === 'actresses' ? m.review_name_source_cast({ count: sourceCastNames(c.result).length }) : c.value}
 															</p>
-															{#if isLongText(c.value)}
+															{#if focusedField.key !== 'actresses' && isLongText(c.value)}
 																<button
 																	type="button"
 																	class="mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -427,6 +431,37 @@
 															{/if}
 														</div>
 													</div>
+													{#if focusedField.key === 'actresses'}
+														<ul class="mt-2 space-y-2 rounded-lg border p-3" aria-label={m.review_name_source_list({ source: c.source })}>
+															{#each sourceCastNames(c.result, { firstNameOrder, japaneseNames }) as entry (entry.index)}
+																<li class="flex flex-wrap items-start justify-between gap-2 text-sm">
+																	<div class="min-w-0">
+																		<p class="whitespace-pre-wrap break-words">{entry.displayName}</p>
+																		<p class="text-xs text-muted-foreground">
+																			{#if entry.provenance?.state === 'unknown_order'}
+																				{m.review_name_source_unknown()}
+																			{:else if entry.provenance?.state === 'native_unsplit'}
+																				{m.review_name_source_native()}
+																			{:else if entry.provenance?.state === 'single_name'}
+																				{m.review_name_source_single()}
+																			{:else if entry.provenance?.state === 'user_corrected'}
+																				{m.review_name_source_corrected()}
+																			{:else}
+																				{m.review_name_source_missing()}
+																			{/if}
+																		</p>
+																	</div>
+																	{#if c.source === 'javlibrary' && canCorrectSourceName(entry.provenance)}
+																		<Button variant="outline" size="sm"
+																			aria-label={m.review_name_source_correct_aria({ name: entry.displayName })}
+																			onclick={() => { correctingName = entry.provenance ?? null; }}>
+																			{m.review_name_source_correct()}
+																		</Button>
+																	{/if}
+																</li>
+															{/each}
+														</ul>
+													{/if}
 												</li>
 											{/each}
 										</ul>
@@ -451,4 +486,10 @@
 			</Card>
 		</div>
 	</div>
+{/if}
+
+{#if show && correctingName}
+	{#key `${correctingName.source}:${correctingName.source_id}:${correctingName.display_name}`}
+		<SourceNameCorrectionModal provenance={correctingName} onClose={() => { correctingName = null; }} />
+	{/key}
 {/if}

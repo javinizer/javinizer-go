@@ -4273,6 +4273,122 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/scrapers/javlibrary/name-overrides/{sourceID}": {
+            "get": {
+                "description": "Get the durable name-split rule for one JavLibrary performer ID, or null if none exists. Requires authentication. Does not return unrelated settings or update historical credits.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get a saved JavLibrary name correction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "JavLibrary performer ID (1-64 alphanumeric characters)",
+                        "name": "sourceID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_system.JavLibraryNameOverrideResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Save one guarded name split for future scrapes, preserving all other settings and historical credits. The source label must reconstruct from the two nonempty fields in either order; native-script and single-stage labels are not eligible. expected_rule is required: null means no prior rule, otherwise provide the complete rule returned by GET. A stale prior rule returns 409. Saving does not enable a disabled scraper. Maximum body size is 4 KiB; each new-rule field is limited to 512 bytes. The decoded source label is preserved verbatim; only component whitespace is normalized.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Save a JavLibrary name correction",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "JavLibrary performer ID (1-64 alphanumeric characters)",
+                        "name": "sourceID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Guarded name correction",
+                        "name": "correction",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_system.JavLibraryNameOverrideRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_system.JavLibraryNameOverrideResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/temp/image": {
             "get": {
                 "description": "Proxies remote images for preview UI, handling hotlink protection and CORS issues. When image caching is enabled, fetched images are persisted server-side with stale-if-error semantics.",
@@ -8486,6 +8602,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_models.CastNameProvenance": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_models.CropBounds": {
             "type": "object",
             "properties": {
@@ -8936,6 +9069,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressInfo"
                     }
                 },
+                "cast_name_provenance": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.CastNameProvenance"
+                    }
+                },
                 "content_id": {
                     "type": "string"
                 },
@@ -9046,6 +9185,20 @@ const docTemplate = `{
                 "OperationModeMetadataArtwork",
                 "OperationModePreview"
             ]
+        },
+        "github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride": {
+            "type": "object",
+            "properties": {
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_javinizer_javinizer-go_internal_scraperconfig.ProxyProfile": {
             "type": "object",
@@ -9753,6 +9906,47 @@ const docTemplate = `{
                 },
                 "start_time": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_api_system.JavLibraryNameOverrideRequest": {
+            "type": "object",
+            "required": [
+                "expected_rule",
+                "first_name",
+                "last_name",
+                "source_name"
+            ],
+            "properties": {
+                "expected_rule": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_system.JavLibraryNameOverrideResponse": {
+            "type": "object",
+            "properties": {
+                "rule": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride"
+                        }
+                    ],
+                    "x-nullable": true
                 }
             }
         },
