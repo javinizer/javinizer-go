@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -515,7 +516,7 @@ func TestComprehensiveE2E(t *testing.T) {
 			return []net.IP{net.ParseIP("8.8.8.8")}, nil
 		}))
 		var modelRequests atomic.Int64
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			modelRequests.Add(1)
 			assert.Equal(t, http.MethodGet, r.Method)
 			assert.Equal(t, "/v1/models", r.URL.Path)

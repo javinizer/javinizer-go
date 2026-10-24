@@ -26,3 +26,12 @@ func TestSetLookupIPForTest(t *testing.T) {
 	// Can't compare func values directly; just verify it doesn't panic
 	assert.NotPanics(t, func() { currentLookupIP() })
 }
+
+func currentLookupIP() func(string) ([]net.IP, error) {
+	lookupIPMu.RLock()
+	defer lookupIPMu.RUnlock()
+	if lookupIP != nil {
+		return lookupIP
+	}
+	return net.LookupIP
+}

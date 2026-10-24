@@ -31,15 +31,6 @@ func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
 	}
 }
 
-func currentLookupIP() func(string) ([]net.IP, error) {
-	lookupIPMu.RLock()
-	defer lookupIPMu.RUnlock()
-	if lookupIP != nil {
-		return lookupIP
-	}
-	return net.LookupIP
-}
-
 func resolvePublicIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -158,17 +149,14 @@ func wrapTransportWithSSRFCheck(transport *http.Transport, dialTimeout time.Dura
 		}
 	}
 	transport.DialContext = pinnedDialerWithTimeout(originalDialContext, dialTimeout)
+	//nolint:staticcheck // Inspect the legacy TLS callback to close its HTTPS bypass.
 	if transport.DialTLSContext != nil || transport.DialTLS != nil {
 		transport.DialTLSContext = func(context.Context, string, string) (net.Conn, error) {
 			return nil, fmt.Errorf("SSRF blocked: custom TLS dialers cannot preserve validated endpoint and hostname verification")
 		}
-		transport.DialTLS = nil
+		transport.DialTLS = nil //nolint:staticcheck // Disable the legacy TLS bypass.
 	}
 	return transport
-}
-
-func pinnedDialer(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
-	return pinnedDialerWithTimeout(dial, 30*time.Second)
 }
 
 func pinnedDialerWithTimeout(dial func(context.Context, string, string) (net.Conn, error), timeout time.Duration) func(context.Context, string, string) (net.Conn, error) {

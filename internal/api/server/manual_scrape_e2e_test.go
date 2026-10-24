@@ -27,6 +27,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper/e2emock"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 )
 
 type batchScrapeResponse struct {
@@ -62,7 +63,7 @@ func setupManualScrapeE2E(t *testing.T) (*gin.Engine, string, *atomic.Int64) {
 	var imageData bytes.Buffer
 	require.NoError(t, jpeg.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 20, 30)), nil))
 	var imageRequests atomic.Int64
-	artwork := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	artwork := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		imageRequests.Add(1)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/poster.jpg", r.URL.Path)

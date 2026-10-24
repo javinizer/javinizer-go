@@ -12,6 +12,8 @@ import (
 
 var bridged sync.Map
 
+// NewServer creates a local fixture and bridges its synthetic 8.8.8.8 endpoint.
+// Tests must remain serial and finish background HTTP work before cleanup.
 func NewServer(t testing.TB, handler http.Handler) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(handler)

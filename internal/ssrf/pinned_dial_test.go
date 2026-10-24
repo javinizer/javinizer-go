@@ -2,12 +2,16 @@ package ssrf
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"golang.org/x/net/proxy"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -122,18 +126,34 @@ func TestCheckURLRejectsInvalidAnswers(t *testing.T) {
 }
 
 func TestPinnedTLSKeepsHostnameVerificationAndSNI(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != "example.com" || r.TLS.ServerName != "example.com" {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"localhost"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil || host != "localhost" || r.TLS.ServerName != "localhost" {
 			t.Errorf("lost hostname: Host=%q SNI=%q", r.Host, r.TLS.ServerName)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.StartTLS()
 	defer server.Close()
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
-	useTestLookup(t, map[string][]net.IP{"example.com": {net.ParseIP("203.0.113.1")}, "wrong.test": {net.ParseIP("203.0.113.1")}})
+	fixtureHost, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	useTestLookup(t, map[string][]net.IP{"localhost": {net.ParseIP("203.0.113.1")}, fixtureHost: {net.ParseIP("203.0.113.1")}})
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}, DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if addr != "203.0.113.1:443" {
+		if addr != net.JoinHostPort("203.0.113.1", port) {
 			return nil, errors.New("unexpected endpoint")
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
@@ -141,34 +161,39 @@ func TestPinnedTLSKeepsHostnameVerificationAndSNI(t *testing.T) {
 	WrapTransportWithSSRFCheck(transport)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
-	req, _ := http.NewRequestWithContext(t.Context(), "GET", "https://example.com/", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "https://"+net.JoinHostPort("localhost", port)+"/", nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	req, _ = http.NewRequestWithContext(t.Context(), "GET", "https://wrong.test/", nil)
+	req, _ = http.NewRequestWithContext(t.Context(), "GET", server.URL+"/", nil)
 	resp, err = client.Do(req)
 	if resp != nil {
 		resp.Body.Close()
 	}
-	if err == nil {
-		t.Fatal("accepted wrong certificate hostname")
+	var hostnameErr x509.HostnameError
+	if !errors.As(err, &hostnameErr) {
+		t.Fatalf("expected certificate hostname rejection, got %v", err)
 	}
 }
 
 func TestPinnedHTTPProxyPreservesDestination(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.String() != "http://target.test/resource" || r.Host != "target.test" {
+		if r.URL.String() != "http://localhost/resource" || r.Host != "localhost" {
 			t.Errorf("proxy target changed: %s %s", r.URL, r.Host)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	useTestLookup(t, map[string][]net.IP{"proxy.test": {net.ParseIP("203.0.113.1")}})
-	proxyURL, _ := url.Parse("http://proxy.test:3128")
+	useTestLookup(t, map[string][]net.IP{"localhost": {net.ParseIP("203.0.113.1")}})
+	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyURL, _ := url.Parse("http://" + net.JoinHostPort("localhost", port))
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if addr != "203.0.113.1:3128" {
+		if addr != net.JoinHostPort("203.0.113.1", port) {
 			return nil, errors.New("unexpected proxy endpoint")
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
@@ -176,7 +201,7 @@ func TestPinnedHTTPProxyPreservesDestination(t *testing.T) {
 	WrapTransportWithSSRFCheck(transport)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
-	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://target.test/resource", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://localhost/resource", nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -336,4 +361,8 @@ func TestFallbackKeepsExplicitBudget(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("explicit budget lost: %v", err)
 	}
+}
+
+func pinnedDialer(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+	return pinnedDialerWithTimeout(dial, 30*time.Second)
 }
