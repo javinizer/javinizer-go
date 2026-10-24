@@ -14,6 +14,7 @@ import (
 var castAttributeToken = regexp.MustCompile("^[ \t\r\n\f]+([A-Za-z_:][A-Za-z0-9_.:-]*)(?:[ \t\r\n\f]*=[ \t\r\n\f]*(?:\"([^\"]*)\"|'([^']*)'|([^ \t\r\n\f\"'`<>]+)))?")
 
 // castNameOverride only consumes metadata already present on the detail page.
+// The name argument is already HTML-decoded by the extraction boundary.
 // No profile fetch, catalog lookup, or name/nationality inference is performed.
 func (s *scraper) castNameOverride(anchorAttributes, name string) (models.ActressInfo, bool) {
 	if len(s.settings.ActressNameOverrides) == 0 {
@@ -24,7 +25,7 @@ func (s *scraper) castNameOverride(anchorAttributes, name string) (models.Actres
 		return models.ActressInfo{}, false
 	}
 	rule, ok := s.settings.ActressNameOverrides[id]
-	if !ok || !rule.Valid() || strings.Join(strings.Fields(rule.SourceName), " ") != strings.Join(strings.Fields(html.UnescapeString(name)), " ") {
+	if !ok || !rule.Valid() || strings.Join(strings.Fields(rule.SourceName), " ") != strings.Join(strings.Fields(name), " ") {
 		return models.ActressInfo{}, false
 	}
 	return models.ActressInfo{

@@ -2,6 +2,7 @@ package javlibrary
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -48,7 +49,7 @@ func TestCastNameMappingMatchesVerifiedJapaneseIdentity(t *testing.T) {
 	for _, language := range []string{"ja", "en", "cn", "tw"} {
 		t.Run(language, func(t *testing.T) {
 			s := &scraper{language: language}
-			info := s.extractActresses(string(html))[0]
+			info := s.extractActresses(strings.ReplaceAll(string(html), "依本しおり", "&#20381;&#26412;&#12375;&#12362;&#12426;"))[0]
 			found, outcome, err := database.ResolveActressIdentityTx(db.DB, &models.Actress{
 				FirstName: info.FirstName, LastName: info.LastName, JapaneseName: info.JapaneseName,
 			})
@@ -72,6 +73,7 @@ func TestCastNameMappingLegacyRescrape(t *testing.T) {
 	for _, tc := range []struct{ name, first, last string }{
 		{"依本しおり", "依本しおり", ""},
 		{"田中　麻美", "田中", "麻美"},
+		{"&#20381;&#26412;&#12375;&#12362;&#12426;", "依本しおり", ""},
 		{"か\u3099", "が", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

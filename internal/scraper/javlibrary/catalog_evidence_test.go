@@ -41,10 +41,10 @@ func TestCatalogEvidenceRejectsAmbiguousSourceLinks(t *testing.T) {
 	require.Equal(t, []models.CastNameEvidence{{DisplayName: "Yorimoto Shiori"}}, evidence)
 	actors, evidence = s.extractActressesWithEvidence(`<span class="star"><a href="vl_star.php?s=native">&#x5c71;&#x7530; &#x82b1;&#x5b50;</a></span>`)
 	require.Equal(t, "山田 花子", evidence[0].DisplayName)
-	require.Empty(t, actors[0].JapaneseName, "legacy raw entity routing remains unchanged")
+	require.Equal(t, "山田 花子", actors[0].JapaneseName)
 	actors, evidence = s.extractActressesWithEvidence(`<span class="star"><a href="vl_star.php?s=compound">Mary &amp; Jane Doe</a></span>`)
 	require.Equal(t, "Mary & Jane Doe", evidence[0].DisplayName)
-	require.Equal(t, "&amp; Jane Doe", actors[0].LastName, "legacy raw parser output is not changed by evidence capture")
+	require.Equal(t, "& Jane Doe", actors[0].LastName)
 }
 
 // extractActresses keeps existing parser-focused tests scoped to public cast fields.
