@@ -71,7 +71,7 @@ func TestUploadStagePreservesExistingPaths(t *testing.T) {
 			}
 			rec := stageRequest(t, h, buildUploadBody(t, []byte("synthetic invalid upload"), "junk.db"))
 			require.Equal(t, http.StatusAccepted, rec.Code)
-			awaitDone(t, h, 5*time.Second)
+			awaitFixtureDone(t, h)
 			lastErr, kind, running := handlerState(h)
 			require.NotEmpty(t, lastErr)
 			require.Equal(t, kindValidation, kind)
@@ -141,7 +141,7 @@ func TestUploadOwnedStageCleanup(t *testing.T) {
 				require.Nil(t, h.done)
 			} else {
 				require.Equal(t, http.StatusAccepted, rec.Code)
-				awaitDone(t, h, 5*time.Second)
+				awaitFixtureDone(t, h)
 				lastErr, kind, _ := handlerState(h)
 				if outcome == "rename failure" {
 					require.NotEmpty(t, lastErr)

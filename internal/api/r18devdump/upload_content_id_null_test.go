@@ -49,7 +49,7 @@ func TestUpload_NullOrMissingContentIDPreservesWorkingDump(t *testing.T) {
 				dump := uploadOneRowDump + fmt.Sprintf("COPY public.%s (%s) FROM stdin;\n%s\n\\.\n", tc.table, columns, values)
 				status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "synthetic.sql.gz"))
 				require.Equal(t, http.StatusAccepted, status)
-				awaitDone(t, h, 5*time.Second)
+				awaitFixtureDone(t, h)
 				require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 				lastErr, kind, running := handlerState(h)
 				assert.Equal(t, kindValidation, kind)
@@ -73,7 +73,7 @@ func TestUpload_NullOrMissingContentIDPreservesWorkingDump(t *testing.T) {
 				// a subsequent valid upload can install normally.
 				status, _, _ = srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "retry.sql.gz"))
 				require.Equal(t, http.StatusAccepted, status)
-				awaitDone(t, h, 5*time.Second)
+				awaitFixtureDone(t, h)
 				require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 				lastErr, kind, running = handlerState(h)
 				assert.Empty(t, lastErr)

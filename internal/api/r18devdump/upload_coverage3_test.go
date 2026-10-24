@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +21,7 @@ func TestUpload_SwapClosesPreviousHandle(t *testing.T) {
 
 		status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 		require.Equal(t, http.StatusAccepted, status)
-		awaitDone(t, h, 10*time.Second)
+		awaitFixtureDone(t, h)
 		lastErr, _, _ := handlerState(h)
 		require.Empty(t, lastErr)
 		assert.True(t, prev.closed, "swap must close the previous dump handle before rename")
@@ -36,7 +35,7 @@ func TestUpload_SwapClosesPreviousHandle(t *testing.T) {
 
 		status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/x.sql.gz"), "new.db"))
 		require.Equal(t, http.StatusAccepted, status)
-		awaitDone(t, h, 10*time.Second)
+		awaitFixtureDone(t, h)
 		lastErr, _, _ := handlerState(h)
 		require.Empty(t, lastErr)
 		assert.True(t, prev.closed, "sidecar swap must close the previous dump handle")
@@ -55,7 +54,7 @@ func TestUpload_Sidecar_RenameFailure_RestoreAlsoFails_LogsAndReports(t *testing
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/new.sql.gz"), "new.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "staging", kind)
 	assert.Contains(t, lastErr, "rename")

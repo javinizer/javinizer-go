@@ -51,7 +51,7 @@ func serviceVariantAPIStatus(t *testing.T, h *dumpHandler) dumpStatusResponse {
 
 func assertServiceVariantsInstalled(t *testing.T, h *dumpHandler, path, source string) {
 	t.Helper()
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 	status := serviceVariantAPIStatus(t, h)
 	assert.False(t, status.Running)
@@ -161,7 +161,7 @@ func TestUpload_DuplicateServiceTuplePreservesWorkingDump(t *testing.T) {
 			}
 			status, body, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, serviceVariantAPIDump()+tc.block), "invalid.sql.gz"))
 			require.Equal(t, http.StatusAccepted, status, body)
-			awaitDone(t, h, 10*time.Second)
+			awaitFixtureDone(t, h)
 			require.True(t, h.rt.WaitBackgroundTasks(time.Second))
 			outcome := serviceVariantAPIStatus(t, h)
 			assert.False(t, outcome.Running)
