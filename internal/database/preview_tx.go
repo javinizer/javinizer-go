@@ -60,7 +60,14 @@ func (db *DB) WithPreviewTx(ctx context.Context, fn func(EditUnit) error) (err e
 	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout=50"); err != nil {
 		return err
 	}
-	isolated := db.WithContext(ctx).Session(&gorm.Session{NewDB: true})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Keep rollback under this function's ownership. A request-bound Begin
+	// lets database/sql roll back and release the pinned connection concurrently
+	// with our rollback/discard and busy-timeout restoration. Queries below still
+	// use the request context; only the transaction lifetime is detached.
+	isolated := db.WithContext(context.WithoutCancel(ctx)).Session(&gorm.Session{NewDB: true})
 	isolated.Statement.ConnPool = conn
 	tx := isolated.Begin()
 	if tx.Error != nil {
@@ -76,7 +83,10 @@ func (db *DB) WithPreviewTx(ctx context.Context, fn func(EditUnit) error) (err e
 			err = errors.Join(err, fmt.Errorf("rollback movie preview: %w", rollbackErr))
 		}
 	}()
-	txDB := &DB{DB: tx, dsn: db.dsn, fs: db.fs}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	txDB := &DB{DB: tx.WithContext(ctx), dsn: db.dsn, fs: db.fs}
 	err = fn(EditUnit{Movies: NewMovieRepository(txDB), Actresses: NewActressRepository(txDB), Jobs: NewJobRepository(txDB)})
 	return errors.Join(err, ctx.Err())
 }
