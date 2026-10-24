@@ -24,8 +24,29 @@ type CastNameEvidence struct {
 	ManualOverride bool
 }
 
+// CastNameProvenance describes source name interpretation, not actor identity.
+// Entries align with ScraperResult.Actresses. Unknown-order FirstName/LastName
+// remain legacy compatibility fields and must not be treated as verified names.
+// DisplayName is the HTML-decoded source label, never reconstructed from a split.
+type CastNameProvenance struct {
+	Source      string `json:"source"`
+	SourceID    string `json:"source_id"`
+	DisplayName string `json:"display_name"`
+	State       string `json:"state"`
+}
+
+// Cast-name interpretation states never assert canonical actor identity.
+const (
+	CastNameUnknownOrder  = "unknown_order"
+	CastNameUserCorrected = "user_corrected"
+	CastNameNativeUnsplit = "native_unsplit"
+	CastNameSingleName    = "single_name"
+)
+
 // ScraperResult represents the raw data returned by a scraper.
 type ScraperResult struct {
+	CastNameProvenance []CastNameProvenance `json:"cast_name_provenance,omitempty"`
+
 	CastNameEvidence []CastNameEvidence `json:"-"`
 	Source           string             `json:"source"`
 	SourceURL        string             `json:"source_url"`
@@ -61,6 +82,9 @@ func (r *ScraperResult) Clone() *ScraperResult {
 		return nil
 	}
 	copied := *r
+	if r.CastNameProvenance != nil {
+		copied.CastNameProvenance = append([]CastNameProvenance{}, r.CastNameProvenance...)
+	}
 	if r.CastNameEvidence != nil {
 		copied.CastNameEvidence = append([]CastNameEvidence{}, r.CastNameEvidence...)
 	}

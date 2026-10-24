@@ -515,6 +515,7 @@ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, lang
 	result.Series = s.extractSeries(html)
 	result.Genres = s.extractGenres(html)
 	result.Actresses, result.CastNameEvidence = s.extractActressesWithEvidence(html)
+	result.CastNameProvenance = castNameProvenance(result.Actresses, result.CastNameEvidence)
 
 	// Description from video_review div
 	result.Description = s.extractDescription(html)

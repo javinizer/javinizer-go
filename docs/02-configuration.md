@@ -1856,3 +1856,54 @@ spec:
 ---
 
 **Next**: [CLI Reference](./03-cli-reference.md)
+
+#### JavLibrary source-name interpretation and corrections
+
+JavLibrary's English cast labels can use different name orders. A label such as
+`Yorimoto Shiori` does not prove that all labels are family-name-first, and an
+actor's nationality or Japanese alias is not evidence of a romanized split.
+
+Raw JavLibrary scrape results now optionally include `cast_name_provenance`, an
+array aligned with `actresses`. Each item carries `source`, `source_id`, the
+HTML-decoded `display_name`, and one of these interpretation states:
+
+- `unknown_order`: the source has not established given/family order. The
+  existing `first_name` and `last_name` values remain compatibility fields, not
+  verified components. Use `display_name` to show the source's original label.
+- `user_corrected`: an explicit, valid source-ID-and-label-guarded correction
+  supplied the components. This describes a user choice, not verified identity.
+- `native_unsplit`: native-script text is preserved in `japanese_name`.
+- `single_name`: the single displayed name is preserved without inventing a
+  family name.
+
+Missing provenance (including other sources and older cached results) does not
+mean that a split is verified. Provenance is source metadata, not a canonical
+actor ID, identity merge instruction, or historical credit edit. The optional
+catalog-name output continues to report catalog consistency separately; it does
+not promote a source's unknown name order to authoritative linguistic knowledge.
+
+In the review source viewer, select the JavLibrary cast and choose **Correct name
+order** for a multi-part label. The original displayed label remains visible.
+Enter the given and family components or use the swap helper; together they must
+reconstruct the same label in either order. Confirm that the correction is for
+future scrapes, then save. Native-script and single names do not require a split.
+
+Corrections reuse `scrapers.javlibrary.actress_name_overrides`, persist across
+restart, and apply after a successful configuration reload. Saving does not edit
+the current movie, catalog actors, existing NFOs, or historical credits. Rescrape
+the movie when you want to review newly interpreted metadata. A changed source
+label stops an old correction from applying. If someone else changed the saved
+rule while the form was open, reload the current rule before saving again.
+
+A successful correction refreshes the shared settings cache. If a separate tab
+already has unsaved edits in the full Settings form, reload that form before
+saving it: full-settings saves retain their existing whole-configuration behavior
+and can replace a newer correction with the older rule shown in that tab. The
+correction dialog itself detects conflicting edits to its rule and never submits
+unrelated settings.
+
+If saving cannot restore configuration after a reload failure, or saved
+corrections disagree with the running configuration, the dialog stops rather
+than guessing whether a retry is safe. Check and repair the saved configuration
+before reopening the correction flow. It will not silently merge inconsistent
+rules or treat an unapplied disk change as an active correction.

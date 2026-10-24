@@ -264,6 +264,30 @@ export interface ActressInfo {
 	thumb_url?: string;
 }
 
+// Source evidence stays separate from ActressInfo and canonical actress identities.
+// The array on ScraperResult is aligned with actresses; an absent entry is not verification.
+export interface CastNameProvenance {
+	source: string;
+	source_id: string;
+	display_name: string;
+	state: 'unknown_order' | 'user_corrected' | 'native_unsplit' | 'single_name';
+}
+
+export interface ActressNameOverride {
+	source_name: string;
+	first_name: string;
+	last_name: string;
+}
+
+export interface ActressNameOverrideResponse {
+	rule: ActressNameOverride | null;
+}
+
+export interface SaveActressNameOverrideRequest extends ActressNameOverride {
+	// Explicit null means no existing correction. Omission is never a blind overwrite.
+	expected_rule: ActressNameOverride | null;
+}
+
 // ScraperResult is the raw per-source result retained in-memory for the review
 // source viewer. Mirrors backend models.ScraperResult JSON.
 export interface ScraperResult {
@@ -283,6 +307,7 @@ export interface ScraperResult {
 	series?: string;
 	rating?: ScraperRating;
 	actresses?: ActressInfo[];
+	cast_name_provenance?: (CastNameProvenance | null)[];
 	genres?: string[];
 	poster_url?: string;
 	cover_url?: string;

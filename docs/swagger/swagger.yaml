@@ -2725,6 +2725,17 @@ definitions:
       window_width:
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_models.CastNameProvenance:
+    properties:
+      display_name:
+        type: string
+      source:
+        type: string
+      source_id:
+        type: string
+      state:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_models.CropBounds:
     properties:
       height:
@@ -3064,6 +3075,10 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ActressInfo'
         type: array
+      cast_name_provenance:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.CastNameProvenance'
+        type: array
       content_id:
         type: string
       cover_url:
@@ -3143,6 +3158,15 @@ definitions:
     - OperationModeInPlaceNoRenameFolder
     - OperationModeMetadataArtwork
     - OperationModePreview
+  github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride:
+    properties:
+      first_name:
+        type: string
+      last_name:
+        type: string
+      source_name:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_scraperconfig.ProxyProfile:
     properties:
       password:
@@ -3617,6 +3641,31 @@ definitions:
         type: string
       start_time:
         type: string
+    type: object
+  internal_api_system.JavLibraryNameOverrideRequest:
+    properties:
+      expected_rule:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride'
+        x-nullable: true
+      first_name:
+        type: string
+      last_name:
+        type: string
+      source_name:
+        type: string
+    required:
+    - expected_rule
+    - first_name
+    - last_name
+    - source_name
+    type: object
+  internal_api_system.JavLibraryNameOverrideResponse:
+    properties:
+      rule:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride'
+        x-nullable: true
     type: object
   internal_api_system.SecurityUpdateRequest:
     properties:
@@ -6672,6 +6721,92 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Get available scrapers
+      tags:
+      - system
+  /api/v1/scrapers/javlibrary/name-overrides/{sourceID}:
+    get:
+      description: Get the durable name-split rule for one JavLibrary performer ID,
+        or null if none exists. Requires authentication. Does not return unrelated
+        settings or update historical credits.
+      parameters:
+      - description: JavLibrary performer ID (1-64 alphanumeric characters)
+        in: path
+        name: sourceID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_system.JavLibraryNameOverrideResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Get a saved JavLibrary name correction
+      tags:
+      - system
+    put:
+      consumes:
+      - application/json
+      description: 'Save one guarded name split for future scrapes, preserving all
+        other settings and historical credits. The source label must reconstruct from
+        the two nonempty fields in either order; native-script and single-stage labels
+        are not eligible. expected_rule is required: null means no prior rule, otherwise
+        provide the complete rule returned by GET. A stale prior rule returns 409.
+        Saving does not enable a disabled scraper. Maximum body size is 4 KiB; each
+        new-rule field is limited to 512 bytes. The decoded source label is preserved
+        verbatim; only component whitespace is normalized.'
+      parameters:
+      - description: JavLibrary performer ID (1-64 alphanumeric characters)
+        in: path
+        name: sourceID
+        required: true
+        type: string
+      - description: Guarded name correction
+        in: body
+        name: correction
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_system.JavLibraryNameOverrideRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_system.JavLibraryNameOverrideResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Save a JavLibrary name correction
       tags:
       - system
   /api/v1/temp/image:
