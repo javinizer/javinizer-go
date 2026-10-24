@@ -14,12 +14,21 @@ import (
 
 var (
 	lookupIPMu sync.RWMutex
-	lookupIP   func(string) ([]net.IP, error)
+	lookupIP   func(context.Context, string) ([]net.IP, error)
 )
 
 // setLookupIPForTest overrides the DNS resolver for testing. Returns a cleanup
 // function that restores the original resolver.
 func setLookupIPForTest(fn func(string) ([]net.IP, error)) func() {
+	if fn == nil {
+		return setLookupIPContextForTest(nil)
+	}
+	return setLookupIPContextForTest(func(_ context.Context, host string) ([]net.IP, error) {
+		return fn(host)
+	})
+}
+
+func setLookupIPContextForTest(fn func(context.Context, string) ([]net.IP, error)) func() {
 	lookupIPMu.Lock()
 	defer lookupIPMu.Unlock()
 	original := lookupIP
@@ -41,7 +50,7 @@ func resolvePublicIPs(ctx context.Context, host string) ([]net.IP, error) {
 	var ips []net.IP
 	var err error
 	if lookup != nil {
-		ips, err = lookup(host)
+		ips, err = lookup(ctx, host)
 	} else {
 		ips, err = net.DefaultResolver.LookupIP(ctx, "ip", host)
 	}

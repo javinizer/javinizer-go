@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -30,8 +31,8 @@ func TestSetLookupIPForTest(t *testing.T) {
 func currentLookupIP() func(string) ([]net.IP, error) {
 	lookupIPMu.RLock()
 	defer lookupIPMu.RUnlock()
-	if lookupIP != nil {
-		return lookupIP
+	if lookup := lookupIP; lookup != nil {
+		return func(host string) ([]net.IP, error) { return lookup(context.Background(), host) }
 	}
 	return net.LookupIP
 }

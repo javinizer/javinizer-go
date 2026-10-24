@@ -355,11 +355,43 @@ func TestStalledAddressLeavesFailoverBudget(t *testing.T) {
 }
 
 func TestFallbackKeepsExplicitBudget(t *testing.T) {
-	transport := &http.Transport{}
-	WrapTransportWithSSRFCheck(transport, time.Nanosecond)
-	_, err := transport.DialContext(t.Context(), "tcp", "public.test:443")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("explicit budget lost: %v", err)
+	for _, tc := range []struct {
+		name     string
+		budget   time.Duration
+		expected time.Duration
+	}{
+		{"explicit_budget", time.Hour, time.Hour},
+		{"default_budget", 0, 30 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			before := time.Now()
+			lookups := 0
+			t.Cleanup(setLookupIPContextForTest(func(resolverCtx context.Context, host string) ([]net.IP, error) {
+				lookups++
+				if host != "public.test" {
+					t.Errorf("unexpected resolver host: %s", host)
+				}
+				observed := time.Now()
+				deadline, ok := resolverCtx.Deadline()
+				if !ok || deadline.Before(before.Add(tc.expected)) || deadline.After(observed.Add(tc.expected)) {
+					t.Errorf("fallback budget changed: got deadline %v, expected %v from connection start", deadline, tc.expected)
+				}
+				cancel()
+				return []net.IP{net.ParseIP("203.0.113.1")}, nil
+			}))
+			transport := &http.Transport{}
+			if tc.budget > 0 {
+				WrapTransportWithSSRFCheck(transport, tc.budget)
+			} else {
+				WrapTransportWithSSRFCheck(transport)
+			}
+			_, err := transport.DialContext(ctx, "tcp", "public.test:443")
+			if !errors.Is(err, context.Canceled) || lookups != 1 {
+				t.Fatalf("resolver cancellation err=%v lookups=%d", err, lookups)
+			}
+		})
 	}
 }
 
