@@ -106,7 +106,7 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 			"baseline migration hash mismatch: stored=%s current=%s. "+
 				"Migration file was modified after being applied. "+
 				"Manual intervention required",
-			storedHash[:12], baselineHash[:12],
+			storedHash[:min(12, len(storedHash))], baselineHash[:12],
 		)
 	}
 

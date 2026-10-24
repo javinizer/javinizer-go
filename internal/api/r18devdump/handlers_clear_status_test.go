@@ -120,7 +120,7 @@ func TestClearDump_AfterUploadFailureAndNextFailure(t *testing.T) {
 	badUpload := buildUploadBody(t, gzBytes(t, "synthetic invalid SQL"), "synthetic.sql.gz")
 	status, _, _ := srv.doUpload(t, badUpload)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 5*time.Second)
+	awaitFixtureDone(t, h)
 	before := readDumpStatus(t, h)
 	require.True(t, before.Present)
 	require.NotEmpty(t, before.LastError)
@@ -134,7 +134,7 @@ func TestClearDump_AfterUploadFailureAndNextFailure(t *testing.T) {
 
 	status, _, _ = srv.doUpload(t, badUpload)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 5*time.Second)
+	awaitFixtureDone(t, h)
 	after = readDumpStatus(t, h)
 	assert.False(t, after.Present)
 	assert.NotEmpty(t, after.LastError, "a new failure must still be visible after clear")
@@ -155,7 +155,12 @@ func TestClearDump_ConcurrentStatusKeepsErrorPairConsistent(t *testing.T) {
 		return nil
 	}
 	clearDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() { clearDone <- clearDumpResponse(h) }()
+	clearExited := make(chan struct{})
+	go func() {
+		defer close(clearExited)
+		clearDone <- clearDumpResponse(h)
+	}()
+	defer func() { unblock(); <-clearExited }()
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
@@ -172,8 +177,12 @@ func TestClearDump_ConcurrentStatusKeepsErrorPairConsistent(t *testing.T) {
 	const readers = 8
 	start := make(chan struct{})
 	errs := make(chan error, readers)
+	var readersDone sync.WaitGroup
+	defer readersDone.Wait()
 	for range readers {
+		readersDone.Add(1)
 		go func() {
+			defer readersDone.Done()
 			<-start
 			for range 100 {
 				w := dumpStatusRecorder(h)
