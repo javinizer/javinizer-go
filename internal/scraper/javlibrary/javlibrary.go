@@ -724,7 +724,9 @@ func (s *scraper) extractActressesWithEvidence(html string) ([]models.ActressInf
 	seen := make(map[string]bool)
 	for _, m := range matches {
 		if len(m) > 2 {
-			name := strings.TrimSpace(m[2])
+			// Decode the source label once, before classification, guards and dedup.
+			// A literal entity displayed by the source must not be decoded twice.
+			name := strings.TrimSpace(htmltext.UnescapeString(m[2]))
 			override, overridden := s.castNameOverride(m[1], name)
 			key := name
 			if overridden {
@@ -734,7 +736,7 @@ func (s *scraper) extractActressesWithEvidence(html string) ([]models.ActressInf
 			}
 			if name != "" && !seen[key] {
 				seen[key] = true
-				evidence = append(evidence, models.CastNameEvidence{SourceID: castSourceID(m[1]), DisplayName: htmltext.UnescapeString(name), ManualOverride: overridden})
+				evidence = append(evidence, models.CastNameEvidence{SourceID: castSourceID(m[1]), DisplayName: name, ManualOverride: overridden})
 				// Map the displayed script, not the page language: localized
 				// pages can still contain either native or romanized cast names.
 				// Preserve native text as supplied; do not infer romanization or
