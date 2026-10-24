@@ -13,6 +13,9 @@ import (
 	"golang.org/x/image/webp"
 )
 
+// Limits bounds encoded bytes, each image dimension, and total decoded pixels.
+// All budgets must be positive; MaxEncodedBytes must be less than math.MaxInt64
+// so validation can read one extra byte to detect oversized input.
 type Limits struct {
 	MaxEncodedBytes int64
 	MaxDimension    int
@@ -31,6 +34,10 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
+// Validate probes and fully decodes JPEG, PNG, or WebP within the supplied limits,
+// returning the header configuration and format after checking decoded dimensions.
+// It checks cancellation during reads and before and after decoding; it cannot
+// interrupt codec CPU work or a blocked input.Read call.
 func Validate(ctx context.Context, input io.Reader, limits Limits) (image.Config, string, error) {
 	if err := ctx.Err(); err != nil {
 		return image.Config{}, "", err
