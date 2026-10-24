@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 )
@@ -17,7 +17,7 @@ func TestRandFailure_FetchAndCache_ReturnsError(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("rand-fail-test"))
 	}))
@@ -40,7 +40,7 @@ func TestDiskWriteFailure_FetchAndCache_PersistFailedTrue(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(make([]byte, 1024))
 	}))

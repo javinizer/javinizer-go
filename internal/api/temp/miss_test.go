@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -192,7 +193,7 @@ func TestServeTempImage_UpstreamNon200Status(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer upstream.Close()
@@ -222,7 +223,7 @@ func TestServeTempImage_SuccessWithNoContentType(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("fake-image"))
 	}))
@@ -257,7 +258,7 @@ func TestServeTempImage_CustomUserAgent(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var receivedUA string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedUA = r.Header.Get("User-Agent")
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.WriteHeader(http.StatusOK)

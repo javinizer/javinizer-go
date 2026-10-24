@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -25,4 +26,13 @@ func TestSetLookupIPForTest(t *testing.T) {
 	restore()
 	// Can't compare func values directly; just verify it doesn't panic
 	assert.NotPanics(t, func() { currentLookupIP() })
+}
+
+func currentLookupIP() func(string) ([]net.IP, error) {
+	lookupIPMu.RLock()
+	defer lookupIPMu.RUnlock()
+	if lookup := lookupIP; lookup != nil {
+		return func(host string) ([]net.IP, error) { return lookup(context.Background(), host) }
+	}
+	return net.LookupIP
 }

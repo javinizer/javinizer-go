@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,7 +37,7 @@ func (s *unavailableVerificationTokenStore) Create(scope, hash string) (string, 
 
 func TestProxySuccessfulConnectionDoesNotInventFailedToken(t *testing.T) {
 	t.Cleanup(ssrf.SetLookupIPForTest(func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("8.8.8.8")}, nil }))
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer target.Close()
 	proxy := startTestForwardProxy(t)
 	defer proxy.Close()
@@ -68,7 +69,7 @@ func TestProxySuccessfulConnectionDoesNotInventFailedToken(t *testing.T) {
 func TestProxyRejectsUnknownModeBeforeConnection(t *testing.T) {
 	t.Cleanup(ssrf.SetLookupIPForTest(func(string) ([]net.IP, error) { return []net.IP{net.ParseIP("8.8.8.8")}, nil }))
 	var requests atomic.Int64
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
 	}))

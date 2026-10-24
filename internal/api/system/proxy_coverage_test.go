@@ -14,6 +14,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,7 @@ func TestProxyCov_DirectSuccessWithToken(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -85,7 +86,7 @@ func TestProxyCov_DirectSuccessNoTokenStore(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -199,7 +200,7 @@ func TestProxyCov_FlareSolverrWithProxy(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fs := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody map[string]interface{}
 		_ = json.NewDecoder(r.Body).Decode(&reqBody)
 
@@ -245,7 +246,7 @@ func TestProxyCov_FlareSolverrSuccessWithToken(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fs := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok","message":"Challenge solved!","solution":{"url":"https://example.com","status":200,"cookies":[{"name":"cf","value":"token"}],"response":"<html>test</html>"},"startTimestamp":0,"endTimestamp":0}`))
 	}))
@@ -283,7 +284,7 @@ func TestProxyCov_DirectWithCustomUserAgent(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var receivedUA string
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedUA = r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -361,7 +362,7 @@ func TestProxyCov_DirectTokenScopeIsGlobal(t *testing.T) {
 	})
 	t.Cleanup(cleanup)
 
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))

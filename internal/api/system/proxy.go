@@ -182,7 +182,7 @@ func TestDirectProxy(ctx context.Context, targetURL string, proxyProfile *models
 		return result
 	}
 	defer transport.CloseIdleConnections()
-	ssrf.WrapTransportWithSSRFCheck(transport)
+	ssrf.WrapTransportWithSSRFCheck(transport, 30*time.Second)
 
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)

@@ -18,6 +18,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,7 @@ func TestImageCache_FreshHitServesFromDiskNoFetch(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var fetchCount int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchCount, 1)
 		w.Header().Set("Content-Type", "image/png")
 		w.Write(pngBytes("fake-png-data"))
@@ -96,7 +97,7 @@ func TestImageCache_OfflineHitServedFromDisk(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("offline-test-data"))
 	}))
@@ -122,7 +123,7 @@ func TestImageCache_DisabledNoDiskWrites(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("uncached"))
 	}))
@@ -143,7 +144,7 @@ func TestImageCache_ContentTypeNormalization(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/webp; charset=UTF-8")
 		w.Write(webpBytes("webp-data"))
 	}))
@@ -165,7 +166,7 @@ func TestImageCache_SVGRejectedOnMiss(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Write(jpegBytes("<svg></svg>"))
 	}))
@@ -186,7 +187,7 @@ func TestImageCache_StaleIfErrorServesStaleBytes(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("stale-data"))
 	}))
@@ -220,7 +221,7 @@ func TestImageCache_ConcurrentCoalescing(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var fetchCount int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchCount, 1)
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -249,7 +250,7 @@ func TestImageCache_AbsentEntryFetchFailureReturns502(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(upstream.Close)
@@ -277,7 +278,7 @@ func TestImageCache_SessionParamDoesNotFragment(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var fetchCount int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchCount, 1)
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("session-test"))
@@ -306,7 +307,7 @@ func TestImageCache_AvifPreserved(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/avif")
 		w.Write(avifBytes("avif-data"))
 	}))
@@ -328,7 +329,7 @@ func TestImageCache_ApngMappedToPng(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/apng")
 		w.Write(pngBytes("apng-data"))
 	}))
@@ -352,7 +353,7 @@ func TestImageCache_StaleRefreshOverwritesEntry(t *testing.T) {
 
 	var data atomic.Value
 	data.Store(jpegBytes("old-data"))
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(data.Load().([]byte))
 	}))
@@ -383,7 +384,7 @@ func TestImageCache_OversizedReturns502(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(make([]byte, maxImageProxyResponseSize+1))
 	}))
@@ -403,7 +404,7 @@ func TestImageCache_SSRFFailureWithStaleServesStale(t *testing.T) {
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Write(jpegBytes("cached-while-online"))
 	}))
@@ -437,7 +438,7 @@ func TestImageCache_LeaderDisconnectDoesNotCancelSharedFetch(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var fetchStarted int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&fetchStarted, 1)
 		time.Sleep(200 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
