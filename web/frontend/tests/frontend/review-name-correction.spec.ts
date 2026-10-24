@@ -343,26 +343,51 @@ test('keyboard activation of a correction never bubbles into applying the source
 	const state = await mockAPI(context);
 	const viewer = await openSources(page);
 	for (const key of ['Enter', 'Space']) {
-		const correction = viewer.getByRole('button', {
-			name: `Correct name for ${ORIGINAL_LABEL}`,
-			exact: true,
-		});
-		await correction.focus();
-		await correction.press(key);
-		const dialog = correctionDialog(page);
-		await expect(dialog).toBeVisible();
-		// Use actual key events: fill() alone would not exercise j/k shortcuts.
-		await dialog
-			.getByRole('textbox', { name: 'Given name', exact: true })
-			.pressSequentially('Jack');
-		await dialog
-			.getByRole('textbox', { name: 'Family name', exact: true })
-			.pressSequentially('King');
-		await expect(dialog.getByRole('textbox', { name: 'Given name', exact: true })).toHaveValue(
-			'Jack',
+		let releaseRead!: () => void;
+		const readCount = state.gets.length;
+		state.getGates.set(
+			'a1',
+			new Promise<void>((resolve) => {
+				releaseRead = resolve;
+			}),
 		);
-		await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-		await expect(viewer.getByRole('heading', { name: 'Actresses', exact: true })).toBeVisible();
+		try {
+			const correction = viewer.getByRole('button', {
+				name: `Correct name for ${ORIGINAL_LABEL}`,
+				exact: true,
+			});
+			await correction.focus();
+			await correction.press(key);
+			const dialog = correctionDialog(page);
+			const givenName = dialog.getByRole('textbox', { name: 'Given name', exact: true });
+			const familyName = dialog.getByRole('textbox', { name: 'Family name', exact: true });
+			await expect(dialog).toBeVisible();
+			await expect.poll(() => state.gets.length).toBe(readCount + 1);
+			await expect(givenName).toBeDisabled();
+			await expect(familyName).toBeDisabled();
+
+			// Visibility does not mean the initial rule has loaded. Unlike fill(),
+			// pressSequentially() does not wait for enabled/editable actionability;
+			// typing while this GET is pending silently loses the keyboard events.
+			releaseRead();
+			await expect(givenName).toBeEnabled();
+			await expect(familyName).toBeEnabled();
+			// Use actual key events: fill() alone would not exercise j/k shortcuts.
+			await givenName.focus();
+			await expect(givenName).toBeFocused();
+			await givenName.pressSequentially('Jack');
+			await expect(givenName).toHaveValue('Jack');
+			await familyName.focus();
+			await expect(familyName).toBeFocused();
+			await familyName.pressSequentially('King');
+			await expect(familyName).toHaveValue('King');
+			await expect(givenName).toHaveValue('Jack');
+			await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+			await expect(viewer.getByRole('heading', { name: 'Actresses', exact: true })).toBeVisible();
+		} finally {
+			releaseRead();
+			state.getGates.delete('a1');
+		}
 	}
 	expect(state.puts).toEqual([]);
 	await expectCurrentMovieUnchanged(page, state);

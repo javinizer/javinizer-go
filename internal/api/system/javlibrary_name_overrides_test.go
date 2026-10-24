@@ -395,12 +395,16 @@ func TestJavLibraryNameOverrides_OnlyNarrowResponse(t *testing.T) {
 	require.Equal(t, &originalNameRule, response.Rule)
 }
 
+// Covers real reload/config publication plus the real parser over loopback HTTP.
+// Network destination injection is test-only; production network wiring and
+// allowed-host validation remain unchanged.
 func TestJavLibraryNameOverrides_ReloadsActiveScraper(t *testing.T) {
 	var requests atomic.Int32
 	var unexpected atomic.Bool
-	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var fixture *httptest.Server
+	fixture = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if r.URL.Path != "/en/vl_searchbyid.php" || r.URL.Query().Get("keyword") != "TEST-001" {
+		if r.Host != fixture.Listener.Addr().String() || r.Method != http.MethodGet || r.URL.IsAbs() || r.URL.Path != "/en/vl_searchbyid.php" || r.URL.Query().Get("keyword") != "TEST-001" {
 			unexpected.Store(true)
 			http.Error(w, "unexpected request, including performer-profile fetch", http.StatusBadRequest)
 			return
@@ -408,20 +412,33 @@ func TestJavLibraryNameOverrides_ReloadsActiveScraper(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte(`<html><head><title>TEST-001 Fixture - JAVLibrary</title></head><body><div id="video_info"></div><span class="star"><a href="vl_star.php?s=aa6sc">Yorimoto Shiori</a></span></body></html>`))
 	}))
+	fixture.Start()
 	t.Cleanup(fixture.Close)
 	cfg := config.DefaultConfig(nil, nil)
 	require.NoError(t, json.Unmarshal([]byte(`{"scrapers":{"priority":["javlibrary"],"javlibrary":{"enabled":true,"language":"en","base_url":"http://www.javlibrary.com","rate_limit":0,"retry_count":0,"timeout":2}}}`), cfg))
-	// Keep production's allowed-host validation. A local HTTP proxy supplies the
-	// fixture itself, so this end-to-end request never reaches a live upstream.
-	cfg.Scrapers.Proxy = models.ProxyConfig{Enabled: true, DefaultProfile: "fixture", Profiles: map[string]models.ProxyProfile{"fixture": {URL: fixture.URL}}}
 	h, router := nameOverrideFixture(t, cfg)
 	h.updates.reload = reloadComponents
 	w := nameOverrideRequest(t, router, http.MethodPut, "aa6sc", nameOverrideBody(t, originalNameRule, nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	checkScrape := func() {
 		t.Helper()
-		instance, ok := h.updates.deps.CoreDeps.GetRegistry().GetInstance("javlibrary")
+		registry := h.updates.deps.CoreDeps.GetRegistry()
+		loaded, ok := registry.GetInstance("javlibrary")
 		require.True(t, ok)
+		require.Equal(t, originalNameRule, loaded.Config().ActressNameOverrides["aa6sc"])
+		// Keep the real configuration validation and reload above. At the
+		// existing constructor boundary, copy the published scraper settings
+		// and point only the HTTP destination at this loopback fixture. A local
+		// proxy is insufficient: the offline guard rejects external ultimate
+		// URLs before proxy selection, even when no upstream would be contacted.
+		settings := loaded.Config().Clone()
+		settings.BaseURL = fixture.URL
+		constructor, ok := registry.GetScraperConstructor("javlibrary")
+		require.True(t, ok)
+		instance, err := constructor(scraperutil.ScraperDeps{Settings: settings})
+		require.NoError(t, err)
+		registry.RegisterInstance(instance)
+		require.NoError(t, loaded.Close())
 		require.Equal(t, originalNameRule, instance.Config().ActressNameOverrides["aa6sc"])
 		result, err := instance.Search(t.Context(), "TEST-001")
 		require.NoError(t, err)
@@ -439,6 +456,7 @@ func TestJavLibraryNameOverrides_ReloadsActiveScraper(t *testing.T) {
 	// Rebuild directly from the saved file, as on restart, not the live config.
 	disk, err := config.Load(h.updates.configFile)
 	require.NoError(t, err)
+	require.Equal(t, &originalNameRule, savedNameOverride(disk, "aa6sc"))
 	require.NoError(t, h.updates.rt.ReloadConfig(disk))
 	checkScrape()
 	require.False(t, unexpected.Load(), "no performer-profile or other requests")

@@ -93,6 +93,7 @@ func TestNewServer(t *testing.T) {
 		"/api/v1/config",
 		"/api/v1/config/security",
 		"/api/v1/scrapers",
+		"/api/v1/scrapers/javlibrary/name-overrides/:sourceID",
 		"/api/v1/proxy/test",
 		"/api/v1/scan",
 		"/api/v1/browse",
@@ -230,6 +231,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"GET /api/v1/movies/:id",
 		"GET /api/v1/posters/:filename",
 		"GET /api/v1/scrapers",
+		"GET /api/v1/scrapers/javlibrary/name-overrides/:sourceID",
 		"GET /api/v1/temp/image",
 		"GET /api/v1/temp/posters/:jobId/:filename",
 		"HEAD /api/v1/temp/image",
@@ -301,6 +303,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"PUT /api/v1/genres/replacements",
 		"PUT /api/v1/genres/ignored",
 		"PUT /api/v1/genres/favorites",
+		"PUT /api/v1/scrapers/javlibrary/name-overrides/:sourceID",
 		"PUT /api/v1/words/replacements",
 	}
 
