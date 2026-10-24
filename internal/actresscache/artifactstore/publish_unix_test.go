@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -505,5 +506,27 @@ func TestObjectReuseReopenFailureAndUnsafeDestination(t *testing.T) {
 	}
 	if err := s.replaceSlot(t.Context(), "current.json", nil); err == nil {
 		t.Fatal("closed replacement capability")
+	}
+}
+
+func TestPublishOversizedReceiptDigestKeepsStoreEmpty(t *testing.T) {
+	s, path := openStore(t)
+	data, r := evidence(t, "Whole")
+	r.SHA256 = strings.Repeat("ab", 1<<20)
+	result, err := s.Publish(t.Context(), bytes.NewReader(data), r)
+	if err == nil || result.CommitAttempted || result.Published {
+		t.Fatalf("oversized receipt accepted: %+v %v", result, err)
+	}
+	if _, err := s.Load(t.Context()); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("receipt failure changed recovery: %v", err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".writer.lock" {
+			t.Fatalf("rejected receipt published %s", entry.Name())
+		}
 	}
 }

@@ -3,15 +3,28 @@
 package artifactstore
 
 import (
+	"errors"
 	"os"
 	"testing"
 )
 
 func TestWriterUnsupported(t *testing.T) {
-	s, _ := openStore(t)
+	s, path := openStore(t)
 	_, r := evidence(t, "Name")
-	if result, err := s.Publish(t.Context(), nil, r); err == nil || result.Published {
+	reads := 0
+	input := readerFunc(func([]byte) (int, error) {
+		reads++
+		return 0, errors.New("unsupported writer must not read input")
+	})
+	if result, err := s.Publish(t.Context(), input, r); err == nil || result.CommitAttempted || result.Published {
 		t.Fatalf("unsupported writer %+v %v", result, err)
+	}
+	if reads != 0 {
+		t.Fatalf("unsupported writer read input %d times", reads)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("unsupported writer created directory entries: %v %v", entries, err)
 	}
 }
 

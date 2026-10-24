@@ -473,6 +473,10 @@ func (r *contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 func validDigest(value string) bool {
+	// Receipt strings are caller supplied: bound decoding before allocating.
+	if len(value) != 64 {
+		return false
+	}
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == 32 && hex.EncodeToString(decoded) == value
 }
