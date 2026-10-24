@@ -39,6 +39,7 @@ var commandFlags = map[string][]flagSpec{
 		{"scrapers", "s"},
 		{"force", "f"},
 		{"output", ""},
+		{"catalog-names", ""},
 		{"scrape-actress", ""},
 		{"no-scrape-actress", ""},
 		{"browser", ""},

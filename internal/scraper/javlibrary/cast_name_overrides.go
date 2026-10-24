@@ -19,6 +19,22 @@ func (s *scraper) castNameOverride(anchorAttributes, name string) (models.Actres
 	if len(s.settings.ActressNameOverrides) == 0 {
 		return models.ActressInfo{}, false
 	}
+	id := castSourceID(anchorAttributes)
+	if id == "" {
+		return models.ActressInfo{}, false
+	}
+	rule, ok := s.settings.ActressNameOverrides[id]
+	if !ok || !rule.Valid() || strings.Join(strings.Fields(rule.SourceName), " ") != strings.Join(strings.Fields(html.UnescapeString(name)), " ") {
+		return models.ActressInfo{}, false
+	}
+	return models.ActressInfo{
+		FirstName: strings.Join(strings.Fields(rule.FirstName), " "),
+		LastName:  strings.Join(strings.Fields(rule.LastName), " "),
+	}, true
+}
+
+// castSourceID fails closed on malformed or ambiguous source links.
+func castSourceID(anchorAttributes string) string {
 	// HTML parsers (including the current tokenizer) discard duplicate
 	// attributes. Inspect raw tokens before trusting a performer identity.
 	var href string
@@ -26,7 +42,7 @@ func (s *scraper) castNameOverride(anchorAttributes, name string) (models.Actres
 	for strings.TrimSpace(anchorAttributes) != "" {
 		match := castAttributeToken.FindStringSubmatch(anchorAttributes)
 		if match == nil {
-			return models.ActressInfo{}, false
+			return ""
 		}
 		if strings.EqualFold(match[1], "href") {
 			href = html.UnescapeString(match[2] + match[3] + match[4])
@@ -35,30 +51,23 @@ func (s *scraper) castNameOverride(anchorAttributes, name string) (models.Actres
 		anchorAttributes = anchorAttributes[len(match[0]):]
 	}
 	if hrefs != 1 {
-		return models.ActressInfo{}, false
+		return ""
 	}
 	u, err := url.Parse(href)
 	if err != nil || u.Host != "" || u.Scheme != "" || u.Fragment != "" || u.User != nil {
-		return models.ActressInfo{}, false
+		return ""
 	}
 	// Accept the source's relative performer link, plus its localized root form.
 	path := strings.TrimPrefix(u.Path, "/")
 	if path != "vl_star.php" {
 		parts := strings.Split(path, "/")
 		if len(parts) != 2 || !isValidLanguage(parts[0]) || parts[1] != "vl_star.php" {
-			return models.ActressInfo{}, false
+			return ""
 		}
 	}
 	query, err := url.ParseQuery(u.RawQuery)
 	if err != nil || len(query["s"]) != 1 {
-		return models.ActressInfo{}, false
+		return ""
 	}
-	rule, ok := s.settings.ActressNameOverrides[query.Get("s")]
-	if !ok || !rule.Valid() || strings.Join(strings.Fields(rule.SourceName), " ") != strings.Join(strings.Fields(html.UnescapeString(name)), " ") {
-		return models.ActressInfo{}, false
-	}
-	return models.ActressInfo{
-		FirstName: strings.Join(strings.Fields(rule.FirstName), " "),
-		LastName:  strings.Join(strings.Fields(rule.LastName), " "),
-	}, true
+	return query.Get("s")
 }

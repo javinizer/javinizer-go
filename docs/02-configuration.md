@@ -205,6 +205,54 @@ scrapers:
     use_flaresolverr: false  # Enable to use global FlareSolverr for Cloudflare bypass
 ```
 
+#### Optional catalog-name JSON output
+
+To reuse first/last names already recorded in an existing actor catalog without
+adding a separate rule for every performer:
+
+```bash
+javinizer scrape HJMO-732 --scrapers javlibrary --output json --catalog-names /path/to/javinizer.db
+```
+
+This explicit CLI-only option returns an envelope with `mode: "catalog_names"`,
+`raw`, `enriched`, and per-actor `decisions`. Without `--catalog-names`, JSON output
+and `QueryRaw` keep their existing raw-result contract. Normal text scraping,
+the GUI, aggregation, sorting and persisted movie credits are unchanged.
+
+The enriched copy can replace only `first_name` and `last_name`. Both complete
+catalog components must reconstruct the displayed source label in either order
+under the catalog's case/Unicode/whitespace normalization. Compound components
+are copied intact. A result labeled `catalog_consistent` means agreement with
+one eligible local catalog row, **not proof of identity or linguistic accuracy**.
+Only verified, non-quarantined `user`/`import` records are eligible; those flags
+are eligibility checks, not an assertion that an import's names are correct.
+Unverified rows and every competing canonical/curated-alias owner still block
+ambiguous matches. The ordinary pipe-separated `aliases` metadata is not trusted.
+Curated aliases can expose conflicts but never authorize renaming a source label
+to unrelated components.
+
+Existing guarded JavLibrary overrides win. Native names, mononyms without two
+complete catalog components, missing source evidence, ambiguous names and
+unmatched names remain unchanged. Each decision includes a reason and confidence;
+`applied` reports whether the copy changed. `catalog_id`, when present, is only
+an explanation, not an identity binding. No DMM ID is assigned. The observed
+JavLibrary `source_id` is retained for explanation, not treated as a catalog
+crosswalk. There is currently no source-ID mapping database.
+
+The supplied path must be an existing ordinary SQLite file with the current
+actor and curated-alias schema; SQLite URI/DSN strings and in-memory databases
+are not accepted. The command reads a consistent, read-only snapshot, honoring
+committed WAL data. It does not migrate, repair indexes, create candidates,
+change aliases, update catalog rows or rewrite old credits. SQLite may use its
+normal WAL shared-memory sidecars. There is no persistent enrichment cache:
+each invocation sees a new snapshot, so later catalog/alias edits take effect on
+the next run. Config overrides are also evaluated anew. No performer-profile or
+other additional network requests are introduced.
+
+A missing, unreadable or incompatible catalog produces a JSON error rather than
+silently falling back. This is opt-in catalog consistency, not universal automatic
+English-name detection or historical identity repair.
+
 #### Explicit cast-name splits
 
 JavLibrary mixes name-order conventions in English cast labels. A label alone does
