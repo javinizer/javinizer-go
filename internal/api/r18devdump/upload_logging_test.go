@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/sirupsen/logrus"
@@ -41,7 +40,7 @@ func TestUpload_LogsAsyncFailureOnceWithoutPayload(t *testing.T) {
 			require.NoError(t, err)
 			status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, tc.dump), "private-upload.sql.gz"))
 			require.Equal(t, http.StatusAccepted, status)
-			awaitDone(t, h, 5*time.Second)
+			awaitFixtureDone(t, h)
 			lastErr, kind, running := handlerState(h)
 			assert.NotEmpty(t, lastErr)
 			assert.Equal(t, kindValidation, kind)
@@ -81,7 +80,7 @@ func TestUpload_SuccessDoesNotLogFailure(t *testing.T) {
 	t.Cleanup(h.rt.Shutdown)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "synthetic.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 5*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, running := handlerState(h)
 	require.Empty(t, lastErr)
 	assert.Empty(t, kind)
