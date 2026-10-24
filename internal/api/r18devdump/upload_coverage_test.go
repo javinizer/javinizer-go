@@ -196,7 +196,7 @@ func TestUpload_OpenPartPanic_Recovered(t *testing.T) {
 	h.openPartFn = nil
 	status, _, _ = srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	assert.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 }
 
 func TestUpload_RawDump_ReloadFailureAfterSwap_FileKeptAndReloadKind(t *testing.T) {
@@ -204,7 +204,7 @@ func TestUpload_RawDump_ReloadFailureAfterSwap_FileKeptAndReloadKind(t *testing.
 	h.reloadFn = func(_ *config.Config, _ bool) error { return errors.New("simulated reload failure") }
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "reload", kind)
 	assert.Contains(t, lastErr, "reload")
@@ -221,7 +221,7 @@ func TestUpload_RawDump_ImportFailure_RestoresHandleWarning(t *testing.T) {
 	}
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, "<html>nope</html>"), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	_, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
 	assert.Greater(t, calls, int32(0), "failure path attempts a handle restore")

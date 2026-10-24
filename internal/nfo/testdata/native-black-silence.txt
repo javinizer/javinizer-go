@@ -1,0 +1,18 @@
+Synthetic, locally generated test media. No third-party footage or audio.
+
+native-black-silence.avi contains one second of black 32x24 MJPEG video
+(10 frames at 10 fps) and silent mono 8 kHz, 16-bit PCM audio. It includes
+actual LIST movi media chunks and an index, unlike the separate header-only
+edge-case fixtures in native_media_contracts_test.go.
+
+Generation command (FFmpeg is not needed to run the Go tests):
+ffmpeg -nostdin -hide_banner -loglevel error \
+  -f lavfi -i 'color=c=black:s=32x24:r=10:d=1' \
+  -f lavfi -i 'anullsrc=r=8000:cl=mono' -t 1 \
+  -c:v mjpeg -q:v 5 -c:a pcm_s16le -threads 1 \
+  -filter_threads 1 -filter_complex_threads 1 native-black-silence.avi
+
+Generation-time validation: ffprobe identified the expected MJPEG/PCM
+streams, and decoding both streams with ffmpeg -v error -i FILE -f null -
+completed successfully with no errors. The Go regression uses only the
+checked-in file and the native analyzer, with no external executable.

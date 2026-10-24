@@ -98,8 +98,8 @@ func TestUploadShutdownJoinsJobAndRequestIsDetached(t *testing.T) {
 				}
 			}
 			unblock()
-			awaitDone(t, h, 5*time.Second)
 			if shutdown {
+				awaitDone(t, h, 5*time.Second)
 				select {
 				case <-stopped:
 				case <-time.After(5 * time.Second):
@@ -108,6 +108,7 @@ func TestUploadShutdownJoinsJobAndRequestIsDetached(t *testing.T) {
 				require.Contains(t, h.lastError, "context canceled")
 				require.NoFileExists(t, path)
 			} else {
+				awaitFixtureDone(t, h)
 				require.Empty(t, h.lastError)
 				require.FileExists(t, path)
 			}

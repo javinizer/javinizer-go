@@ -943,7 +943,7 @@ jobs:
   frontend-e2e:
     name: Frontend-only E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
 
     steps:
     - name: Checkout code

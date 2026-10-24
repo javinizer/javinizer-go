@@ -88,7 +88,7 @@ func TestMigrationRunnerReportsRejectedFinalHashWithoutInventingSuccess(t *testi
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	sqlDB, err := db.DB.DB()
 	require.NoError(t, err)
-	require.NoError(t, ensureMigrationHashTable(sqlDB))
+	require.NoError(t, ensureMigrationHashTable(t.Context(), sqlDB))
 	require.NoError(t, db.Exec(`CREATE TRIGGER reject_baseline_hash BEFORE INSERT ON schema_migrations_hash BEGIN SELECT RAISE(ABORT, 'fixture baseline hash rejected'); END`).Error)
 	err = db.RunMigrationsOnStartup(context.Background())
 	require.EqualError(t, err, "store baseline hash: store migration hash: fixture baseline hash rejected")

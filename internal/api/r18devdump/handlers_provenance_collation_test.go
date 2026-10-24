@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,7 +52,7 @@ func TestUpload_SidecarNoncanonicalProvenancePreservesWorkingDump(t *testing.T) 
 				require.True(t, beforeStatus.Present)
 				status, body, _ := srv.doUpload(t, buildUploadBody(t, collatedUploadProvenance(t, collation, key), "upload.db"))
 				require.Equal(t, http.StatusAccepted, status, body)
-				awaitDone(t, h, 5*time.Second)
+				awaitFixtureDone(t, h)
 				afterStatus := readDumpStatus(t, h)
 				assert.False(t, afterStatus.Running)
 				assert.True(t, afterStatus.Present)
