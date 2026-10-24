@@ -126,7 +126,7 @@ func openWithRoot(path string, limits Limits, openRoot func(string) (*os.Root, e
 	if _, err := actresscache.Build(context.Background(), nil, limits.Artifact); err != nil {
 		return nil, err
 	}
-	before, err := os.Lstat(path)
+	before, err := snapshotRoot(path)
 	if err != nil {
 		return nil, err
 	}

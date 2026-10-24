@@ -11,22 +11,31 @@ import (
 
 func TestRootOpenAndIdentityRaces(t *testing.T) {
 	sentinel := errors.New("open root syscall refused")
-	if _, err := openWithRoot(t.TempDir(), limits(), func(string) (*os.Root, error) { return nil, sentinel }); !errors.Is(err, sentinel) {
+	got, err := openWithRoot(t.TempDir(), limits(), func(string) (*os.Root, error) { return nil, sentinel })
+	if got != nil {
+		_ = got.Close()
+	}
+	if !errors.Is(err, sentinel) {
 		t.Fatal(err)
 	}
 	path := t.TempDir()
 	var closed *os.Root
-	if _, err := openWithRoot(path, limits(), func(path string) (*os.Root, error) {
+	got, err = openWithRoot(path, limits(), func(path string) (*os.Root, error) {
 		root, err := os.OpenRoot(path)
 		if err != nil {
 			return nil, err
 		}
 		closed = root
+		t.Cleanup(func() { _ = root.Close() })
 		if err := root.Close(); err != nil {
 			return nil, err
 		}
 		return root, nil
-	}); !errors.Is(err, os.ErrClosed) {
+	})
+	if got != nil {
+		_ = got.Close()
+	}
+	if !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("closed directory stat: %v", err)
 	}
 	if closed == nil {
@@ -36,18 +45,45 @@ func TestRootOpenAndIdentityRaces(t *testing.T) {
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
+	original, err := snapshotRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var swapped *os.Root
-	if _, err := openWithRoot(path, limits(), func(path string) (*os.Root, error) {
+	renamed, created, distinct := false, false, false
+	got, err = openWithRoot(path, limits(), func(path string) (*os.Root, error) {
 		if err := os.Rename(path, path+"-original"); err != nil {
 			return nil, err
 		}
+		renamed = true
 		if err := os.Mkdir(path, 0700); err != nil {
 			return nil, err
 		}
+		created = true
+		old, err := snapshotRoot(path + "-original")
+		if err != nil {
+			return nil, err
+		}
+		replacement, err := snapshotRoot(path)
+		if err != nil {
+			return nil, err
+		}
+		distinct = os.SameFile(original, old) && !os.SameFile(original, replacement)
 		root, err := os.OpenRoot(path)
 		swapped = root
+		if root != nil {
+			t.Cleanup(func() { _ = root.Close() })
+		}
 		return root, err
-	}); err == nil {
+	})
+	// Close an unexpected success before any Fatal, including fixture assertions.
+	if got != nil {
+		_ = got.Close()
+	}
+	if !renamed || !created || !distinct {
+		t.Fatalf("fixture did not substitute distinct directories: renamed%v created%v distinct%v error%v", renamed, created, distinct, err)
+	}
+	if err == nil {
 		t.Fatal("directory substitution accepted")
 	}
 	if swapped == nil {
@@ -55,6 +91,34 @@ func TestRootOpenAndIdentityRaces(t *testing.T) {
 	}
 	if _, err := swapped.Stat("."); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("rejected capability leaked: %v", err)
+	}
+}
+
+func TestRootIdentitySnapshotSurvivesRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "root")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	before, err := snapshotRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+"-original"); err != nil {
+		t.Fatalf("fixture rename failed: %v", err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	original, err := snapshotRoot(path + "-original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := snapshotRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, original) || os.SameFile(before, replacement) {
+		t.Fatal("identity snapshot followed replaced pathname")
 	}
 }
 

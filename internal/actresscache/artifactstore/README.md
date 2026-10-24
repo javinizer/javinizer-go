@@ -11,7 +11,11 @@ explicitly empty, not a deletion instruction.
 `Open` requires an existing absolute clean directory, rejects a symlink leaf,
 checks its identity across opening, and pins it through `os.Root`. All store names
 are generated flat names relative to this root; manifests cannot supply a path.
-No permission changes or parent directory creation are performed. On Darwin and
+No permission changes or parent directory creation are performed. Windows root
+identity is captured eagerly from a no-follow, attribute-only native handle, not
+from path metadata whose file-ID lookup can be deferred until after substitution.
+The handle closes before opening the root capability. Long drive/UNC roots use
+extended-length names when needed; existing namespaces remain unchanged. On Darwin and
 Linux the directory must not be group/other writable. **The caller must exclude
 untrusted directory writers**, including same-user processes; this is not a
 hostile shared-directory protocol. Root confinement does not forbid mount points
