@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -227,7 +228,7 @@ func TestFetchOpenAICompatibleModels_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("upstream status error", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 		}))
 		defer upstream.Close()
@@ -238,7 +239,7 @@ func TestFetchOpenAICompatibleModels_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("invalid payload", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"data":`))
 		}))
 		defer upstream.Close()
@@ -249,7 +250,7 @@ func TestFetchOpenAICompatibleModels_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("empty models", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"   "}]}`))
 		}))
 		defer upstream.Close()
@@ -301,7 +302,7 @@ func TestGetTranslationModels_AdditionalErrors(t *testing.T) {
 	}
 
 	t.Run("upstream failure becomes bad gateway", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 		}))
 		defer upstream.Close()
@@ -373,7 +374,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy propagates non-success status", func(t *testing.T) {
-		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "blocked", http.StatusBadGateway)
 		}))
 		defer target.Close()
@@ -489,7 +490,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("direct proxy request failure returns structured response", func(t *testing.T) {
-		closedProxy := httptest.NewServer(http.NotFoundHandler())
+		closedProxy := ssrffixture.NewServer(t, http.NotFoundHandler())
 		closedProxy.Close()
 		cfg := config.DefaultConfig(nil, nil)
 		cfg.Scrapers.Proxy.Enabled = true
@@ -532,7 +533,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 
 	t.Run("direct proxy method not allowed adds endpoint guidance", func(t *testing.T) {
 		var connects atomic.Int64
-		nonProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonProxy := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			connects.Add(1)
 			assert.Equal(t, http.MethodConnect, r.Method)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -577,7 +578,7 @@ func TestTestProxy_AdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("flaresolverr request failure returns structured response", func(t *testing.T) {
-		fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fs := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"error","message":"blocked"}`))
 		}))

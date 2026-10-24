@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -444,7 +445,7 @@ func startTestForwardProxy(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	client := &http.Client{}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		targetURL := r.RequestURI
 		if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 			targetURL = r.URL.String()
@@ -483,7 +484,7 @@ func TestTestProxy(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	t.Run("direct proxy success", func(t *testing.T) {
-		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("ok"))
 		}))
@@ -531,7 +532,7 @@ func TestTestProxy(t *testing.T) {
 	})
 
 	t.Run("flaresolverr success", func(t *testing.T) {
-		fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fs := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"ok","solution":{"response":"<html>ok</html>","cookies":[{"name":"cf_clearance","value":"abc"}],"userAgent":"ua"}}`))
 		}))
@@ -588,7 +589,7 @@ func TestTestProxy(t *testing.T) {
 
 func TestGetTranslationModels(t *testing.T) {
 	t.Run("success openai-compatible models", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/models", r.URL.Path)
 			assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
 			w.Header().Set("Content-Type", "application/json")
@@ -622,7 +623,7 @@ func TestGetTranslationModels(t *testing.T) {
 	})
 
 	t.Run("success openai-compatible provider", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/models", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"id":"llama-3"},{"id":"mistral"}]}`))
@@ -655,7 +656,7 @@ func TestGetTranslationModels(t *testing.T) {
 	})
 
 	t.Run("openai-compatible without api key", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/models", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"id":"ollama-model"}]}`))
@@ -688,7 +689,7 @@ func TestGetTranslationModels(t *testing.T) {
 	})
 
 	t.Run("success anthropic models", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/v1/models", r.URL.Path)
 			assert.Equal(t, "test-anthropic-key", r.Header.Get("x-api-key"))
 			assert.Equal(t, "2023-06-01", r.Header.Get("anthropic-version"))
@@ -755,7 +756,7 @@ func TestGetTranslationModels(t *testing.T) {
 
 func TestGetDeepLUsage(t *testing.T) {
 	t.Run("success free mode", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/v2/usage", r.URL.Path)
 			assert.Equal(t, "DeepL-Auth-Key test-free-key", r.Header.Get("Authorization"))
 			w.Header().Set("Content-Type", "application/json")
@@ -790,7 +791,7 @@ func TestGetDeepLUsage(t *testing.T) {
 	})
 
 	t.Run("success pro mode with billing period", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "DeepL-Auth-Key test-pro-key", r.Header.Get("Authorization"))
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
@@ -863,7 +864,7 @@ func TestGetDeepLUsage(t *testing.T) {
 	})
 
 	t.Run("upstream error", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"message":"Invalid auth key"}`))
 		}))

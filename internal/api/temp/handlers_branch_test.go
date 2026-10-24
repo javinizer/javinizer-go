@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,8 +89,8 @@ func seedCacheEntry(t *testing.T, fs afero.Fs, tempDir, normalizedURL, content s
 	return entry
 }
 
-func testUpstream(payload string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func testUpstream(t *testing.T, payload string) *httptest.Server {
+	return ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(jpegBytes(payload))
 	}))
@@ -119,7 +120,7 @@ func TestBranch_CachedResultBranch_CopyFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("cached-body")
+	upstream := testUpstream(t, "cached-body")
 	t.Cleanup(upstream.Close)
 
 	hooked := &openHookFs{
@@ -139,7 +140,7 @@ func TestBranch_RenameFailure_ServesFromTemp(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("temp-body")
+	upstream := testUpstream(t, "temp-body")
 	t.Cleanup(upstream.Close)
 
 	fs := &renameAlwaysFailFs{Fs: afero.NewMemMapFs()}
@@ -155,7 +156,7 @@ func TestBranch_RenameFailure_TempUnreadable_FallsBackToSharedMemoryServe(t *tes
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("temp-body")
+	upstream := testUpstream(t, "temp-body")
 	t.Cleanup(upstream.Close)
 
 	hooked := &openHookFs{
@@ -176,7 +177,7 @@ func TestBranch_RenameFailure_TempReadbackFails_FallsBackToSharedMemoryServe(t *
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("temp-body")
+	upstream := testUpstream(t, "temp-body")
 	t.Cleanup(upstream.Close)
 
 	hooked := &openHookFs{
@@ -244,7 +245,7 @@ func TestBranch_Uncached_UpstreamFetchError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	srv := testUpstream("x")
+	srv := testUpstream(t, "x")
 	deadURL := srv.URL + "/gone.jpg"
 	srv.Close()
 
@@ -259,7 +260,7 @@ func TestBranch_Uncached_EmptyContentTypeUsesDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
@@ -276,7 +277,7 @@ func TestBranch_Uncached_CopyFailureAborts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		w.Header().Set("Content-Length", "1000")
 		_, _ = w.Write(jpegBytes("abc"))
@@ -293,7 +294,7 @@ func TestBranch_PersistFailure_FallsBackToUncached(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("fallback-body")
+	upstream := testUpstream(t, "fallback-body")
 	t.Cleanup(upstream.Close)
 
 	fs := &mkdirSuffixFailFs{Fs: afero.NewMemMapFs(), suffix: ".tmp"}
@@ -309,7 +310,7 @@ func TestBranch_NonImageUpstream_ServesStaleEntry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write(jpegBytes("<html>bot check</html>"))
 	}))
@@ -372,7 +373,7 @@ func TestBranch_QueryOrderDistinctCacheKeys(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(jpegBytes("body:" + r.URL.RawQuery))
 	}))
@@ -393,7 +394,7 @@ func TestBranch_CachedFill_MaxAgeBoundedByConfigTTL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("fill-body")
+	upstream := testUpstream(t, "fill-body")
 	t.Cleanup(upstream.Close)
 
 	deps := newImageCacheDeps(t, afero.NewMemMapFs())
@@ -413,7 +414,7 @@ func TestBranch_CachedFill_MaxAgeCappedAt24h(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("fill-body")
+	upstream := testUpstream(t, "fill-body")
 	t.Cleanup(upstream.Close)
 
 	cfg := config.DefaultConfig(nil, nil)
@@ -436,7 +437,7 @@ func TestBranch_PersistFailure_SharedAcrossWaiters(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var hits int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
 		time.Sleep(120 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -478,7 +479,7 @@ func TestBranch_PersistFailure_RefetchFails(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	var hits int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&hits, 1) == 1 {
 			w.Header().Set("Content-Type", "image/jpeg")
 			_, _ = w.Write(jpegBytes("once"))
@@ -501,7 +502,7 @@ func TestBranch_PersistFailureWithStale_PrefersFreshMemoryBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cleanup := ssrf.SetLookupIPForTest(lookupPublicIP)
 	t.Cleanup(cleanup)
-	upstream := testUpstream("fresh-fallback-body")
+	upstream := testUpstream(t, "fresh-fallback-body")
 	t.Cleanup(upstream.Close)
 
 	mem := afero.NewMemMapFs()
@@ -541,7 +542,7 @@ func TestBranch_CacheFill_QuotaEnforcedAfterCommit(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	payload := append([]byte("\xff\xd8\xff\xe0"), make([]byte, 600_000)...)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(payload)
 	}))
@@ -582,7 +583,7 @@ func TestBranch_OverQuotaFill_AllWaitersServedFromSharedEntry(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	payload := append([]byte("\xff\xd8\xff\xe0"), make([]byte, 1_200_000)...)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(120 * time.Millisecond)
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(payload)

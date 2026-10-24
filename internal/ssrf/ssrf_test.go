@@ -162,7 +162,7 @@ func TestNewSSRFSafeClient_AllowsPublicIP(t *testing.T) {
 	calls := 0
 	client := newClientWithTestDial(t, func(ctx context.Context, network, addr string) (net.Conn, error) {
 		calls++
-		if ctx != t.Context() || network != "tcp" || addr != "public.example.test:80" {
+		if ctx.Err() != nil || network != "tcp" || addr != "203.0.113.10:80" {
 			t.Errorf("underlying dialer arguments differ: %s %s", network, addr)
 		}
 		return clientConn, nil
@@ -207,11 +207,11 @@ func TestNewSSRFSafeClient_BlocksRedirectToPrivateIP(t *testing.T) {
 	var dials atomic.Int32
 	client := newClientWithTestDial(t, func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dials.Add(1)
-		if network != "tcp" || addr != fixtureURL.Host {
+		if network != "tcp" || addr != net.JoinHostPort("203.0.113.10", fixtureURL.Port()) {
 			return nil, fmt.Errorf("unexpected test dial: %s %s", network, addr)
 		}
 		// Only the local fixture is reachable, even if SSRF validation regresses.
-		return (&net.Dialer{}).DialContext(ctx, network, addr)
+		return (&net.Dialer{}).DialContext(ctx, network, fixtureURL.Host)
 	})
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, redirectServer.URL+"/redirect", nil)
@@ -284,7 +284,7 @@ func TestWrapTransportWithSSRFCheck_PublicIP(t *testing.T) {
 	calls := 0
 	transport := &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		calls++
-		if ctx != t.Context() || network != "tcp" || addr != "public.example.test:80" {
+		if ctx.Err() != nil || network != "tcp" || addr != "203.0.113.10:80" {
 			t.Errorf("underlying dialer arguments differ: %s %s", network, addr)
 		}
 		return clientConn, nil

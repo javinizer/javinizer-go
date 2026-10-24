@@ -17,6 +17,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
+	"github.com/javinizer/javinizer-go/internal/testutil/ssrffixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,7 +61,7 @@ func TestProxy_RedactedRequestCredentials(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var targetURL string
 			var proxyRequests atomic.Int64
-			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxy := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				proxyRequests.Add(1)
 				if r.Method != http.MethodGet || !r.URL.IsAbs() || r.URL.String() != targetURL {
 					t.Errorf("unexpected proxy request: %s %s", r.Method, r.URL)
@@ -155,7 +156,7 @@ func TestProxy_RequestProfiles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var targetURL string
 			var proxyRequests atomic.Int64
-			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxy := ssrffixture.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				proxyRequests.Add(1)
 				if r.Method != http.MethodGet || !r.URL.IsAbs() || r.URL.String() != targetURL {
 					t.Errorf("unexpected proxy request: %s %s", r.Method, r.URL)
