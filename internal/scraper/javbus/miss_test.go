@@ -516,13 +516,15 @@ func TestSearch_Miss_Non200DetailStatus(t *testing.T) {
 	<a class="movie-box" href="/STS-001" title="STS-001"><date>STS-001</date></a>
 </body></html>`
 
+	const searchURL = "https://www.javbus.com/search/STS-001&type=0&parent=uc"
+	const detailURL = "https://www.javbus.com/ja/STS-001"
 	rt := &javbusRoundTripper{
 		responses: map[string]string{
-			"/search/": searchHTML,
-			"/STS-001": "server error",
+			searchURL: searchHTML,
+			detailURL: "server error",
 		},
 		statuses: map[string]int{
-			"/STS-001": http.StatusInternalServerError,
+			detailURL: http.StatusInternalServerError,
 		},
 	}
 
@@ -540,6 +542,10 @@ func TestSearch_Miss_Non200DetailStatus(t *testing.T) {
 
 	_, err := scraper.Search(context.Background(), "STS-001")
 	require.Error(t, err)
+	scraperErr, ok := models.AsScraperError(err)
+	require.True(t, ok, "expected the configured detail response, not a fixture routing failure")
+	assert.Equal(t, http.StatusInternalServerError, scraperErr.StatusCode)
+	assert.Equal(t, []string{searchURL, detailURL}, rt.lastReqs)
 }
 
 // --- extractActresses: invalid actress name with HTML ---
