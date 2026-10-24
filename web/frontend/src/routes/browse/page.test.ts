@@ -4,7 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import BrowsePage from './+page.svelte';
 import { goto as mockGoto } from '$app/navigation';
-import { decodeBrowseBootstrap } from '$lib/browse-bootstrap';
+import { decodeBrowseBootstrap, encodeBrowseBootstrap } from '$lib/browse-bootstrap';
 
 // STORAGE_KEY must mirror +page.svelte exactly. A Back round-trip from /manual
 // preserves /browse selection because this snapshot is re-read on mount.
@@ -70,6 +70,7 @@ vi.mock('$lib/api/client', () => ({
 		getScrapers: vi.fn(),
 		getCurrentWorkingDirectory: vi.fn(),
 		browse: vi.fn(),
+		scan: vi.fn(),
 		batchScrape: vi.fn()
 	}
 }));
@@ -130,10 +131,12 @@ function renderPage(props: Record<string, unknown> = {}) {
 	});
 }
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	client.clear();
+	document.cookie = 'javinizer_browse_bootstrap=; Max-Age=0; Path=/';
 	apiClient.getConfig.mockResolvedValue(mockConfig() as never);
 	apiClient.getScrapers.mockResolvedValue([
 		mockScraper('javbus', true),
@@ -468,5 +471,137 @@ describe('/browse — phantom selection pruning on refresh', () => {
 			expect(getByText('1 File Selected for Scraping')).toBeTruthy();
 		});
 		expect(apiClient.browse).not.toHaveBeenCalled();
+	});
+});
+
+describe('browse location restoration', () => {
+	// Both return actions remount this leaf under the retained root layout.
+	// Simulate that lifecycle here without scraping real files or changing routes.
+	it.each(['Review Continue', 'Manual Back'])('restores the last navigated path on %s with retained layout data', async () => {
+		const data = { browseBootstrap: { version: 1, applyPlan: null, initialPath: '/old', destinationPath: '', forceRefresh: false, showScraperSelector: false, selectedScrapers: [], manualScrapeMode: false, planExpanded: true } };
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const first = renderPage({ data });
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/old'));
+		const input = first.getByDisplayValue('/old');
+		await fireEvent.input(input, { target: { value: '/last-scraped' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/last-scraped'));
+		await first.unmount();
+		apiClient.browse.mockClear();
+		const second = renderPage({ data });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/last-scraped', scope: 'operation' }));
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/last-scraped');
+		await second.unmount();
+		apiClient.browse.mockClear();
+		renderPage({ data });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/last-scraped', scope: 'operation' }));
+	});
+
+	it('restores saved path without bootstrap as control', async () => {
+		localStorage.setItem('javinizer_input_path', '/last-scraped');
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		renderPage();
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalled());
+		expect(apiClient.browse.mock.calls[0][0].path).toBe('/last-scraped');
+	});
+});
+
+describe('browse restore boundaries', () => {
+	const bootstrap = { version: 1, applyPlan: null, initialPath: '/old', destinationPath: '/output', forceRefresh: false, showScraperSelector: false, selectedScrapers: [], manualScrapeMode: false, planExpanded: true } as const;
+
+	it('keeps an actual SSR browse snapshot authoritative without a duplicate request', async () => {
+		localStorage.setItem('javinizer_input_path', '/stale-local');
+		const view = renderPage({ data: { initialPath: '/server', initialBrowse: mockBrowseResponse('/server'), browseBootstrap: bootstrap } });
+		await view.findByText('a.mp4');
+		expect(view.getByDisplayValue('/server')).toBeTruthy();
+		expect(apiClient.browse).not.toHaveBeenCalled();
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/server');
+		await view.unmount();
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		renderPage({ data: { browseBootstrap: bootstrap } });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/server', scope: 'operation' }));
+	});
+
+	it('honors an explicit server path over local storage and keeps output separate', async () => {
+		localStorage.setItem('javinizer_input_path', '/saved');
+		localStorage.setItem('javinizer_output_path', '/separate-output');
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		renderPage({ data: { initialPath: '/explicit', browseBootstrap: bootstrap } });
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/explicit', scope: 'operation' }));
+		expect(localStorage.getItem('javinizer_output_path')).toBe('/separate-output');
+		await waitFor(() => {
+			const value = document.cookie.split('; ').find((v) => v.startsWith('javinizer_browse_bootstrap='))?.split('=')[1];
+			expect(value && decodeBrowseBootstrap(value)?.destinationPath).toBe('/output');
+		});
+	});
+
+	it('still browses and resets when local storage reads, writes and removals are denied', async () => {
+		vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('storage denied'); });
+		vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage denied'); });
+		vi.spyOn(localStorage, 'removeItem').mockImplementation(() => { throw new Error('storage denied'); });
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const view = renderPage({ data: { browseBootstrap: bootstrap } });
+		await view.findByText('a.mp4');
+		expect(view.queryByText('storage denied')).toBeNull();
+		await fireEvent.click(view.getByRole('button', { name: 'Reset Paths' }));
+		await waitFor(() => expect(view.getByDisplayValue('/library')).toBeTruthy());
+	});
+
+	it('does not persist an invalid saved location as a successful cookie or browse', async () => {
+		localStorage.setItem('javinizer_input_path', '/missing');
+		document.cookie = `javinizer_browse_bootstrap=${encodeBrowseBootstrap({ ...bootstrap, selectedScrapers: [] })}; Path=/`;
+		const save = vi.spyOn(localStorage, 'setItem');
+		apiClient.browse.mockRejectedValue(new Error('Directory no longer exists'));
+		const view = renderPage({ data: { browseBootstrap: bootstrap } });
+		await view.findByText('Directory no longer exists');
+		expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/missing', scope: 'operation' });
+		expect(save).not.toHaveBeenCalledWith('javinizer_input_path', expect.anything());
+		const value = document.cookie.split('; ').find((v) => v.startsWith('javinizer_browse_bootstrap='))?.split('=')[1];
+		expect(value && decodeBrowseBootstrap(value)?.initialPath).toBe('/old');
+	});
+
+	it('allows manual path recovery if the initial CWD lookup fails', async () => {
+		apiClient.getCurrentWorkingDirectory.mockRejectedValue(new Error('CWD unavailable'));
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const view = renderPage();
+		const input = await view.findByPlaceholderText('Enter path (e.g., /path/to/videos)');
+		await fireEvent.input(input, { target: { value: '/recovered' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/recovered'));
+	});
+
+	it('resets to CWD even when it equals the original seed after internal navigation', async () => {
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const view = renderPage();
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/library'));
+		const input = view.getByPlaceholderText('Enter path (e.g., /path/to/videos)');
+		await fireEvent.input(input, { target: { value: '/another' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/another'));
+		await fireEvent.click(view.getByRole('button', { name: 'Reset Paths' }));
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/library'));
+		expect(apiClient.browse.mock.calls.map(([request]) => request.path)).toEqual(['/library', '/another', '/library']);
+	});
+
+	it('does not replay a previous scan when Reset Paths remounts the browser', async () => {
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		apiClient.scan.mockResolvedValue({ files: [] } as never);
+		const view = renderPage();
+		await view.findByText('a.mp4');
+		await fireEvent.click(view.getByRole('button', { name: 'Scan' }));
+		await waitFor(() => expect(apiClient.scan).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect((view.getByRole('button', { name: 'Scan' }) as HTMLButtonElement).disabled).toBe(false));
+		await fireEvent.click(view.getByRole('button', { name: 'Reset Paths' }));
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledTimes(2));
+		await view.findByText('a.mp4');
+		expect(apiClient.scan).toHaveBeenCalledTimes(1);
+	});
+
+	it('discards initial SSR data when resetting to CWD', async () => {
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const view = renderPage({ data: { initialPath: '/server', initialBrowse: mockBrowseResponse('/server') } });
+		await view.findByText('a.mp4');
+		await fireEvent.click(view.getByRole('button', { name: 'Reset Paths' }));
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/library', scope: 'operation' }));
 	});
 });

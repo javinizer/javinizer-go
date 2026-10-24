@@ -56,11 +56,13 @@
 	let recursiveScan = $state(false);
 	let selectedFolders: string[] = $state([]);
 	let triggerScan = $state(0);
-	let initialPath = $state(serverInitialPath || browseBootstrap?.initialPath || '');
+	let initialPath = $state(serverInitialBrowse?.current_path || serverInitialPath || browseBootstrap?.initialPath || '');
 	let destinationPath = $state(browseBootstrap?.destinationPath ?? '');
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let currentBrowserPath = $state('');
+	let browserReset = $state(0);
+	let activeInitialBrowse = $derived(browserReset === 0 ? serverInitialBrowse : null);
 	const configQuery = createConfigQuery();
 	const scrapersQuery = createScrapersQuery();
 	const queryClient = useQueryClient();
@@ -92,21 +94,30 @@
 
 	$effect(() => {
 		if (pathInitialized) return;
-		const savedInputPath = localStorage.getItem(STORAGE_KEY_INPUT);
+		const savedInputPath = readStoredPath(STORAGE_KEY_INPUT);
 		const cwd = cwdQuery.data?.path;
-		if (!initialPath) {
-			initialPath = savedInputPath || cwd || '';
+		if (serverInitialBrowse?.current_path) {
+			// A server snapshot is already a successful, canonical browse.
+			currentBrowserPath = serverInitialBrowse.current_path;
+			saveStoredPath(STORAGE_KEY_INPUT, currentBrowserPath);
+		}
+		// Layout bootstrap data survives client-side navigation. Restore the live
+		// saved path before mounting FileBrowser, not after its first request.
+		// An actual server browse snapshot stays authoritative for hydration.
+		if (!serverInitialBrowse && !serverInitialPath) {
+			initialPath = savedInputPath || initialPath || cwd || '';
 		}
 		// Restore destination from localStorage even when cwdQuery is disabled
 		// (initialPath was supplied by the SSR bootstrap). Without this, a
 		// returning user's saved output dir is silently dropped.
-		const savedOutputPath = localStorage.getItem(STORAGE_KEY_OUTPUT);
+		const savedOutputPath = readStoredPath(STORAGE_KEY_OUTPUT);
 		if (!destinationPath) {
 			destinationPath = savedOutputPath || initialPath;
 		}
 		// Only mark initialized once we've attempted the restore — if cwd
 		// hasn't loaded yet and we have no initialPath, keep the effect open.
-		if (initialPath || cwd) {
+		// On failure still show the browser so the user can enter a path.
+		if (initialPath || cwd || cwdQuery.isError) {
 			pathInitialized = true;
 		}
 	});
@@ -243,11 +254,13 @@
 		};
 		try {
 			sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE, JSON.stringify(state));
+			// Do not turn an unverified restore candidate into a saved location.
+			if (!currentBrowserPath && !activeInitialBrowse) return;
 			const bootstrap: BrowseBootstrap = {
 				version: 1,
 				applyPlan: state.applyPlan ?? null,
 				planMigrationWarning,
-				initialPath: currentBrowserPath || initialPath,
+				initialPath: currentBrowserPath || activeInitialBrowse?.current_path || '',
 				destinationPath,
 				forceRefresh,
 				showScraperSelector,
@@ -445,6 +458,14 @@
 	const STORAGE_KEY_OUTPUT = 'javinizer_output_path';
 	const STORAGE_KEY_RECURSIVE = 'javinizer_filebrowser_recursive';
 
+	function readStoredPath(key: string): string | null {
+		try { return localStorage.getItem(key); } catch { return null; }
+	}
+
+	function saveStoredPath(key: string, path: string) {
+		try { localStorage.setItem(key, path); } catch {}
+	}
+
 	// Load recursive scan from sessionStorage
 	try {
 		if (sessionStorage.getItem(STORAGE_KEY_RECURSIVE) === 'true') {
@@ -469,7 +490,7 @@
 	function handleBrowserPathChange(path: string) {
 		currentBrowserPath = path;
 		// Save to localStorage for persistence
-		localStorage.setItem(STORAGE_KEY_INPUT, path);
+		saveStoredPath(STORAGE_KEY_INPUT, path);
 	}
 
 	// Unified scan handler - handles both recursive and non-recursive scans
@@ -660,7 +681,7 @@
 	function confirmDestination() {
 		destinationPath = tempDestinationPath;
 		// Save to localStorage for persistence
-		localStorage.setItem(STORAGE_KEY_OUTPUT, tempDestinationPath);
+		saveStoredPath(STORAGE_KEY_OUTPUT, tempDestinationPath);
 		showDestinationBrowser = false;
 	}
 
@@ -669,13 +690,17 @@
 	}
 
 	async function resetDirectories() {
-		// Clear localStorage
-		localStorage.removeItem(STORAGE_KEY_INPUT);
-		currentBrowserPath = '';
-		localStorage.removeItem(STORAGE_KEY_OUTPUT);
 		// Reset to working directory
 		try {
 			const response = await apiClient.getCurrentWorkingDirectory();
+			try { localStorage.removeItem(STORAGE_KEY_INPUT); } catch {}
+			try { localStorage.removeItem(STORAGE_KEY_OUTPUT); } catch {}
+			currentBrowserPath = '';
+			// Do not replay an earlier scan when the browser remounts.
+			triggerScan = 0;
+			selectedFolders = [];
+			// Remount even when CWD equals the original seed, and discard SSR data.
+			browserReset++;
 			initialPath = response.path;
 			destinationPath = response.path;
 		} catch (error) {
@@ -809,7 +834,7 @@
 									<label class="text-sm font-semibold" for="apply-destination">{m.browse_output_destination()}</label>
 								</div>
 								<div class="flex flex-col gap-2 sm:flex-row">
-									<PathInput id="apply-destination" bind:value={destinationPath} onchange={(v) => localStorage.setItem(STORAGE_KEY_OUTPUT, v)} placeholder={m.browse_destination_placeholder()} whitelistPaths={config?.api?.security?.allowed_directories ?? []} ariaDescribedby={planErrors.length > 0 ? 'apply-plan-errors' : undefined} ariaInvalid={planErrors.some((error) => error.toLowerCase().includes('destination'))} required={true} class="px-3 py-2" />
+									<PathInput id="apply-destination" bind:value={destinationPath} onchange={(v) => saveStoredPath(STORAGE_KEY_OUTPUT, v)} placeholder={m.browse_destination_placeholder()} whitelistPaths={config?.api?.security?.allowed_directories ?? []} ariaDescribedby={planErrors.length > 0 ? 'apply-plan-errors' : undefined} ariaInvalid={planErrors.some((error) => error.toLowerCase().includes('destination'))} required={true} class="px-3 py-2" />
 									<Button onclick={openDestinationBrowser} class="w-full shrink-0 sm:w-auto">{#snippet children()}<FolderOpen class="h-4 w-4 mr-2" />{m.browse_browse_button()}{/snippet}</Button>
 								</div>
 								{#if destinationMatchesSource}<p class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300" role="status"><TriangleAlert class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span class="min-w-0">{m.browse_plan_same_source_warning()}</span></p>{/if}
@@ -928,20 +953,24 @@
 		</div>
 		{/if}
 
-		<!-- File Browser -->
-		<FileBrowser
-			{initialPath}
-			bind:selectedFiles={selectedFiles}
-			onFileSelect={handleFileSelect}
-			onPathChange={handleBrowserPathChange}
-			multiSelect={true}
-			onScan={handleScan}
-			bind:recursiveScan={recursiveScan}
-			bind:selectedFolders={selectedFolders}
-			triggerScan={triggerScan}
-			whitelistPaths={config?.api?.security?.allowed_directories ?? []}
-			initialData={serverInitialBrowse ?? undefined}
-		/>
+		<!-- Keep SSR data visible; otherwise wait for client path restoration. -->
+		{#if pathInitialized || activeInitialBrowse}
+			{#key browserReset}
+				<FileBrowser
+					{initialPath}
+					bind:selectedFiles={selectedFiles}
+					onFileSelect={handleFileSelect}
+					onPathChange={handleBrowserPathChange}
+					multiSelect={true}
+					onScan={handleScan}
+					bind:recursiveScan={recursiveScan}
+					bind:selectedFolders={selectedFolders}
+					triggerScan={triggerScan}
+					whitelistPaths={config?.api?.security?.allowed_directories ?? []}
+					initialData={activeInitialBrowse ?? undefined}
+				/>
+			{/key}
+		{/if}
 
 		<!-- Help Text -->
 		<Card class="p-5">
