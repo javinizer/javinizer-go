@@ -45,13 +45,20 @@ type DumpRow struct {
 	Values  []string
 }
 
+// IsNull reports whether a valid field index contains a COPY SQL NULL.
+// It distinguishes NULL from an escaped literal backslash-N. Out-of-range
+// indices report false; callers must validate the row shape separately.
+func (r DumpRow) IsNull(index int) bool {
+	return index >= 0 && index < len(r.Values) && r.Values[index] == nullSentinel
+}
+
 // ParseDump streams a PostgreSQL pg_dump and emits DumpRows from every COPY
 // block to the provided callback. It is a pure consumer of an io.Reader and
 // performs no I/O of its own, making it trivially testable with fixture
 // strings.
 //
-// pg_dump encodes NULL values as the literal "\N"; callers receive them
-// verbatim and may interpret them as needed.
+// pg_dump encodes NULL values as the literal "\N"; callers can use IsNull to
+// distinguish them from escaped literal text after COPY decoding.
 func ParseDump(r io.Reader, emit func(DumpRow) error) error {
 	return parseDump(r, nil, emit)
 }
