@@ -79,7 +79,11 @@ func newUploadTestServer(t *testing.T, h *dumpHandler) *uploadTestServer {
 	router.POST("/api/v1/r18dev/dump/download", h.startDownload)
 	router.DELETE("/api/v1/r18dev/dump", h.clearDump)
 	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		h.rt.Shutdown()
+		srv.Close()
+		shutdownTestHandler(h)
+	})
 	return &uploadTestServer{srv: srv, client: srv.Client()}
 }
 
@@ -93,7 +97,11 @@ func newUploadTestServerH2(t *testing.T, h *dumpHandler) *uploadTestServer {
 	srv := httptest.NewUnstartedServer(router)
 	srv.EnableHTTP2 = true
 	srv.StartTLS()
-	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		h.rt.Shutdown()
+		srv.Close()
+		shutdownTestHandler(h)
+	})
 	return &uploadTestServer{srv: srv, client: srv.Client()}
 }
 
@@ -141,10 +149,8 @@ func awaitDone(t *testing.T, h *dumpHandler, d time.Duration) {
 	done := h.done
 	h.mu.Unlock()
 	require.NotNil(t, done, "accepted operation should have a done channel")
-	select {
-	case <-done:
-	case <-time.After(d):
-		t.Fatal("operation did not finish in time")
+	if err := waitDumpDone(done, d); err != nil {
+		t.Fatalf("operation did not finish in %s\n%s", d, dumpTimeoutDiagnostics(h))
 	}
 }
 
@@ -174,7 +180,7 @@ func TestUpload_RawDump_HappyPath(t *testing.T) {
 	h, dumpPath, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	lastErr, kind, running := handlerState(h)
 	assert.Empty(t, lastErr)
@@ -198,7 +204,7 @@ func TestUpload_RawDump_HappyPath_HTTP2(t *testing.T) {
 
 	status, body, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status, "h2 upload must not fail closed on deadline control: %s", body)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr)
 	assert.Empty(t, kind)
@@ -213,7 +219,7 @@ func TestUpload_RawDump_ExtensionlessFilename(t *testing.T) {
 	h, dumpPath, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "blob"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr, "extension-less gzip must be detected by magic: %s", lastErr)
 	assert.Empty(t, kind)
@@ -232,7 +238,7 @@ func TestUpload_Sidecar_HappyPath_PreservesEmbeddedProvenance(t *testing.T) {
 	// URL-shaped multipart filename on a .db is harmless — sidecars ignore it.
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, embedded), "https://x/output.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr)
@@ -353,7 +359,7 @@ func TestUpload_ChunkedUnknownLength_Succeeds(t *testing.T) {
 	req.contentLength = -1
 	status, _, _ := srv.doUpload(t, req)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	store, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
@@ -420,7 +426,7 @@ func TestUpload_InboundStall_408ThenFreshRetrySucceeds(t *testing.T) {
 	// Fresh retry on a NEW connection succeeds (fresh watchdog/lock).
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ = handlerState(h)
 	assert.Empty(t, lastErr)
 	assert.Empty(t, kind)
@@ -430,13 +436,13 @@ func TestUpload_SequentialUploadsAfterFailure(t *testing.T) {
 	h, _, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, []byte("not a dump"), "junk.bin"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	_, kind1, _ := handlerState(h)
 	assert.Equal(t, "validation", kind1)
 
 	status, _, _ = srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status, "a failed upload must not wedge the guard")
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr, "kind must be cleared by the following success")
 	assert.Empty(t, kind)
@@ -448,7 +454,7 @@ func TestUpload_NeitherMagic_Validation(t *testing.T) {
 	h, dumpPath, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, []byte("plain text payload that is neither gzip nor sqlite"), "mystery.bin"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
 	assert.Contains(t, lastErr, "neither")
@@ -460,7 +466,7 @@ func TestUpload_OneByteFile_ValidationNotStaging(t *testing.T) {
 	h, _, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, []byte("x"), "one.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	_, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind, "short format-detection reads are validation, never staging")
 }
@@ -469,7 +475,7 @@ func TestUpload_GzipCarryingHTML_Validation(t *testing.T) {
 	h, _, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, "<html><body>503</body></html>"), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
 	assert.Contains(t, lastErr, "derived_video", lastErr)
@@ -481,7 +487,7 @@ func TestUpload_TruncatedGzip_Validation(t *testing.T) {
 	trunc := full[:len(full)/2]
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, trunc, "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	_, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind, "gzip truncation classifies as validation, not import")
 }
@@ -494,7 +500,7 @@ func TestUpload_InvalidSidecar_ValidationAndPreservesExisting(t *testing.T) {
 	bad = bad[:len(bad)/2]
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, bad, "dump.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	_, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
 	_, statErr := os.Stat(dumpPath)
@@ -505,7 +511,7 @@ func TestUpload_RawDump_URLFilenameRejectedValidation(t *testing.T) {
 	h, _, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "https://x/dumps/r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind, "URL-shaped provenance rejected for gzip payloads")
 	assert.Contains(t, lastErr, "URL")
@@ -515,7 +521,7 @@ func TestUpload_RawDump_TraversalFilenameReducedToBasename(t *testing.T) {
 	h, dumpPath, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), `..\evil_r18dotdev_dump_2026-09-20.sql.gz`))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, _, _ := handlerState(h)
 	assert.Empty(t, lastErr)
 	store, err := r18devdump.Open(dumpPath)
@@ -531,7 +537,7 @@ func TestUpload_RawDump_MalformedDateInstallsWithEmptyDate(t *testing.T) {
 	h, dumpPath, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-13-99.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr, "malformed embedded date must not reject the upload")
 	assert.Empty(t, kind)
@@ -550,7 +556,7 @@ func TestUpload_SQLTruncatedCopy_Validation(t *testing.T) {
 	h, _, srv := newUploadHandler(t)
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n"), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind, "SQL-level truncation is a validation failure (content problem), not import")
 	assert.Contains(t, lastErr, "truncated")
@@ -563,7 +569,7 @@ func TestUpload_TextRuntimeValue_Validation(t *testing.T) {
 	dump := "COPY public.derived_video (content_id, runtime_mins) FROM stdin;\n118ipx00535\tunknown\n\\.\n"
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "validation", kind)
 	assert.Contains(t, lastErr, "runtime_mins")
@@ -576,7 +582,7 @@ func TestUpload_UppercaseContentID_Preserved(t *testing.T) {
 	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118IPX00535\tIPX-535\n\\.\n"
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, dump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, kind)
 	assert.Empty(t, lastErr)
@@ -597,7 +603,7 @@ func TestUpload_Sidecar_RenameFailure_RestoresPrevious(t *testing.T) {
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/new.sql.gz"), "new.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "staging", kind)
 	assert.Contains(t, lastErr, "rename")
@@ -614,7 +620,7 @@ func TestUpload_Sidecar_ReloadFailureAfterRename_FileKept(t *testing.T) {
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/new.sql.gz"), "new.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, kind, _ := handlerState(h)
 	assert.Equal(t, "reload", kind)
 	assert.Contains(t, lastErr, "reload")
@@ -644,6 +650,8 @@ func TestClear_AcquiresGuard_UploadDuringClear409(t *testing.T) {
 
 	release := make(chan struct{})
 	entered := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	var once sync.Once
 	h.reloadFn = func(_ *config.Config, _ bool) error {
 		once.Do(func() { close(entered) })
@@ -658,7 +666,7 @@ func TestClear_AcquiresGuard_UploadDuringClear409(t *testing.T) {
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	assert.Equal(t, http.StatusConflict, status, "clear must hold the shared guard for its whole duration")
 
-	close(release)
+	unblock()
 	resp := <-clearDone
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -666,7 +674,7 @@ func TestClear_AcquiresGuard_UploadDuringClear409(t *testing.T) {
 	h.reloadFn = func(_ *config.Config, _ bool) error { return nil }
 	status, _, _ = srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	assert.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 }
 
 func TestClear_DuringUploadJob409(t *testing.T) {
@@ -675,6 +683,8 @@ func TestClear_DuringUploadJob409(t *testing.T) {
 
 	// Hold the job in progress via reloadFn gate.
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	h.reloadFn = func(_ *config.Config, _ bool) error { <-release; return nil }
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, "https://example/x.sql.gz"), "new.db"))
 	require.Equal(t, http.StatusAccepted, status)
@@ -690,8 +700,8 @@ func TestClear_DuringUploadJob409(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, "clear during an upload job must 409")
 
-	close(release)
-	awaitDone(t, h, 10*time.Second)
+	unblock()
+	awaitFixtureDone(t, h)
 }
 
 // --- status / progress semantics ---
@@ -704,7 +714,7 @@ func TestUpload_202ClearsStatusImmediately(t *testing.T) {
 	lastErr, kind, _ := handlerState(h)
 	assert.Empty(t, lastErr, "Transition 2 clears status immediately at 202")
 	assert.Empty(t, kind)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 }
 
 func TestUpload_ProgressReflectsRequestBytesOnly(t *testing.T) {
@@ -727,7 +737,7 @@ func TestUpload_ProgressReflectsRequestBytesOnly(t *testing.T) {
 	req := buildUploadBody(t, data, "r18dotdev_dump_2026-09-20.sql.gz")
 	status, _, _ := srv.doUpload(t, req)
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -821,7 +831,7 @@ func TestUpload_DesktopDeadlineServer_SlowBodySucceeds(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusAccepted, resp.StatusCode, "per-request deadline lift must let slow bodies past desktop server timeouts")
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	store, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
@@ -880,7 +890,7 @@ func TestUpload_UnobservedServerTimer_Completes202(t *testing.T) {
 	h.stallTimeout = time.Hour // armed but never fires; guards against false stalls
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	store, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)
 	defer func() { _ = store.Close() }()
@@ -902,7 +912,7 @@ func TestUpload_StagingCreatesMissingParentDir(t *testing.T) {
 
 	status, body, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status, body)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, _, _ := handlerState(h)
 	require.Empty(t, lastErr)
 	store, err := r18devdump.Open(nested)
@@ -929,7 +939,7 @@ func TestUpload_ProgressThrottledUnderFastLAN(t *testing.T) {
 	big := bytes.Repeat([]byte("row"), 700000) // ~2.1 MB part
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, big, "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1025,7 +1035,7 @@ func TestUpload_DownloadBuiltSidecar_PreservedThroughUpload(t *testing.T) {
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, validSidecarFixture(t, embedded), "copied.db"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 	lastErr, _, _ := handlerState(h)
 	require.Empty(t, lastErr)
 
@@ -1059,7 +1069,7 @@ func TestUpload_TokenProvenance_DateAwareUpdateSkip(t *testing.T) {
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	store1, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)
@@ -1070,7 +1080,7 @@ func TestUpload_TokenProvenance_DateAwareUpdateSkip(t *testing.T) {
 	resp, err := srv.client.Post(srv.srv.URL+"/api/v1/r18dev/dump/update", "application/json", nil)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	store2, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)
@@ -1101,12 +1111,12 @@ func TestUpload_TokenProvenance_NewerDateRedownloads(t *testing.T) {
 
 	status, _, _ := srv.doUpload(t, buildUploadBody(t, gzBytes(t, uploadOneRowDump), "r18dotdev_dump_2026-09-20.sql.gz"))
 	require.Equal(t, http.StatusAccepted, status)
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	resp, err := srv.client.Post(srv.srv.URL+"/api/v1/r18dev/dump/update", "application/json", nil)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	awaitDone(t, h, 10*time.Second)
+	awaitFixtureDone(t, h)
 
 	store, err := r18devdump.Open(dumpPath)
 	require.NoError(t, err)

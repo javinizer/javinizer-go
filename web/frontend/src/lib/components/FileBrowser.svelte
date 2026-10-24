@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { apiClient } from '$lib/api/client';
 	import { formatBytes } from '$lib/utils';
 	import { pruneStaleFileSelections } from '$lib/utils/file-selection';
@@ -210,7 +210,11 @@
 		browse(initialPath);
 	});
 
+	let browseRequest = 0;
+	onDestroy(() => { browseRequest++; });
+
 	async function browse(path: string) {
+		const request = ++browseRequest;
 		loading = true;
 		error = null;
 		filterText = '';
@@ -218,6 +222,7 @@
 		anchorFolderPath = null;
 		try {
 			const response: BrowseResponse = await apiClient.browse({ path: path || '/', scope });
+			if (request !== browseRequest) return;
 			currentPath = response.current_path;
 			parentPath = response.parent_path || '';
 			pathInputValue = response.current_path; // Sync path input
@@ -234,6 +239,7 @@
 				onFileSelect?.(externalSelectedFiles);
 			}
 		} catch (e) {
+			if (request !== browseRequest) return;
 			const msg = e instanceof Error ? e.message : m.filebrowser_browse_failed();
 			if (scope === 'operation' && (msg.includes('allowed directories') || msg.includes('403'))) {
 				error = m.common_path_outside_allowed();
@@ -241,7 +247,7 @@
 				error = msg;
 			}
 		} finally {
-			loading = false;
+			if (request === browseRequest) loading = false;
 		}
 	}
 

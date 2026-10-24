@@ -32,7 +32,7 @@ func TestEnsureMigrationHashTable(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = ensureMigrationHashTable(db)
+	err = ensureMigrationHashTable(t.Context(), db)
 	require.NoError(t, err)
 
 	// Verify table exists
@@ -44,7 +44,7 @@ func TestEnsureMigrationHashTable(t *testing.T) {
 	assert.Equal(t, "schema_migrations_hash", name)
 
 	// Calling again should not error (idempotent)
-	err = ensureMigrationHashTable(db)
+	err = ensureMigrationHashTable(t.Context(), db)
 	require.NoError(t, err)
 }
 
@@ -53,7 +53,7 @@ func TestStoreAndGetHash(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	err = ensureMigrationHashTable(db)
+	err = ensureMigrationHashTable(t.Context(), db)
 	require.NoError(t, err)
 
 	// Store hash

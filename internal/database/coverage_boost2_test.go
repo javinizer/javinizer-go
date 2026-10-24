@@ -725,7 +725,7 @@ func TestCovBoost2_EnsureMigrationHashTable_ErrorBranch(t *testing.T) {
 	// Close the underlying connection to trigger an error
 	require.NoError(t, sqlDB.Close())
 
-	err = ensureMigrationHashTable(sqlDB)
+	err = ensureMigrationHashTable(t.Context(), sqlDB)
 	assert.Error(t, err)
 }
 
