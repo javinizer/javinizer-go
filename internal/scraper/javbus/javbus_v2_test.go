@@ -14,7 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// javbusRoundTripper maps URLs to HTML responses for testing
+// javbusRoundTripper maps exact URLs to responses. Unconfigured requests stay
+// visible as 404s instead of matching an unrelated path or URL substring.
 type javbusRoundTripper struct {
 	responses map[string]string
 	statuses  map[string]int
@@ -35,21 +36,6 @@ func (rt *javbusRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			Body:       io.NopCloser(strings.NewReader(body)),
 			Request:    req,
 		}, nil
-	}
-	// Path-based fallback
-	for url, body := range rt.responses {
-		if strings.Contains(url, req.URL.Path) || strings.Contains(req.URL.String(), url) {
-			status := 200
-			if s, ok := rt.statuses[url]; ok {
-				status = s
-			}
-			return &http.Response{
-				StatusCode: status,
-				Header:     http.Header{"Content-Type": []string{"text/html; charset=UTF-8"}},
-				Body:       io.NopCloser(strings.NewReader(body)),
-				Request:    req,
-			}, nil
-		}
 	}
 	return &http.Response{
 		StatusCode: http.StatusNotFound,
@@ -143,10 +129,12 @@ func TestSearchV2_Success(t *testing.T) {
 </html>
 `
 
+	const searchURL = "https://www.javbus.com/search/IPX-456&type=0&parent=uc"
+	const detailURL = "https://www.javbus.com/ja/IPX-456"
 	rt := &javbusRoundTripper{
 		responses: map[string]string{
-			"/search/": searchHTML,
-			"/IPX-456": detailHTML,
+			searchURL: searchHTML,
+			detailURL: detailHTML,
 		},
 	}
 
@@ -166,6 +154,7 @@ func TestSearchV2_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, "IPX-456", result.ID)
+	assert.Equal(t, []string{searchURL, detailURL}, rt.lastReqs)
 }
 
 // TestSearchV2_Disabled tests Search when disabled
