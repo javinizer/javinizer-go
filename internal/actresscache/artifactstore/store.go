@@ -27,6 +27,18 @@ var ErrBusy = errors.New("artifact writer busy")
 // ErrEmpty means neither recovery slot contains a committed manifest.
 var ErrEmpty = errors.New("no committed artifact")
 
+// ErrReadContention means a manifest kept changing through the finite read
+// budget. It does not classify the committed generations as corrupt or empty.
+var ErrReadContention = errors.New("manifest read retry budget exhausted")
+
+const (
+	manifestReadAttempts = 3
+	currentManifest      = "current.json"
+	previousManifest     = "previous.json"
+)
+
+var errManifestChanged = errors.New("regular manifest replaced during open")
+
 var errMissingManifest = errors.New("manifest leaf absent")
 var errReplaceAttempted = errors.New("replacement syscall attempted")
 
@@ -154,30 +166,30 @@ func (s *Store) Load(ctx context.Context) (View, error) {
 	if err := ctx.Err(); err != nil {
 		return View{}, err
 	}
-	current, err := s.loadSlot(ctx, "current.json")
+	current, err := s.loadSlot(ctx, currentManifest)
 	if err == nil {
 		return current, nil
 	}
 	if ctx.Err() != nil {
 		return View{}, ctx.Err()
 	}
-	previous, previousErr := s.loadSlot(ctx, "previous.json")
+	previous, previousErr := s.loadSlot(ctx, previousManifest)
 	if previousErr == nil {
 		previous.Recovered = true
 		return previous, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return View{}, err
+	}
 	if errors.Is(err, errMissingManifest) && errors.Is(previousErr, errMissingManifest) {
 		return View{}, ErrEmpty
 	}
-	return View{}, fmt.Errorf("no valid recovery slot: %w", errors.Join(err, previousErr))
+	return View{}, fmt.Errorf("recovery read failed: %w", errors.Join(err, previousErr))
 }
 
 func (s *Store) loadSlot(ctx context.Context, name string) (View, error) {
-	data, err := s.readRegular(ctx, name, s.limits.MaxManifestBytes)
+	data, err := s.readManifest(ctx, name)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return View{}, errors.Join(errMissingManifest, err)
-		}
 		return View{}, err
 	}
 	var m Manifest
@@ -201,6 +213,24 @@ func (s *Store) loadSlot(ctx context.Context, name string) (View, error) {
 		return View{}, err
 	}
 	return View{Snapshot: snapshot, Manifest: m}, nil
+}
+
+// Only a verified regular-manifest inode replacement is retryable. Parsing,
+// digest/object errors, unsafe entries and arbitrary I/O failures are terminal.
+func (s *Store) readManifest(ctx context.Context, name string) ([]byte, error) {
+	for attempt := 0; attempt < manifestReadAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := s.readRegular(ctx, name, s.limits.MaxManifestBytes)
+		if !errors.Is(err, errManifestChanged) {
+			return data, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, ErrReadContention
 }
 
 func (s *Store) validate(ctx context.Context, data []byte, receipt r18dump.Receipt) (*actresscache.Snapshot, error) {
@@ -276,14 +306,14 @@ func (s *Store) Publish(ctx context.Context, input io.Reader, receipt r18dump.Re
 		return Result{}, err
 	}
 	if old != nil {
-		if err := s.replaceSlot(ctx, "previous.json", old); err != nil {
+		if err := s.replaceSlot(ctx, previousManifest, old); err != nil {
 			return Result{}, err
 		}
 		if err := s.ops.syncDir(s.root); err != nil {
 			return Result{}, err
 		}
 	}
-	if err := s.replaceSlot(ctx, "current.json", manifest); err != nil {
+	if err := s.replaceSlot(ctx, currentManifest, manifest); err != nil {
 		if errors.Is(err, errReplaceAttempted) {
 			return Result{CommitAttempted: true, FilesSynced: true}, errors.Join(ErrCommitUncertain, err)
 		}
@@ -316,7 +346,7 @@ func (s *Store) capacity(ctx context.Context, artifactBytes, manifestBytes int64
 			return err
 		}
 		name := entry.Name()
-		allowed := name == "current.json" || name == "previous.json" || name == ".writer.lock" || strings.HasPrefix(name, ".stage-") || (strings.HasSuffix(name, ".ndjson") && validDigest(strings.TrimSuffix(name, ".ndjson")))
+		allowed := name == currentManifest || name == previousManifest || name == ".writer.lock" || strings.HasPrefix(name, ".stage-") || (strings.HasSuffix(name, ".ndjson") && validDigest(strings.TrimSuffix(name, ".ndjson")))
 		info, err := s.ops.entryInfo(entry)
 		if err != nil {
 			return err
@@ -426,6 +456,9 @@ func (s *Store) stage(ctx context.Context, data []byte) (string, error) {
 func (s *Store) readRegular(ctx context.Context, name string, limit int64) ([]byte, error) {
 	before, err := s.root.Lstat(name)
 	if err != nil {
+		if (name == currentManifest || name == previousManifest) && errors.Is(err, os.ErrNotExist) {
+			return nil, errors.Join(errMissingManifest, err)
+		}
 		return nil, err
 	}
 	if !before.Mode().IsRegular() || before.Size() > limit {
@@ -440,9 +473,30 @@ func (s *Store) readRegular(ctx context.Context, name string, limit int64) ([]by
 	if err != nil {
 		return nil, err
 	}
-	if !after.Mode().IsRegular() || !os.SameFile(before, after) {
+	if !after.Mode().IsRegular() {
+		return nil, fmt.Errorf("opened store entry is not regular")
+	}
+	// Check the leaf without following it even when the descriptor still pins
+	// the original inode: a symlink back to that inode is not a safe store entry.
+	observed, err := s.root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !observed.Mode().IsRegular() || observed.Size() > limit {
+		return nil, fmt.Errorf("unsafe or oversized opened store leaf")
+	}
+	if !os.SameFile(before, after) {
+		if name == currentManifest || name == previousManifest {
+			return nil, errManifestChanged
+		}
 		return nil, fmt.Errorf("entry identity changed")
 	}
+	// Immutable objects cannot change identity even after their descriptor opens.
+	// A pinned manifest may remain a valid older committed generation instead.
+	if name != currentManifest && name != previousManifest && !os.SameFile(after, observed) {
+		return nil, fmt.Errorf("immutable object replaced after open")
+	}
+
 	return readBounded(ctx, file, limit)
 }
 

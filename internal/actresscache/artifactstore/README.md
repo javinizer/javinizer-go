@@ -43,6 +43,16 @@ closes; no stale-file timeout or lock stealing exists. Close must not race store
 operations. Concurrent readers may observe either complete committed generation;
 old in-memory views stay valid.
 
+Manifest reads retry only a verified regular-file inode replacement, at most
+three attempts per slot (six total manifest attempts per Load). A fresh no-follow
+leaf check must still show a regular, bounded file. Exhausted churn returns
+ErrReadContention, not empty/corrupt state. Malformed manifests, digest failures,
+unsafe entries, arbitrary I/O errors and immutable-object changes are not retried.
+A descriptor pinning a valid older manifest remains usable after a later regular
+publication; unrelated renames do not invalidate that committed generation.
+Missing-manifest classification applies only to the initial leaf lookup, not
+to disappearance after an existing leaf was observed.
+
 Positive limits bound manifest bytes (at most 1 MiB), source-receipt bytes/rows,
 artifact decoding, directory entries (at most one million) and stored bytes.
 A bounded directory scan rejects foreign names and nonregular entries, counts
