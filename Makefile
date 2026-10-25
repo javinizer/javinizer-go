@@ -840,3 +840,8 @@ docker-help:
 	@echo "Examples:"
 	@echo "  make docker-build VERSION=1.0.0"
 	@echo "  make docker-push DOCKER_REGISTRY=ghcr.io/myorg"
+
+.PHONY: test-e2e-offline-sync
+test-e2e-offline-sync:
+	go build -o bin/javinizer-sync-e2e ./cmd/javinizer-sync-e2e
+	cd web/frontend && npx playwright test --config=playwright.sync.config.ts

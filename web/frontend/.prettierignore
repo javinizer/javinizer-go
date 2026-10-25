@@ -33,3 +33,5 @@ tests/fullstack/.auth/
 
 # Generated SvelteKit types
 src/routes/$types.ts
+
+test-results-sync/

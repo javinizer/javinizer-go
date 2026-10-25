@@ -921,7 +921,21 @@ jobs:
       run: npx playwright install --with-deps chromium
 
     - name: Run fullstack E2E suite
+      id: fullstack
       run: make test-e2e-fullstack
+
+    - name: Run offline name sync lifecycle suite
+      if: ${{ !cancelled() && (success() || steps.fullstack.outcome == 'failure') }}
+      run: make test-e2e-offline-sync
+
+    - name: Upload offline sync browser evidence
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: offline-name-sync-browser-evidence
+        path: web/frontend/test-results-sync/
+        if-no-files-found: ignore
+        retention-days: 14
 
     - name: Upload Playwright artifacts
       if: failure()

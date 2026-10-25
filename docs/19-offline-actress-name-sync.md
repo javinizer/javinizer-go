@@ -42,6 +42,35 @@ retry diagnostics. Windows supports existing validated artifact reads but not
 artifact publication. See the [service contract](../internal/actressnamesync/README.md)
 for worker, protection, restart and retention details.
 
+## Catalog review interface
+
+Select actors on the current catalog page, then choose **Sync selected Japanese names**.
+An empty selection never means the entire database. The dialog freezes at most 500
+actor IDs. Search the provisioned source and explicitly choose each exact source
+identity; names, aliases and matching numeric IDs are not proof of identity, and
+DMM/R18 IDs are not interchangeable. Remove uncertain actors before reviewing.
+
+Check every server-returned before/after name, source identity, provenance,
+observation time, artifact digest and freshness policy. Review does not guarantee
+later admission: protected, missing or stale rows can reject the entire batch.
+Only a separate identity acknowledgment followed by **Confirm one-shot sync**
+submits work. Close, Escape, Back and navigation never implicitly confirm or cancel.
+
+Durable history and per-actor receipts remain readable when new admission is
+disabled. Completed can include skipped, unchanged or invalidated tasks. Explicit
+cancellation stops remaining uncommitted work without undoing applied names.
+
+A submitted confirmation's exact nonce is saved in tab-local session storage when
+available. Reload never automatically replays it. If transport fails, inspect
+history or explicitly retry that same nonce, using the original authenticated
+principal, rather than creating a duplicate review. Forgetting recovery requires a
+separate warning and does not cancel a job. Storage-disabled browsers retain the
+reference only while the current page remains loaded.
+
+The interface neither provisions an artifact nor enables configuration, fetches
+live metadata, updates images, or authorizes recurring sync. Administrator
+provisioning and a server restart remain separate steps.
+
 ## Authentication and browser write safety
 
 All routes below are under `/api/v1/actress-name-sync` and require the existing

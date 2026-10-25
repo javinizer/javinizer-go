@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -20,12 +20,16 @@
 	import ActressTableView from './components/ActressTableView.svelte';
 	import ActressMergeModal from './components/ActressMergeModal.svelte';
 	import ActressPagination from './components/ActressPagination.svelte';
+	import ActressNameSyncPanel from './components/ActressNameSyncPanel.svelte';
+	import { createActressNameSyncController } from './stores/actress-name-sync.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { createConfigQuery } from '$lib/query/queries';
 
 	const store = createActressStore();
 	onMount(store.hydrateSortPreferences);
 	const queryClient = useQueryClient();
+	const nameSync = createActressNameSyncController({ changed: () => { void queryClient.invalidateQueries({ queryKey: ['actresses'] }); } });
+	onDestroy(() => nameSync.close());
 	const configQuery = createConfigQuery();
 	let firstNameOrder = $derived(configQuery.data?.output?.first_name_order ?? false);
 	let japaneseNames = $derived(
@@ -185,6 +189,11 @@
 					onStartMergeSelected={store.startMergeSelected}
 				/>
 
+                <div class="flex flex-wrap items-center gap-2">
+                    <Button onclick={() => nameSync.open(store.actresses.filter(a => a.id !== undefined && store.selectedIds.includes(a.id)))} disabled={!store.selectedIds.length}>{m.actress_sync_open_selected()}</Button>
+                    <Button variant="outline" onclick={() => nameSync.open()}>{m.actress_sync_history()}</Button>
+                    <p class="text-sm text-muted-foreground">{m.actress_sync_select_hint()}</p>
+                </div>
 				{#if store.error}
 					<div in:fly|local={{ y: 8, duration: 180 }}>
 						<Card class="p-4 border-destructive bg-destructive/10 text-destructive">
@@ -283,3 +292,4 @@
 	onSetResolution={store.setResolution}
 	formatMergeValue={store.formatMergeValue}
 />
+<ActressNameSyncPanel controller={nameSync} />
