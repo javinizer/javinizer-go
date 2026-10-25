@@ -1,9 +1,10 @@
 # Actress evidence cache v1 contract
 
-This package is an unwired, offline evidence boundary. It is not a canonical
-actor catalog, identity resolver, merge authority or credit mutation layer. No
-database, API, scraper, UI, runtime lifecycle or network client imports it in
-this slice.
+This package is an offline evidence boundary. It is not a canonical
+actor catalog, identity resolver, merge authority or credit mutation layer. The
+selected-actor offline preview in `internal/actresssync` and its read-only
+database adapter now consume snapshots. No API, scraper, UI, runtime lifecycle
+or network client is activated. The preview does not mutate application state.
 
 ## First slice
 
