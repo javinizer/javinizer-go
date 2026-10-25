@@ -51,8 +51,10 @@ type Target struct {
 	UpdatedAt   time.Time
 }
 
+// Outcome describes why a selected actor has evidence or cannot be previewed.
 type Outcome string
 
+// Preview outcomes are diagnostic results, never identity or mutation authority.
 const (
 	Missing           Outcome = "missing"
 	Quarantined       Outcome = "quarantined"
