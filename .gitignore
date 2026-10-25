@@ -132,3 +132,5 @@ graphify-out/
 .pi-subagents/
 
 # OpenSpec
+
+/web/frontend/test-results-sync/
