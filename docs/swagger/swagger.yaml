@@ -1909,6 +1909,10 @@ definitions:
       enabled:
         description: Enable actress image lookup from database
         type: boolean
+      offline_name_sync:
+        allOf:
+        - $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OfflineNameSyncConfig'
+        description: Explicit offline Japanese-name jobs; restart required after changes
       trusted_collision_sources:
         description: Scrapers eligible for auto_alias
         items:
@@ -2149,6 +2153,19 @@ definitions:
       unknown_actress_text:
         description: Text for fallback mode
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OfflineNameSyncConfig:
+    properties:
+      artifact_directory:
+        type: string
+      enabled:
+        type: boolean
+      max_age_hours:
+        type: number
+      max_queued_jobs:
+        type: integer
+      max_queued_tasks:
+        type: integer
     type: object
   github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig:
     properties:
