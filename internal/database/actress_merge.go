@@ -448,6 +448,12 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				return wrapDBErr("load", fmt.Sprintf("merge target actress %d", targetID), err)
 			}
 
+			if err := revokeActressSyncNameTx(tx, targetID); err != nil {
+				return err
+			}
+			if err := revokeActressSyncNameTx(tx, sourceID); err != nil {
+				return err
+			}
 			merged := mergeActressValuesResolved(&previousTarget, &source, plan.decisions)
 			canonicalName := canonicalActressName(&merged)
 			sourceCandidates := collectActressAliasCandidates(&source)

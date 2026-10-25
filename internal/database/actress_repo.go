@@ -78,6 +78,9 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 		if err := tx.First(&current, actress.ID).Error; err != nil {
 			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
 		}
+		if err := revokeActressSyncNameTx(tx, actress.ID); err != nil {
+			return err
+		}
 		canonicalChanged := actressCanonicalNameChanged(&current, actress.FirstName, actress.LastName, actress.JapaneseName)
 		// An explicit catalog rename takes ownership from a curated import.
 		// A stale import-owned caller must not undo a committed manual edit.
@@ -164,6 +167,9 @@ func (r *ActressRepository) renameIdentityFields(ctx context.Context, id uint, f
 		var current models.Actress
 		if err := tx.First(&current, id).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
+		}
+		if err := revokeActressSyncNameTx(tx, id); err != nil {
+			return err
 		}
 		nameChanged := actressCanonicalNameChanged(&current, firstName, lastName, japaneseName)
 		if nameChanged && current.Origin == ActressOriginImport {
@@ -678,8 +684,13 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 // SetUserOwned marks an identity as user-owned so curated imports cannot
 // overwrite user corrections.
 func (r *ActressRepository) SetUserOwned(ctx context.Context, id uint) error {
-	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).
-		Update("origin", ActressOriginUser).Error; err != nil {
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := revokeActressSyncNameTx(tx, id); err != nil {
+			return err
+		}
+		return tx.Model(&models.Actress{}).Where("id = ?", id).Update("origin", ActressOriginUser).Error
+	})
+	if err != nil {
 		return wrapDBErr("set user owned", fmt.Sprintf("actress %d", id), err)
 	}
 	return nil
@@ -693,6 +704,9 @@ func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, 
 		"thumb_url": thumbURL, "origin": ActressOriginUser, "verified": true, colAmbiguityQuarantined: false,
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := revokeActressSyncNameTx(tx, id); err != nil {
+			return err
+		}
 		contentIDs, err := movieContentIDsForActressesTx(tx, id)
 		if err != nil {
 			return err
