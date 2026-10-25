@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -132,7 +134,18 @@ func TestPreviewOfflineSyncFailsClosed(t *testing.T) {
 }
 
 func TestPreviewOfflineSyncCancellationAfterRead(t *testing.T) {
-	db := newCreditTestDB(t)
+	// Cancellation may let database/sql discard SQLite's last connection. A
+	// shared-memory database then ceases to exist, which is fixture lifetime loss,
+	// not a preview write. Use durable disposable storage so the no-mutation
+	// assertion remains meaningful after a fresh connection is opened.
+	db, err := New(&Config{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "cancel-preview.db"), LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	sqlDB, err := db.DB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 	repo := NewActressRepository(db)
 	s, o, _ := previewFixture(t)
 	actor := models.Actress{DMMID: 7, FirstName: "Managed"}
@@ -140,11 +153,29 @@ func TestPreviewOfflineSyncCancellationAfterRead(t *testing.T) {
 	before := previewDatabaseState(t, db)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	require.NoError(t, db.Callback().Row().After("gorm:row").Register("cancel_offline_preview", func(*gorm.DB) { cancel() }))
+	require.NoError(t, db.Callback().Row().After("gorm:row").Register("cancel_offline_preview", func(tx *gorm.DB) {
+		// Keep the application callback from returning until the cancellation
+		// rollback wins and retires the only connection. Closing the returned rows
+		// releases the query lock needed by database/sql's rollback goroutine.
+		// This forces the Windows-observed ordering on every platform without
+		// depending on a scheduler race or an arbitrary sleep.
+		cancel()
+		rows, ok := tx.Statement.Dest.(*sql.Rows)
+		require.True(t, ok)
+		require.NoError(t, rows.Close())
+		require.Eventually(t, func() bool { return sqlDB.Stats().OpenConnections == 0 }, 5*time.Second, time.Millisecond,
+			"canceled transaction should discard its sole connection before the test continues")
+	}))
 	p, err := repo.PreviewOfflineSync(ctx, []uint{actor.ID}, s, o)
 	require.NoError(t, db.Callback().Row().Remove("cancel_offline_preview"))
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, p)
+	require.Equal(t, before, previewDatabaseState(t, db))
+	// A new uncanceled request must still see the original managed identity and
+	// evidence; cancellation must not poison the pool or return a partial plan.
+	recovered, err := repo.PreviewOfflineSync(t.Context(), []uint{actor.ID}, s, o)
+	require.NoError(t, err)
+	require.Equal(t, actresssync.EvidenceAvailable, recovered.Items[0].Outcome)
 	require.Equal(t, before, previewDatabaseState(t, db))
 }
 
