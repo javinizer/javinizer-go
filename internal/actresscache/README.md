@@ -3,15 +3,19 @@
 This package is an offline evidence boundary. It is not a canonical
 actor catalog, identity resolver, merge authority or credit mutation layer. The
 selected-actor offline preview in `internal/actresssync` and its read-only
-database adapter now consume snapshots. No API, scraper, UI, runtime lifecycle
-or network client is activated. The preview does not mutate application state.
+database adapter consume snapshots. The separately confirmed one-shot Japanese-name
+API and worker now use pinned artifacts (`internal/actressnamesync`; see
+[workflow documentation](../../docs/19-offline-actress-name-sync.md)). The preview
+remains read-only. The unwired `internal/actressmetadata` provider boundary also
+reads snapshots; it activates no network client or ordinary scrape enrichment.
 
 ## First slice
 
 Provide an offline builder, bounded format reader, immutable indexed snapshot
 and single-writer in-memory publication. A fixture artifact exercises the
 format. No live source adapter, image download, embedded production dataset,
-filesystem publication or application consumer is enabled.
+filesystem publication or application consumer was enabled by that initial slice.
+Later artifact storage and confirmed API consumers are documented separately.
 
 ### Keys and evidence
 
