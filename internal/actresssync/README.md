@@ -50,8 +50,9 @@ The current `r18dump.Convert` adapter intentionally emits only `r18dev` source
 IDs, **not DMM claims**. Thus its artifacts alone cannot match this DMM-claim preview for these
 actors, even when an ID's digits and the actor's names happen to match. Production integration must either implement a fixture-tested provider that
 actually supplies authoritative DMM identifiers, or use the new durable explicitly
-confirmed actor/source binding boundary after implementing its API/UI activation
-gates. No runtime currently supplies that confirmation.
+confirmed actor/source binding boundary through the confirmed one-shot API and worker now implemented in
+`internal/actressnamesync` (see [workflow documentation](../../docs/19-offline-actress-name-sync.md)).
+That explicit confirmation is not recurring provider consent.
 Do not manufacture DMM equivalence from r18 IDs, source positions, or name lookup.
 Actors without a positive DMM ID remain `missing_identity` until such explicit
 bindings exist. There is no universal name-based fallback.
@@ -75,11 +76,13 @@ snapshot differs from a valid empty snapshot (`no_snapshot` versus `unmatched`).
 Returned evidence is an owned copy, including aliases and external IDs.
 
 The package has no movie-scraper capability and creates no workers or queues.
-Provider configuration, source priorities, `__skip__`, throttling and live
-providers are deliberately not activated or claimed complete. HTTP-proxy target
+The separate, unwired `internal/actressmetadata` boundary now supports explicit
+provider registrations, source priorities, `__skip__` and cancellable throttling.
+This preview does not invoke it; no live provider or application configuration
+is activated. HTTP-proxy target
 DNS safety and Windows artifact writes remain gated exactly as before. The
 cache's existing validation/memory budgets bound each retained evidence record;
 selection limits additionally bound copied results. Ordinary scraping remains
-unchanged. A full user workflow still needs safe provider/binding review,
-API integration of the lease-fenced canonical storage boundary, runtime
-recovery/cancel, and UI activation.
+unchanged. The one-shot confirmed API now integrates lease-fenced storage and runtime
+recovery/cancel. Broader provider-driven or recurring sync and its field ownership
+remain separate gates; this preview itself is not that authorization path.
