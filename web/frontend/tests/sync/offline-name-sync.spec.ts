@@ -192,7 +192,17 @@ test.describe('durable lifecycle', () => {
 		await dialog(page).getByRole('button', { name: 'Keep job running', exact: true }).click();
 		expect((await sync.inspect()).jobs[0].cancelled).toBe(false);
 		await dialog(page).getByRole('button', { name: 'Cancel remaining work', exact: true }).click();
+		const jobId = (await sync.inspect()).jobs[0].id;
+		const cancelledResponse = page.waitForResponse(
+			(response) =>
+				response.request().method() === 'POST' &&
+				new URL(response.url()).pathname === `/api/v1/actress-name-sync/jobs/${jobId}/cancel`,
+		);
 		await dialog(page).getByRole('button', { name: 'Confirm cancellation', exact: true }).click();
+		expect((await cancelledResponse).status()).toBe(200);
+		// A click does not await the async write. Keep the next claim gated until
+		// the real cancellation is committed, rather than racing it with release.
+		expect((await sync.inspect()).jobs[0].cancelled).toBe(true);
 		await sync.releaseWorker();
 		await expect(dialog(page).getByRole('status').filter({ hasText: 'Cancelled' })).toBeVisible();
 		const after = await sync.inspect();
@@ -447,12 +457,15 @@ for (const pending of ['sources', 'reviews', 'jobs'] as const)
 		await select(page, [a]);
 		if (pending !== 'sources') await choose(page, a);
 		if (pending === 'jobs') await review(page);
-		let release!: () => void, captured!: () => void;
+		let release!: () => void, captured!: () => void, settled!: () => void;
 		const hold = new Promise<void>((r) => {
 				release = r;
 			}),
 			received = new Promise<void>((r) => {
 				captured = r;
+			}),
+			routeSettled = new Promise<void>((r) => {
+				settled = r;
 			});
 		await page.route(
 			`**/api/v1/actress-name-sync/${pending}*`,
@@ -460,7 +473,11 @@ for (const pending of ['sources', 'reviews', 'jobs'] as const)
 				const response = await route.fetch();
 				captured();
 				await hold;
-				await route.fulfill({ response }).catch(() => {});
+				try {
+					await route.fulfill({ response }).catch(() => {});
+				} finally {
+					settled();
+				}
 			},
 			{ times: 1 },
 		);
@@ -486,6 +503,7 @@ for (const pending of ['sources', 'reviews', 'jobs'] as const)
 			// Deliberate full-document navigation while delivery is held, not after closing.
 			await page.goto('/');
 			release();
+			await routeSettled;
 			await page.goBack();
 			await expect(
 				page.getByRole('heading', { name: 'Actress Database', exact: true }),

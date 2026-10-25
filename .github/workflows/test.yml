@@ -925,8 +925,14 @@ jobs:
       run: make test-e2e-fullstack
 
     - name: Run offline name sync lifecycle suite
+      id: offline_sync
       if: ${{ !cancelled() && (success() || steps.fullstack.outcome == 'failure') }}
       run: make test-e2e-offline-sync
+
+    - name: Repeat offline sync cancellation ordering
+      if: ${{ !cancelled() && steps.offline_sync.outcome == 'success' }}
+      working-directory: web/frontend
+      run: npx playwright test --config=playwright.sync.config.ts --grep 'partial cancellation' --repeat-each=5 --output=test-results-sync/cancellation-repeat
 
     - name: Upload offline sync browser evidence
       if: always()
