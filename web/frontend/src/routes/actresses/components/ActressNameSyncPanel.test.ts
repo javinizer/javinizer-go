@@ -51,27 +51,23 @@ afterEach(() => {
 function setup(info = { enabled: true, available: true }) {
 	const client = new ActressNameSyncClient('http://unused.test');
 	const api = {
-		status: vi
-			.spyOn(client, 'status')
-			.mockResolvedValue({
-				...info,
-				record_count: 1,
-				recovered: false,
-				max_age_seconds: 3600,
-				restart_required_for_config_changes: true,
-			}),
+		status: vi.spyOn(client, 'status').mockResolvedValue({
+			...info,
+			record_count: 1,
+			recovered: false,
+			max_age_seconds: 3600,
+			restart_required_for_config_changes: true,
+		}),
 		sources: vi
 			.spyOn(client, 'sources')
 			.mockResolvedValue({ items: [source], next_offset: null, artifact_digest: 'digest' }),
-		review: vi
-			.spyOn(client, 'review')
-			.mockResolvedValue({
-				review_id: 'a'.repeat(64),
-				expires_at: '2030-01-01T00:00:00Z',
-				artifact_digest: 'digest',
-				max_age_seconds: 3600,
-				proposals: [{ actress_id: 1, source, before_name: '旧名', after_name: '新名' }],
-			}),
+		review: vi.spyOn(client, 'review').mockResolvedValue({
+			review_id: 'a'.repeat(64),
+			expires_at: '2030-01-01T00:00:00Z',
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
+			proposals: [{ actress_id: 1, source, before_name: '旧名', after_name: '新名' }],
+		}),
 		confirm: vi.spyOn(client, 'confirm').mockResolvedValue(job),
 		jobs: vi.spyOn(client, 'jobs').mockResolvedValue({ items: [job] }),
 		job: vi.spyOn(client, 'job').mockResolvedValue(job),
@@ -94,6 +90,39 @@ async function choices(h: ReturnType<typeof setup>) {
 	await tick();
 }
 describe('explicit offline name review', () => {
+	it('wraps Tab both ways among visible enabled controls without issuing writes', async () => {
+		const h = setup();
+		await choices(h);
+		const dialog = h.container.querySelector('dialog')!;
+		vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (
+			this: HTMLElement,
+		) {
+			return (this.hidden ? [] : [{}]) as unknown as DOMRectList;
+		});
+		const controls = Array.from(
+			dialog.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'),
+		).filter((el) => el.tabIndex >= 0 && !el.matches(':disabled'));
+		const first = controls[0];
+		const last = controls[controls.length - 1];
+		const disabled = document.createElement('button');
+		disabled.disabled = true;
+		dialog.append(disabled);
+		const hidden = document.createElement('button');
+		hidden.hidden = true;
+		dialog.append(hidden);
+		last.focus();
+		await fireEvent.keyDown(last, { key: 'Tab' });
+		expect(document.activeElement).toBe(first);
+		first.focus();
+		await fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+		expect(document.activeElement).toBe(last);
+		dialog.querySelector<HTMLElement>('[data-sync-title]')!.focus();
+		await fireEvent.keyDown(dialog, { key: 'Tab' });
+		expect(document.activeElement).toBe(first);
+		expect(h.api.review).not.toHaveBeenCalled();
+		expect(h.api.confirm).not.toHaveBeenCalled();
+		expect(h.api.cancel).not.toHaveBeenCalled();
+	});
 	it('does not close an unopened dialog or issue writes on unmount', () => {
 		const h = setup();
 		h.unmount();
@@ -146,8 +175,7 @@ describe('explicit offline name review', () => {
 			await choices(h);
 			await h.c.requestReview();
 			await tick();
-			if (action === 'close')
-				await fireEvent.click(h.getByRole('button', { name: 'Close' }));
+			if (action === 'close') await fireEvent.click(h.getByRole('button', { name: 'Close' }));
 			else await fireEvent(h.getByRole('dialog'), new Event('cancel', { cancelable: true }));
 			await tick();
 			expect(h.c.isOpen).toBe(false);

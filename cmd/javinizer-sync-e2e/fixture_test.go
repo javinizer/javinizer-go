@@ -163,7 +163,15 @@ func TestInspectorReadOnlyAllowlist(t *testing.T) {
 func TestRootRejectsUnsafeInputs(t *testing.T) {
 	require.Error(t, validateRoot("relative"))
 	root := testRoot(t)
-	require.NoError(t, validateRoot(root))
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	if info.Mode().Perm()&0077 == 0 {
+		require.NoError(t, validateRoot(root))
+	} else {
+		// Windows Chmod cannot enforce POSIX private-directory permissions.
+		// The host must reject that root, not silently weaken its safety gate.
+		require.ErrorContains(t, validateRoot(root), "private directory")
+	}
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".javinizer-sync-e2e"), []byte("wrong"), 0600))
 	require.Error(t, validateRoot(root))
 	root = testRoot(t)
@@ -201,6 +209,13 @@ func TestInspectorAndCommandRejectMissingStateAndUnsupportedArguments(t *testing
 	require.Error(t, run())
 	os.Args = []string{"fixture"}
 	require.NoError(t, os.WriteFile(filepath.Join(root, "fixture.json"), []byte("{}"), 0600))
-	require.ErrorContains(t, run(), "incomplete fixture initialization")
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	if info.Mode().Perm()&0077 == 0 {
+		require.ErrorContains(t, run(), "incomplete fixture initialization")
+	} else {
+		// An unenforceable private root fails before any startup-state access.
+		require.ErrorContains(t, run(), "private directory")
+	}
 	require.NoFileExists(t, filepath.Join(root, "names.db"))
 }

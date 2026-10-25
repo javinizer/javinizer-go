@@ -8,7 +8,12 @@ Build with `go build -o bin/javinizer-sync-e2e ./cmd/javinizer-sync-e2e`.
 The host owns a private disposable directory (mode 0700), containing the regular
 file `.javinizer-sync-e2e` with exact bytes `javinizer-sync-e2e disposable fixture\n`.
 Set `JAVINIZER_SYNC_E2E_ROOT` to its absolute clean path. The command refuses
-unmarked roots, symlink roots/state and incomplete initializations.
+unmarked roots, symlink roots/state and incomplete initializations. The host
+requires enforceable POSIX private-directory permissions; Windows roots that
+cannot report those permissions fail closed. Native artifact publication and
+real-process fixture lifecycle tests are supported on Linux/macOS, while safety
+rejection tests still run on Windows. This does not restrict the production
+application's separately tested Windows read/service support.
 
 Environment options:
 

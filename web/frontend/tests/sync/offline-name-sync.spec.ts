@@ -21,7 +21,8 @@ async function choose(page: Page, a: FixtureActor, id = a.source_id) {
 	await d.getByRole('button', { name: `Choose source for ${a.name}`, exact: true }).click();
 	await d.getByRole('searchbox', { name: 'Source name, alias, or ID' }).fill(id);
 	await d.getByRole('button', { name: 'Search offline evidence', exact: true }).click();
-	const result = d.getByRole('listitem').filter({ has: d.getByText(id, { exact: true }) });
+	// has is resolved relative to each list item, so do not include the dialog ancestor.
+	const result = d.getByRole('listitem').filter({ has: page.getByText(id, { exact: true }) });
 	await expect(result).toHaveCount(1);
 	await result.getByRole('button', { name: 'Choose this source identity', exact: true }).click();
 }
@@ -291,9 +292,12 @@ test('mobile keyboard dialog traps focus and ambiguous names never auto-select',
 
 test('new source query supersedes a held real older response', async ({ page, sync }) => {
 	await catalog(page, sync);
-	const a = sync.fixture.actors.managed;
+	const a = sync.fixture.actors.unicode;
 	await select(page, [a]);
-	let release!: () => void, captured!: () => void;
+	let release!: () => void, captured!: () => void, settled!: () => void;
+	const routeSettled = new Promise<void>((resolve) => {
+		settled = resolve;
+	});
 	const hold = new Promise<void>((r) => {
 			release = r;
 		}),
@@ -308,7 +312,11 @@ test('new source query supersedes a held real older response', async ({ page, sy
 		const response = await route.fetch();
 		captured();
 		await hold;
-		await route.fulfill({ response }).catch(() => {});
+		try {
+			await route.fulfill({ response }).catch(() => {});
+		} finally {
+			settled();
+		}
 	});
 	const d = dialog(page);
 	try {
@@ -319,9 +327,12 @@ test('new source query supersedes a held real older response', async ({ page, sy
 		await d.getByRole('button', { name: 'Search offline evidence', exact: true }).click();
 		await expect(d.getByText(a.source_id, { exact: true })).toBeVisible();
 		release();
+		await routeSettled;
 		await expect(
 			d.getByRole('button', { name: 'Choose this source identity', exact: true }),
 		).toHaveCount(1);
+		await expect(d.getByText('r18-same-b', { exact: true })).toHaveCount(0);
+		await expect(d.getByText('r18-unchanged', { exact: true })).toHaveCount(0);
 		await expect(
 			d.getByRole('button', { name: 'Review proposed changes', exact: true }),
 		).toBeDisabled();

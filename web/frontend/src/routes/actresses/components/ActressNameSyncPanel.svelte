@@ -15,6 +15,18 @@
  let activeActor = $derived(c.actors.find(a => a.id === c.activeActorId));
  let expired = $derived(!!c.review && now >= Date.parse(c.review.expires_at));
  let canReview = $derived(available && !locked && c.actors.length > 0 && c.actors.length <= 500 && c.actors.every(a => !!c.choices[a.id]));
+ // Native modal dialogs can tab into browser chrome; keep keyboard navigation
+ // within the currently visible, enabled controls, including dynamic receipts.
+ function containTab(event: KeyboardEvent) {
+  if (event.key !== 'Tab' || !dialog?.open) return;
+  const controls = Array.from(dialog.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
+   .filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && !el.closest('[hidden], [inert], [aria-hidden="true"]') && el.getClientRects().length > 0);
+  const first = controls[0]; const last = controls[controls.length - 1];
+  const active = document.activeElement;
+  if (!first) { event.preventDefault(); dialog.querySelector<HTMLElement>('[data-sync-title]')?.focus(); }
+  else if (event.shiftKey && (active === first || !controls.includes(active as HTMLElement))) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (active === last || !controls.includes(active as HTMLElement))) { event.preventDefault(); first.focus(); }
+ }
  function errorLabel(code:string) {
   switch(code) {
    case 'SYNC_DISABLED':return m.actress_sync_disabled();
@@ -52,7 +64,7 @@
  });
  onDestroy(() => { c.close(); if (dialog?.open) dialog.close(); opener?.focus(); });
 </script>
-<dialog bind:this={dialog} class="sync-dialog" aria-labelledby="sync-title" aria-describedby="sync-scope" oncancel={(e) => { e.preventDefault(); c.close(); }}>
+<dialog onkeydown={containTab} bind:this={dialog} class="sync-dialog" aria-labelledby="sync-title" aria-describedby="sync-scope" oncancel={(e) => { e.preventDefault(); c.close(); }}>
  {#if c.isOpen}
  <div class="shell">
   <header><h2 id="sync-title" data-sync-title tabindex="-1">{m.actress_sync_title()}</h2><Button variant="outline" onclick={c.close}>{m.actress_sync_close()}</Button></header>
