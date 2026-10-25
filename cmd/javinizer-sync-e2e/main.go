@@ -32,6 +32,7 @@ import (
 )
 
 const disposableMarker = "javinizer-sync-e2e disposable fixture\n"
+const disabledMode = "disabled"
 
 func main() {
 	if err := run(); err != nil {
@@ -84,7 +85,7 @@ func run() error {
 	}
 	mode := env("JAVINIZER_SYNC_E2E_MODE", "ready")
 	switch mode {
-	case "ready", "disabled", "missing", "stale", "future":
+	case "ready", disabledMode, "missing", "stale", "future":
 	default:
 		return errors.New("invalid fixture mode")
 	}
@@ -141,10 +142,10 @@ func run() error {
 	cfg.API.Security.RateLimit.RequestsPerMinute = 0
 	cfg.Metadata.ActressDatabase.Enabled = true
 	artifactMode := mode
-	if artifactMode == "disabled" {
+	if artifactMode == disabledMode {
 		artifactMode = "ready"
 	}
-	cfg.Metadata.ActressDatabase.OfflineNameSync = config.OfflineNameSyncConfig{Enabled: mode != "disabled", ArtifactDirectory: filepath.Join(root, "artifacts", artifactMode), MaxAgeHours: 24, MaxQueuedJobs: 8, MaxQueuedTasks: 32}
+	cfg.Metadata.ActressDatabase.OfflineNameSync = config.OfflineNameSyncConfig{Enabled: mode != disabledMode, ArtifactDirectory: filepath.Join(root, "artifacts", artifactMode), MaxAgeHours: 24, MaxQueuedJobs: 8, MaxQueuedTasks: 32}
 	configPath := filepath.Join(root, "config.yaml")
 	auth, err := apiauth.NewAuthManager(configPath, time.Hour, func(string) (string, bool) { return "", false })
 	if err != nil {
@@ -180,7 +181,7 @@ func run() error {
 	// Disabled services intentionally do not run an artifact reader. Do not wait
 	// for their Ready channel: readiness is the listening HTTP server in that mode.
 	err = func() error {
-		if mode != "disabled" {
+		if mode != disabledMode {
 			select {
 			case <-rt.OfflineNameSync().Ready():
 			case err := <-result:
