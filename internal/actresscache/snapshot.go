@@ -113,3 +113,29 @@ func (s *Store) publish(ctx context.Context, snapshot *Snapshot) (*Snapshot, err
 	s.current.Store(snapshot)
 	return snapshot, nil
 }
+
+// UniqueLookupResult avoids materializing an unbounded list of competing claims.
+// Ambiguous results deliberately contain no candidate, including identical metadata.
+type UniqueLookupResult struct {
+	Candidate *Evidence
+	Ambiguous bool
+}
+
+// LookupUnique returns an owned record only when exactly one source key claims
+// this exact external ID. It does not infer or verify a local actor's identity.
+// Ambiguity is checked before freshness/source preference, so filtering cannot
+// turn contradictory evidence into permission to choose an identity.
+func (s *Snapshot) LookupUnique(namespace, value string) (UniqueLookupResult, error) {
+	if _, err := SourceKey(namespace, value); err != nil {
+		return UniqueLookupResult{}, err
+	}
+	indexes := s.byExternalID[ExternalID{namespace, value}]
+	if len(indexes) > 1 {
+		return UniqueLookupResult{Ambiguous: true}, nil
+	}
+	if len(indexes) == 0 {
+		return UniqueLookupResult{}, nil
+	}
+	candidate := cloneEvidence(s.records[indexes[0]])
+	return UniqueLookupResult{Candidate: &candidate}, nil
+}
