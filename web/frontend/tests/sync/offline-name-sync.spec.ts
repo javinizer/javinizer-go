@@ -76,7 +76,19 @@ test('explicit review applies once, preserves historical credits, and survives r
 	expect(after.tasks[0].status).toBe('applied');
 	expect(after.actors.find((x) => x.id === a.id)?.japanese_name).toBe(a.after_name);
 	expect(after.credits).toEqual(before.credits);
-	expect(after.aliases).toEqual(before.aliases);
+	// Canonical renames retain the former canonical name as a trusted alias.
+	// This is not permission to import the source's untrusted alias metadata.
+	const expectedAliases = [
+		...before.aliases,
+		{ alias_name: a.before_name, canonical_name: a.after_name },
+	];
+	expect(after.aliases).toEqual(expectedAliases);
+	expect(after.actors.filter((actor) => actor.id !== a.id)).toEqual(
+		before.actors.filter((actor) => actor.id !== a.id),
+	);
+	expect(after.actors.map(({ id, aliases }) => ({ id, aliases }))).toEqual(
+		before.actors.map(({ id, aliases }) => ({ id, aliases })),
+	);
 	await page.reload();
 	await history(page);
 	await dialog(page).getByRole('button', { name: 'View results', exact: true }).click();
@@ -90,6 +102,10 @@ test('explicit review applies once, preserves historical credits, and survives r
 	after = await sync.inspect();
 	expect(after.jobs).toHaveLength(1);
 	expect(after.credits).toEqual(before.credits);
+	expect(after.aliases).toEqual(expectedAliases);
+	expect(after.actors.filter((actor) => actor.id !== a.id)).toEqual(
+		before.actors.filter((actor) => actor.id !== a.id),
+	);
 });
 
 test('Back Escape close and reopen discard unsubmitted permission', async ({ page, sync }) => {
