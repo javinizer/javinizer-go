@@ -21,6 +21,7 @@ Cross-cutting packages (no routes; consumed by handlers across domains):
 Domain packages (each owns a feature surface and is wired from `internal/api/server`):
 
 - `actress` — actress catalog: list, search, CRUD, merge preview/execute, import/export.
+- `actresssync` — authenticated offline Japanese-name source discovery, exact batch review/confirmation, durable jobs/receipts and cancellation; all writes use the rate-limited subgroup plus domain CSRF/origin checks. Its narrow service contract excludes repository, artifact and clock authority.
 - `auth` — authentication endpoints (`/auth/status`, `/auth/setup`, `/auth/login`, `/auth/logout`); exposes `RegisterPublicRoutes`, mounted on `/api/v1` before the protected group.
 - `batch` — batch scrape/organize/rescrape workflow, per-result operations (rescrape, exclude, preview, poster), cancel, update, and delete.
 - `events` — event-log endpoints: list, stats, and clear (`GET`/`DELETE /events`).

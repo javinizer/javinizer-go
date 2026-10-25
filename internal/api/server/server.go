@@ -161,6 +161,7 @@ func NewServer(rt *core.APIRuntime) *gin.Engine {
 	// boundary, after bootstrap has returned, so slow/unavailable ledger roots
 	// cannot hold up API availability. It is one-shot and tied to rt.Shutdown.
 	rt.StartStartupSweep()
+	rt.StartOfflineNameSync()
 
 	return router
 }

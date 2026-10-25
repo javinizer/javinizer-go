@@ -11,6 +11,7 @@ var (
 	ErrActressSyncStale     = errors.New("actress sync confirmation or evidence is stale")
 	ErrActressSyncConflict  = errors.New("actress sync request conflicts with existing work or source ownership")
 	ErrActressSyncLease     = errors.New("actress sync lease is unavailable or fenced")
+	ErrActressSyncQueueFull = errors.New("actress sync queue is full")
 )
 
 // ActressSyncChoice is an explicit actor/source association chosen for review.
@@ -70,7 +71,36 @@ type ActressSyncTask struct {
 	LeaseOwner      string
 	LeaseUntilMS    int64 `gorm:"column:lease_until_ms"`
 	FinishedAt      *time.Time
+	// Operational diagnostics are not receipts or permission to change identity.
+	// Terminal tasks suppress these fields even when historical diagnostics remain.
+	ProblemCode     string `gorm:"-"`
+	RetryAfterMS    int64  `gorm:"-"`
+	ProblemAttempts int    `gorm:"-"`
 }
+
+// ActressSyncQueueLimits bounds outstanding work across all server processes.
+// Zero fields select the defaults; invalid or over-hard-cap values fail closed.
+type ActressSyncQueueLimits struct {
+	MaxQueuedJobs  int
+	MaxQueuedTasks int
+}
+
+// Queue budgets bound pending work and each discovery/history page. Problem
+// codes are safe durable categories, never raw storage errors.
+const (
+	DefaultActressSyncQueuedJobs  = 16
+	DefaultActressSyncQueuedTasks = 2000
+	MaxActressSyncQueuedJobs      = 32
+	MaxActressSyncQueuedTasks     = 8192
+	DefaultActressSyncDueJobs     = 16
+	MaxActressSyncDueJobs         = 16
+	DefaultActressSyncHistoryJobs = 20
+	MaxActressSyncHistoryJobs     = 32
+
+	ActressSyncProblemSnapshotMissing = "snapshot_missing"
+	ActressSyncProblemSnapshotInvalid = "snapshot_invalid"
+	ActressSyncProblemApplyFailed     = "apply_failed"
+)
 
 // ActressSyncLease is the complete fencing token issued by ClaimOfflineNameSync.
 // Its times are supplied by the server, never from an untrusted API clock.

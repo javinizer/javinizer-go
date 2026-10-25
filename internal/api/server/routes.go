@@ -13,6 +13,7 @@ import (
 
 	swaggerPkg "github.com/javinizer/javinizer-go/docs/swagger"
 	"github.com/javinizer/javinizer-go/internal/api/actress"
+	"github.com/javinizer/javinizer-go/internal/api/actresssync"
 	"github.com/javinizer/javinizer-go/internal/api/auth"
 	"github.com/javinizer/javinizer-go/internal/api/batch"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -172,6 +173,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	temp.RegisterRoutes(protected, rt)
 	token.RegisterRoutes(protected, writeProtected, tokenSvc)
 	r18devdump.RegisterRoutes(protected, writeProtected, rt)
+	actresssync.RegisterRoutes(protected, writeProtected, rt)
 }
 
 func registerStaticWebRoutes(router *gin.Engine, assets webUIAssets) {

@@ -271,6 +271,16 @@ metadata:
         convert_alias: false  # Convert actress names using alias database
         candidate_retention_days: 30 # Delete creditless scrape candidates after 30 days
 
+        # Explicitly reviewed Japanese-name updates from a locally provisioned artifact.
+        # No downloads, automatic identity matches, or scrape-time changes.
+        # All settings and the artifact snapshot are pinned until server restart.
+        offline_name_sync:
+            enabled: false        # Requires actress_database.enabled
+            artifact_directory: "" # Set a clean absolute server-local path before enabling
+            max_age_hours: 168     # Finite 1..8760; maximum source observation age
+            max_queued_jobs: 16    # 1..32 outstanding jobs across server processes
+            max_queued_tasks: 2000 # 1..8192 outstanding tasks across server processes
+
     # Genre replacement/normalization database (SQLite-backed)
     genre_replacement:
         enabled: true

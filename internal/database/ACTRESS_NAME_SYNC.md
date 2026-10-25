@@ -1,9 +1,10 @@
 # Confirmed offline Japanese-name batches
 
-Migration 26 and the `ActressRepository` methods provide a tested durable storage
-boundary, **not an activated feature or recurring automatic sync**. There is no
-HTTP handler, background worker, scheduler, UI, live fetching or change to normal
-scraping. All examples/tests use disposable synthetic databases and evidence.
+Migrations 26–27 and the `ActressRepository` methods provide a tested durable
+storage boundary, **not recurring automatic sync**. The repository does not fetch
+evidence, schedule work, authenticate users, or activate a worker. Consumers must
+opt in explicitly and obtain authenticated human confirmation. All examples/tests
+use disposable synthetic databases and evidence.
 
 ## Explicit source bridge and review
 
@@ -14,13 +15,15 @@ actor can now be explicitly associated with an exact evidence `SourceKey` using
 chooses an actor. Evidence supplies a nonempty Japanese name, not an inferred
 first/last-name split or trusted alias.
 
-The intended next API/UI flow is a bounded selection of actors and source
-records, a batch review showing both identities, source provenance and exact
+The opt-in offline API/service now implements bounded selection of actors and
+source records, a batch review showing both identities, source provenance and exact
 before/after names, followed by one explicit confirmation of the selected batch.
-It must not require editing per-record configuration files. The review payload
+See `internal/actressnamesync/README.md` and `docs/19-offline-actress-name-sync.md`.
+A user-friendly UI remains a separate gate; it must not require editing per-record
+configuration files. The repository review payload
 includes the immutable snapshot digest, an actor-state precondition, and freshness
 limit. `SubmitConfirmedOfflineNameSync` revalidates the entire batch inside its
-write transaction. Calling it asserts that the future authenticated API obtained
+write transaction. Calling it asserts that the authenticated API obtained
 human confirmation; this repository method cannot itself authenticate a person.
 Do not connect it to ordinary scraping/import or treat a preview as confirmation.
 The review fingerprint is a state precondition, not a secret or signature.
@@ -93,15 +96,53 @@ permission for recurring sync.
   Migration rollback revokes outstanding work and removes dependent triggers but
   preserves audit tables/tombstones. Re-upgrade does not reactivate old consent.
 
-## Remaining activation gates
+## Bounded activation support
 
-The next slice must supply authenticated batch review/confirmation endpoints,
-trusted server clocks, request/global queue admission, snapshot retention by
-referenced digest, bounded workers with restart/reclaim/cancel handling, observable
-receipts, and a usable batch UI. Database history currently has no pruning policy;
+`SubmitConfirmedOfflineNameSyncWithLimits` serializes global admission with the
+submission transaction, including across independent database connections. Exact
+request-key retries are resolved first and remain available when the queue is
+full or their evidence is unavailable. Defaults are 16 outstanding jobs and 2,000
+outstanding tasks; callers may configure positive limits up to hard caps of 32
+and 8,192. Pending/leased/applying tasks count; terminal receipts do not. A
+replacement is conservatively counted as new work until submission commits.
+
+`DueOfflineNameSyncJobs` returns at most 16 job metadata rows in ascending ID
+order. The server carries the last ID between passes and wraps after an empty
+page. Claimability and persisted retry times are filtered before the page limit,
+so live leases and blocked earlier jobs do not hide later due work. A serial
+worker can claim/apply one task per discovered job before its next poll.
+`ListOfflineNameSyncJobs` provides newest-first metadata history (default 20,
+maximum 32) using a stable created-time/ID keyset. Receipt collections remain
+bounded by the 500-task batch limit. `OfflineNameSyncJobByRequestKey` resolves a
+server-generated confirmation replay after restart; authentication/principal
+binding remains the service's responsibility.
+
+Migration 27 adds per-task operational diagnostics separate from immutable
+receipts. Only `snapshot_missing`, `snapshot_invalid`, and `apply_failed` are
+stored, never raw filesystem, database, or provider error text. Backoff starts at
+five seconds, doubles, and caps at five minutes; attempt counters cap at 16.
+`RecordOfflineNameSyncJobProblem` touches only currently due/claimable tasks under
+write admission, returning due expired leases to pending while retaining their
+generation and clearing the old owner/expiry. `RecordOfflineNameSyncLeaseProblem`
+checks the full current
+unexpired lease fence, then returns that task to pending without reducing its
+generation. Old tokens remain unusable; the next claim must increment generation.
+Neither method grants new authority or substitutes another evidence digest.
+
+Task reads expose diagnostics only while pending/leased. Cancellation and other
+terminal outcomes always take precedence over stale diagnostic history. Rolling
+migration 27 back retires outstanding grants before older consumers can ignore
+backoff, while preserving diagnostic/receipt history and protection tombstones.
+
+## Remaining product gates
+
+The disabled-by-default API/service supplies authenticated batch review and
+confirmation, server clocks, bounded admission/workers, exact-digest recovery,
+and observable receipts. A usable batch UI remains required before claiming a
+complete user workflow. Database history currently has no pruning policy;
 retention must preserve ownership/tombstone safety and active snapshot references.
 No API should accept client clocks or automatically treat a cached review as human
 consent. Real providers/authenticity, recurring field-level ownership policy,
 source priorities, image enrichment and end-to-end UI acceptance remain separate.
 HTTP-proxy origin DNS safety and Windows artifact publication remain fail-closed
-under their existing gates; this storage work does not relax either.
+under their existing gates; this offline workflow does not relax either.

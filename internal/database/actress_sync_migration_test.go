@@ -18,7 +18,7 @@ func TestConfirmedNameSyncMigrationPreservesHistoryButRevokesOnRollback(t *testi
 	provider := newMigrationProvider(t, sqlDB)
 	version, err := provider.GetDBVersion(t.Context())
 	require.NoError(t, err)
-	require.EqualValues(t, 26, version)
+	require.EqualValues(t, 27, version)
 	_, err = provider.DownTo(t.Context(), 25)
 	require.NoError(t, err)
 	var triggers int64

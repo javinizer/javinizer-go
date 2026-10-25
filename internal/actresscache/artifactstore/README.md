@@ -1,7 +1,9 @@
-# Durable offline evidence publication — unwired
+# Durable offline evidence publication
 
 This package stores **canonical, already validated r18 dump evidence**, without
-live fetching, database/config/media changes, CLI/runtime activation or pruning.
+live fetching, database/config/media changes or pruning. The explicit offline
+`actress provision-cache` CLI is a publisher; runtime readers can use the same
+finite limits from `internal/actresscache/offline`.
 A source receipt is an assertion about one supplied file, never upstream
 completeness, authenticity or identity/credit authority. Empty evidence remains
 explicitly empty, not a deletion instruction.
@@ -82,6 +84,20 @@ canonical manifests, exact object length/hash, format limits and receipt binding
 Invalid current falls back to validated previous and reports `Recovered=true`.
 If both are absent, ErrEmpty; otherwise neither-valid fails closed. Loading never
 selects a newer-looking orphan, staging file, timestamp or directory order.
+
+`LoadReferencedSnapshot(ctx, digest)` is a separate read-only recovery boundary
+for a digest recorded in an **already admitted durable job**, not a lookup API
+for arbitrary request strings. The caller must establish that job/reference
+relationship. It validates lowercase SHA-256 before constructing the one flat
+`<digest>.ndjson` name, then uses the same bounded root-confined regular-file and
+identity checks, verifies the exact SHA-256 and canonical decoder bytes, and
+requires r18dev-only records. It does not scan, read or infer current/previous,
+select an orphan, reconstruct a source receipt, or retry a missing/changed object.
+A reference can therefore remain valid after both manifest slots rotate, without
+silently substituting a different generation. The caller must retain every
+immutable artifact referenced by an active durable job. Missing or corrupt
+references fail closed and require explicit repair; this package never prunes.
+The narrow referenced reader remains available on Windows.
 
 ## Publication order and outcomes
 

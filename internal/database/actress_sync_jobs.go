@@ -31,7 +31,7 @@ func (r *ActressRepository) ClaimOfflineNameSync(ctx context.Context, jobID, own
 				return ErrActressSyncLease
 			}
 			var task ActressSyncTask
-			if err := tx.Where("job_id = ? AND (status = 'pending' OR (status = 'leased' AND lease_until_ms <= ?))", jobID, now.UnixMilli()).Order("id").Take(&task).Error; err != nil {
+			if err := claimableOfflineNameSyncTasks(tx, now).Where("job_id = ?", jobID).Order("id").Take(&task).Error; err != nil {
 				return err
 			}
 			if task.LeaseGeneration == math.MaxInt64 {

@@ -95,6 +95,9 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 
 	rt.SetConfig(cfg)
 	rt.EnsureRuntime()
+	// Pin the offline-sync settings without artifact I/O. Its worker starts at
+	// the server boundary, not while dependency bootstrap is still in flight.
+	rt.OfflineNameSync()
 
 	// Configure the one-shot replacement repair without running it here. The
 	// API server starts it after BootstrapAPI returns, on rt.ServerCtx(), so
