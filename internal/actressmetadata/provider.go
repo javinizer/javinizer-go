@@ -14,9 +14,13 @@ import (
 	"github.com/javinizer/javinizer-go/internal/actresscache"
 )
 
+// Skip disables a request when present anywhere in its priorities.
 const Skip = "__skip__"
+
+// MaxProviders bounds both registered providers and priority entries.
 const MaxProviders = 32
 
+// ErrBusy reports concurrent resolution without queuing another request.
 var ErrBusy = errors.New("metadata resolver is busy")
 
 // Reference is an exact source-owned ID, never a name or inferred cross-source ID.
@@ -63,8 +67,10 @@ func (q Query) validate() error {
 	return err
 }
 
+// Outcome describes evidence availability without granting mutation authority.
 type Outcome string
 
+// Evidence outcomes distinguish missing snapshots, absence and ambiguity.
 const (
 	NoSnapshot Outcome = "no_snapshot"
 	Unmatched  Outcome = "unmatched"
@@ -95,12 +101,15 @@ type SnapshotProvider struct {
 	source   string
 }
 
+// NewSnapshotProvider pins a snapshot and validates its source namespace.
 func NewSnapshotProvider(snapshot *actresscache.Snapshot, source string) (*SnapshotProvider, error) {
 	if _, err := actresscache.SourceKey(source, "validation"); err != nil {
 		return nil, err
 	}
 	return &SnapshotProvider{snapshot: snapshot, source: source}, nil
 }
+
+// LookupEvidence returns owned exact-match evidence from the pinned snapshot.
 func (p *SnapshotProvider) LookupEvidence(ctx context.Context, q Query) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -151,9 +160,14 @@ type Clock interface {
 	Now() time.Time
 	Wait(context.Context, time.Duration) error
 }
+
+// SystemClock uses the system clock and cancellable timers.
 type SystemClock struct{}
 
+// Now returns the current system time.
 func (SystemClock) Now() time.Time { return time.Now() }
+
+// Wait waits for a delay or context cancellation, whichever happens first.
 func (SystemClock) Wait(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -187,6 +201,7 @@ type Registry struct {
 	timeout time.Duration
 }
 
+// NewRegistry validates explicit provider options without implicit defaults.
 func NewRegistry(registrations []Registration, clock Clock, timeout time.Duration) (*Registry, error) {
 	if clock == nil || timeout <= 0 || len(registrations) > MaxProviders {
 		return nil, fmt.Errorf("invalid resolver clock, timeout or provider budget")
@@ -209,6 +224,8 @@ type Observation struct {
 	Provider string
 	Result   Result
 }
+
+// Resolution retains ordered observations and a conservative overall outcome.
 type Resolution struct {
 	Outcome      Outcome
 	Observations []Observation
