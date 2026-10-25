@@ -12,8 +12,8 @@ import (
 // PreviewOfflineSync reads selected identities and name-management provenance in
 // one transaction, then evaluates evidence without writing any application state.
 // It neither repairs quarantine nor promotes candidates. User/legacy/revoked
-// ownership blocks the whole preview conservatively; there is no field-level
-// sync ownership schema yet. A future writer must re-read all protections under
+// ownership and explicit sync-name guards block the preview conservatively.
+// A writer must re-read all protections under
 // its lease-fenced canonical mutation transaction, never apply this plan blindly.
 func (r *ActressRepository) PreviewOfflineSync(ctx context.Context, ids []uint, snapshot *actresscache.Snapshot, options actresssync.Options) (*actresssync.Plan, error) {
 	if err := ctx.Err(); err != nil {
@@ -33,15 +33,16 @@ func (r *ActressRepository) PreviewOfflineSync(ctx context.Context, ids []uint, 
 			AmbiguityQuarantined bool
 			Origin               string
 			Managed              bool
+			Protected            bool
 			UpdatedAt            time.Time
 		}
-		if err := tx.Table("actresses AS a").Select("a.id, a.dmm_id, a.verified, a.ambiguity_quarantined, a.origin, a.updated_at, COALESCE(p.managed, 0) AS managed").
-			Joins("LEFT JOIN actress_import_name_provenance AS p ON p.actress_id = a.id").Where("a.id IN ?", ids).Scan(&rows).Error; err != nil {
+		if err := tx.Table("actresses AS a").Select("a.id, a.dmm_id, a.verified, a.ambiguity_quarantined, a.origin, a.updated_at, COALESCE(p.managed, 0) AS managed, COALESCE(g.protected, 0) AS protected").
+			Joins("LEFT JOIN actress_import_name_provenance AS p ON p.actress_id = a.id").Joins("LEFT JOIN actress_sync_name_guards AS g ON g.actress_id = a.id").Where("a.id IN ?", ids).Scan(&rows).Error; err != nil {
 			return err
 		}
 		found := make(map[uint]actresssync.Target, len(rows))
 		for _, row := range rows {
-			found[row.ID] = actresssync.Target{ID: row.ID, Exists: true, DMMID: row.DMMID, Verified: row.Verified, Quarantined: row.AmbiguityQuarantined, Protected: row.Origin != ActressOriginImport || !row.Managed, UpdatedAt: row.UpdatedAt}
+			found[row.ID] = actresssync.Target{ID: row.ID, Exists: true, DMMID: row.DMMID, Verified: row.Verified, Quarantined: row.AmbiguityQuarantined, Protected: row.Origin != ActressOriginImport || !row.Managed || row.Protected, UpdatedAt: row.UpdatedAt}
 		}
 		targets := make([]actresssync.Target, len(ids))
 		for i, id := range ids {
