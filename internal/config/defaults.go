@@ -160,6 +160,7 @@ func defaultMetadataConfig() MetadataConfig {
 			AutoAdd:                true,
 			ConvertAlias:           false,
 			CandidateRetentionDays: 30,
+			OfflineNameSync:        defaultOfflineNameSyncConfig(),
 		},
 		GenreReplacement: GenreReplacementConfig{
 			Enabled: true,

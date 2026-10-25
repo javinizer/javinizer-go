@@ -68,7 +68,7 @@ func NewCommand() *cobra.Command {
 	importCmd.Flags().Bool("overwrite-names", false, "Replace managed import-owned names; legacy records remain protected")
 	importCmd.Flags().Bool("overwrite-legacy-names", false, "Also overwrite ambiguous legacy import names for this invocation only; requires --overwrite-names (back up and review first)")
 
-	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd)
+	actressCmd.AddCommand(mergeCmd, exportCmd, importCmd, newProvisionCommand())
 	return actressCmd
 }
 

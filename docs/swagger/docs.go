@@ -7440,6 +7440,14 @@ const docTemplate = `{
                     "description": "Enable actress image lookup from database",
                     "type": "boolean"
                 },
+                "offline_name_sync": {
+                    "description": "Explicit offline Japanese-name jobs; restart required after changes",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OfflineNameSyncConfig"
+                        }
+                    ]
+                },
                 "trusted_collision_sources": {
                     "description": "Scrapers eligible for auto_alias",
                     "type": "array",
@@ -7811,6 +7819,26 @@ const docTemplate = `{
                 "unknown_actress_text": {
                     "description": "Text for fallback mode",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_config.OfflineNameSyncConfig": {
+            "type": "object",
+            "properties": {
+                "artifact_directory": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "max_age_hours": {
+                    "type": "number"
+                },
+                "max_queued_jobs": {
+                    "type": "integer"
+                },
+                "max_queued_tasks": {
+                    "type": "integer"
                 }
             }
         },

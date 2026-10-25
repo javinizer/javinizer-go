@@ -91,6 +91,7 @@ func TestDefaultConfigMatchesExample(t *testing.T) {
 		assert.Equal(t, exampleCfg.Metadata.ActressDatabase.Enabled, defaultCfg.Metadata.ActressDatabase.Enabled, "metadata.actress_database.enabled mismatch")
 		assert.Equal(t, exampleCfg.Metadata.ActressDatabase.AutoAdd, defaultCfg.Metadata.ActressDatabase.AutoAdd, "metadata.actress_database.auto_add mismatch")
 		assert.Equal(t, exampleCfg.Metadata.ActressDatabase.ConvertAlias, defaultCfg.Metadata.ActressDatabase.ConvertAlias, "metadata.actress_database.convert_alias mismatch")
+		assert.Equal(t, exampleCfg.Metadata.ActressDatabase.OfflineNameSync, defaultCfg.Metadata.ActressDatabase.OfflineNameSync, "metadata.actress_database.offline_name_sync mismatch")
 	})
 
 	t.Run("DatabaseConfig", func(t *testing.T) {

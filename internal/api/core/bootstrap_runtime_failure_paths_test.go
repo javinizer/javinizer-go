@@ -55,6 +55,13 @@ func TestBootstrapAPIWithOptsValidationAndWiring(t *testing.T) {
 				require.Same(t, registry, deps.CoreDeps.GetRegistry())
 			}
 			require.Nil(t, rt.updateCheckerDone, "disabled version checking must not start outbound work")
+			svc := rt.OfflineNameSync()
+			require.NotNil(t, svc, "bootstrap must pin a service for the capable concrete repository even when disabled")
+			select {
+			case <-svc.Ready():
+				t.Fatal("bootstrap must not start artifact initialization or the offline worker")
+			default:
+			}
 		})
 	}
 }

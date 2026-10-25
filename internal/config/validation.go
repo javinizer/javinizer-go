@@ -463,6 +463,9 @@ func validateConfigStructure(cfg *Config) error {
 
 	// --- Cross-field validators ---
 
+	if err := ValidateOfflineNameSync(cfg.Metadata.ActressDatabase); err != nil {
+		return err
+	}
 	if err := ValidateScraperOverrides(cfg); err != nil {
 		return err
 	}

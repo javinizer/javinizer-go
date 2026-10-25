@@ -93,6 +93,15 @@ curl -X POST http://localhost:8765/api/v1/scrape \
 curl http://localhost:8765/api/v1/movies
 ```
 
+### Confirmed offline actress-name jobs
+
+The disabled-by-default `/api/v1/actress-name-sync` API supports offline source
+discovery, complete batch review, explicit confirmation, bounded durable job and
+task receipts, and cancellation. It does not infer actor identity or enable
+recurring synchronization. See the [offline actress-name API guide](19-offline-actress-name-sync.md)
+for provisioning, startup configuration, exact request schemas, authentication,
+CSRF headers, retry semantics and limitations.
+
 ### Actresses
 
 Manage actress database with images and metadata.

@@ -143,6 +143,13 @@ func (r *ActressRepository) ReviewOfflineNameSync(ctx context.Context, choices [
 // A repeated request key with the exact payload returns its original job even
 // after completion; a different payload conflicts. Binding is not field ownership.
 func (r *ActressRepository) SubmitConfirmedOfflineNameSync(ctx context.Context, requestKey string, review ActressSyncReview, snapshot *actresscache.Snapshot, now time.Time) (*ActressSyncJob, error) {
+	return r.SubmitConfirmedOfflineNameSyncWithLimits(ctx, requestKey, review, snapshot, now, ActressSyncQueueLimits{})
+}
+
+// SubmitConfirmedOfflineNameSyncWithLimits applies atomic global admission only
+// after resolving exact idempotent retries. Queue pressure cannot hide an
+// already-committed request, including one whose evidence is no longer available.
+func (r *ActressRepository) SubmitConfirmedOfflineNameSyncWithLimits(ctx context.Context, requestKey string, review ActressSyncReview, snapshot *actresscache.Snapshot, now time.Time, limits ActressSyncQueueLimits) (*ActressSyncJob, error) {
 	if !syncOpaque(requestKey) || !syncClockValid(now) || !validSyncHash(review.SnapshotDigest) || review.MaxAge <= 0 || len(review.Proposals) == 0 || len(review.Proposals) > actresssync.MaxSelection {
 		return nil, ErrActressSyncConflict
 	}
@@ -178,6 +185,9 @@ func (r *ActressRepository) SubmitConfirmedOfflineNameSync(ctx context.Context, 
 				return err
 			}
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err := admitOfflineNameSyncTx(tx, len(review.Proposals), limits); err != nil {
 				return err
 			}
 			if snapshot == nil || snapshot.Digest() != review.SnapshotDigest {
@@ -264,6 +274,9 @@ func offlineNameSyncJobTx(tx *gorm.DB, id string) (*ActressSyncJob, error) {
 	}
 	if len(job.Tasks) > actresssync.MaxSelection {
 		return nil, ErrActressSyncConflict
+	}
+	if err := readOfflineNameSyncProblemsTx(tx, job.Tasks); err != nil {
+		return nil, err
 	}
 	return &job, nil
 }

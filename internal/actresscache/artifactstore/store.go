@@ -1,5 +1,5 @@
 // Package artifactstore publishes validated offline evidence in a private local
-// directory. It has no application runtime, network or identity mutation wiring.
+// directory. Its publisher and readers grant no network or identity authority.
 package artifactstore
 
 import (
