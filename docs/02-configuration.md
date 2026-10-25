@@ -287,9 +287,13 @@ Mappings cannot rename a performer or supply identity identifiers.
 
 There are no default mappings. Set `actress_name_overrides: {}` or remove the field
 to clear them in a config file; an explicit empty object or null also clears them
-when replacing settings. This is a YAML/JSON configuration option, not a new
-per-performer settings form. Settings saves preserve it. It is rejected on other
-scrapers.
+when replacing settings. You can also save a per-performer correction through
+**Correct for future scrapes** in the review source viewer; see
+[JavLibrary source-name interpretation and corrections](#javlibrary-source-name-interpretation-and-corrections).
+The UI stores the same guarded configuration and keeps it across restarts. It
+applies to future scrapes, including CLI runs using that configuration, not the
+current movie or historical credits. Settings saves preserve this option; it is
+rejected on other scrapers.
 
 This is not automatic name-order detection and does not repair historical rows.
 Verified database identities are not overwritten or promoted by a scrape. The
@@ -1882,8 +1886,8 @@ actor ID, identity merge instruction, or historical credit edit. The optional
 catalog-name output continues to report catalog consistency separately; it does
 not promote a source's unknown name order to authoritative linguistic knowledge.
 
-In the review source viewer, select the JavLibrary cast and choose **Correct name
-order** for a multi-part label. The original displayed label remains visible.
+In the review source viewer, select the JavLibrary cast and choose **Correct for future
+scrapes** for a multi-part label. The original displayed label remains visible.
 Enter the given and family components or use the swap helper; together they must
 reconstruct the same label in either order. Confirm that the correction is for
 future scrapes, then save. Native-script and single names do not require a split.
