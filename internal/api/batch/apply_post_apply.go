@@ -51,6 +51,9 @@ func makeOrganizePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInter
 		auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		emit := postApplyAuditEmit(auditCtx, emitter, job.GetID())
+		if afr.Err == nil && afr.Result != nil && afr.Result.RecoveryWarning != "" {
+			emit("file_move", fmt.Sprintf("Applied %s with recovery warning: %s", afc.Movie.ID, afr.Result.RecoveryWarning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, fileKey: afc.FilePath, "recovery_warning": afr.Result.RecoveryWarning, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
+		}
 		if afr.Err != nil {
 			// PR #249 codex follow-up (F4): the failed lane's result still
 			// carries the displacement crumbs — the link lane binds the
@@ -118,6 +121,11 @@ func makeUpdatePostApplyAuditHook(deps *core.APIDeps, job worker.BatchJobInterfa
 			return
 		}
 		emitter := deps.GetEventEmitter()
+		if emitter != nil && afr.Err == nil && afr.Result != nil && afr.Result.RecoveryWarning != "" {
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			postApplyAuditEmit(auditCtx, emitter, job.GetID())("nfo_gen", fmt.Sprintf("Applied %s with recovery warning: %s", afc.Movie.ID, afr.Result.RecoveryWarning), models.SeverityWarn, map[string]any{jobIDKey: job.GetID(), movieIDKey: afc.Movie.ID, fileKey: afc.FilePath, "recovery_warning": afr.Result.RecoveryWarning, applyGenerationKey: loadApplyGeneration(applyGenerationRef)})
+		}
 		if afr.Err != nil && emitter != nil && !errors.Is(afr.Err, context.Canceled) {
 			// canceled check BEFORE the failure emit (PR #249 codex P2,
 			// canceled-error lane): the worker records canceled files as

@@ -117,6 +117,7 @@ func publishRecoveryFailure(rc recoveryContext, msg string) {
 			}
 			current.FileMatchInfo = applyMatchFollowedByLiveIdentity(rc.fmi, current)
 			current.Movie = mergeLiveReviewEdits(rc.movie, rc.movie, current.Movie)
+			current.RecoveryWarning = ""
 			current.Status = models.JobStatusFailed
 			current.Error = msg
 			if !rc.startTime.IsZero() {

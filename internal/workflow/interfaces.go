@@ -108,6 +108,10 @@ type stepCompletion struct {
 // partial Steps AND a non-nil error — callers should check result != nil even
 // when err != nil. FailedStep identifies which step failed programmatically.
 type ApplyResult struct {
+	// RecoveryWarning reports successful filesystem publication with backup
+	// cleanup or journal finalization still pending. It is not a retry-Apply error.
+	RecoveryWarning string
+
 	VideoOutcome         string
 	PublicationPending   bool                        `json:"-"`
 	PublicationFinalized bool                        `json:"-"`

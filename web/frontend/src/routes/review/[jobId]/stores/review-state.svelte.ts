@@ -587,9 +587,9 @@ export function createReviewState(getJobId: () => string) {
 			if (status.status === 'failed') paths.add(path);
 		}
 		for (const [path, result] of Object.entries(job?.results ?? {})) {
-			if (result.status === 'failed' && result.movie) paths.add(path);
+			if (result.status === 'failed' && !result.recovery_warning && result.movie) paths.add(path);
 		}
-		return Array.from(paths).filter((path) => !job?.excluded?.[path]);
+		return Array.from(paths).filter((path) => !job?.excluded?.[path] && !job?.results?.[path]?.recovery_warning && !fileStatuses.get(path)?.recovery_warning);
 	}
 	function videoCollisionRequest() {
 		const options =
@@ -843,7 +843,7 @@ export function createReviewState(getJobId: () => string) {
 		job
 			? (Object.values((job as BatchJobResponse).results) as FileResult[]).filter(
 					(r) =>
-						r.status === 'failed' &&
+						r.status === 'failed' && !r.recovery_warning &&
 						!isCreditBlockedResult(r) &&
 						!((job as BatchJobResponse).excluded ?? {})[r.file_path],
 				)
@@ -852,7 +852,7 @@ export function createReviewState(getJobId: () => string) {
 
 	const creditBlockedResults = $derived(
 		Object.values(job?.results ?? {}).filter(
-			(result) => isCreditBlockedResult(result) && !job?.excluded?.[result.file_path],
+			(result) => !result.recovery_warning && isCreditBlockedResult(result) && !job?.excluded?.[result.file_path],
 		),
 	);
 	const recoveredCreditStatuses = $derived(
@@ -863,6 +863,26 @@ export function createReviewState(getJobId: () => string) {
 			]),
 		),
 	);
+
+	const recoveredApplyStatuses = $derived.by(() => {
+		const results = Object.values(job?.results ?? {}).filter(
+			(result) => !job?.excluded?.[result.file_path],
+		);
+		if (!results.some((result) => result.recovery_warning)) {
+			return recoveredCreditStatuses;
+		}
+		return new Map<string, FileStatus>(results.flatMap((result): [string, FileStatus][] => {
+			if (result.recovery_warning) return [[result.file_path, { status: 'success', recovery_warning: result.recovery_warning }]];
+			if (result.status === 'failed') return [[result.file_path, {
+				status: 'failed', error: result.error, error_code: result.error_code,
+			}]];
+			if (result.status !== 'completed') return [];
+			return [[result.file_path, {
+				status: result.video_outcome === 'skipped' ? 'skipped' : result.video_outcome === 'replaced' ? 'replaced' : 'success',
+				...(result.recovery_warning ? { recovery_warning: result.recovery_warning } : {}),
+			}]];
+		}));
+	});
 
 	const creditGuidance = $derived(
 		new Map(
@@ -2556,9 +2576,9 @@ export function createReviewState(getJobId: () => string) {
 			return organizeProgress;
 		},
 		get organizeStatus() {
-			return organizeStatus === 'idle' && recoveredCreditStatuses.size > 0
-				? 'failed'
-				: organizeStatus;
+			if (organizeStatus !== 'idle') return organizeStatus;
+			if (Array.from(recoveredApplyStatuses.values()).some((status) => status.status === 'failed')) return 'failed';
+			return recoveredApplyStatuses.size > 0 ? 'completed' : organizeStatus;
 		},
 		get canRetryFailed() {
 			return (
@@ -2579,7 +2599,7 @@ export function createReviewState(getJobId: () => string) {
 			return creditGuidanceRequest;
 		},
 		get displayedFileStatuses() {
-			return fileStatuses.size > 0 ? fileStatuses : recoveredCreditStatuses;
+			return fileStatuses.size > 0 ? fileStatuses : recoveredApplyStatuses;
 		},
 		get fileStatuses() {
 			return fileStatuses;

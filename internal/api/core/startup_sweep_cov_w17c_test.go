@@ -82,10 +82,17 @@ func TestStartupSweepLaunchDoesNotBlockBootstrap(t *testing.T) {
 
 	// A second server-construction call is still one-shot; it must not start a
 	// second sweep while the first one is blocked.
+	scansBeforeSecondLaunch := len(repo.scanContexts())
 	rt.StartStartupSweep()
 	fs.releaseReadDir()
 	require.True(t, rt.WaitBackgroundTasks(500*time.Millisecond),
 		"background startup sweep did not complete after the filesystem unblocked")
+	contexts := repo.scanContexts()
+	require.Len(t, contexts, scansBeforeSecondLaunch, "second launch must not start another sweep")
+	require.GreaterOrEqual(t, len(contexts), 2, "cleanup prepass and fresh index must both finish")
+	for _, got := range contexts {
+		require.Same(t, serverCtx, got, "every ledger scan must use the server lifetime context")
+	}
 
 	got, err := afero.ReadFile(base, dest)
 	require.NoError(t, err)
@@ -137,8 +144,11 @@ func (f *blockedStartupSweepFs) releaseReadDir() {
 
 type startupSweepDBFixture struct {
 	database.BatchFileOperationRepositoryInterface
-	rows    []models.BatchFileOperation
-	ctxSeen chan context.Context
+	rows     []models.BatchFileOperation
+	ctxSeen  chan context.Context
+	ctxOnce  sync.Once
+	ctxMu    sync.Mutex
+	contexts []context.Context
 }
 
 func (r *startupSweepDBFixture) FindOperationsWithReplacements(context.Context) ([]models.BatchFileOperation, error) {
@@ -146,10 +156,21 @@ func (r *startupSweepDBFixture) FindOperationsWithReplacements(context.Context) 
 }
 
 func (r *startupSweepDBFixture) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
-	r.ctxSeen <- ctx
+	// Observe the lifetime context once without turning later ledger reads
+	// (cleanup prepass followed by fresh index) into an unintended blocking seam.
+	r.ctxOnce.Do(func() { r.ctxSeen <- ctx })
+	r.ctxMu.Lock()
+	r.contexts = append(r.contexts, ctx)
+	r.ctxMu.Unlock()
 	return r.rows, nil
 }
 
 func (r *startupSweepDBFixture) FindOperationsByDestination(context.Context, string) ([]models.BatchFileOperation, error) {
 	return nil, nil
+}
+
+func (r *startupSweepDBFixture) scanContexts() []context.Context {
+	r.ctxMu.Lock()
+	defer r.ctxMu.Unlock()
+	return append([]context.Context(nil), r.contexts...)
 }

@@ -751,3 +751,83 @@ it('requires an originating retry context and revokes it on cleanup', async () =
 	await controller.retryFailed();
 	expect(apply).toHaveBeenCalledOnce();
 });
+
+describe('committed recovery warning', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+	it.each(['live', 'reloaded'] as const)('preserves %s warning without retry or automatic navigation', async (mode) => {
+		const path = '/synthetic/committed.mp4';
+		const warning = 'Output committed; backup cleanup pending. Do not re-apply.';
+		const job = makeJob(mode === 'live' ? 'organizing' : 'organized');
+		job.results[path] = {
+			file_path: path, movie_id: 'TEST-001', status: 'completed',
+			movie: { id: 'TEST-001' }, recovery_warning: warning,
+		} as FileResult;
+		const { deps, calls, fileStatuses } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+		const request = controller.organizeAll();
+		job.apply_generation = 1;
+		await request;
+		if (mode === 'live') {
+			await vi.advanceTimersByTimeAsync(5);
+			controller.handleWebSocketMessage({
+				job_id: job.id, file_path: path, status: 'organized', apply_generation: 1,
+				recovery_warning: warning,
+			} as ProgressMessage);
+			expect(fileStatuses.get(path)).toEqual({ status: 'success', recovery_warning: warning });
+			job.status = 'organized';
+		}
+		await vi.advanceTimersByTimeAsync(30);
+		expect(fileStatuses.get(path)).toEqual({ status: 'success', recovery_warning: warning });
+		expect(calls.toastInfo).toContain(warning);
+		expect(calls.toastSuccess).toEqual([]);
+		expect(calls.navigateBrowse).toBe(0);
+		const previousCalls = vi.mocked(deps.api.organizeBatchJob).mock.calls.length;
+		await controller.retryFailed();
+		expect(vi.mocked(deps.api.organizeBatchJob).mock.calls.length).toBe(previousCalls);
+		controller.cleanup();
+	});
+	it.each(['completed', 'failed'])('retains active warning across warningless %s REST, but clears it for a new apply', async (staleStatus) => {
+		const path = '/synthetic/committed.mp4';
+		const warning = 'Output committed; result writeback and cleanup pending.';
+		const job = makeJob('organizing');
+		job.results[path] = {
+			file_path: path, movie_id: 'TEST-001', status: 'completed', movie: { id: 'TEST-001' },
+		} as FileResult;
+		const { deps, calls, fileStatuses } = makeDeps({ job });
+		const controller = createOrganizeController(deps);
+		const request = controller.organizeAll();
+		job.apply_generation = 1;
+		await request;
+		await vi.advanceTimersByTimeAsync(5);
+		const event = { job_id: job.id, file_path: path, status: 'organized', apply_generation: 1 } as ProgressMessage;
+		controller.handleWebSocketMessage({ ...event, recovery_warning: warning });
+		// A later generic success event is also not a cleanup receipt.
+		controller.handleWebSocketMessage(event);
+		expect(fileStatuses.get(path)).toEqual({ status: 'success', recovery_warning: warning });
+		job.results[path].status = staleStatus;
+		job.status = 'organized';
+		await vi.advanceTimersByTimeAsync(30);
+		expect(fileStatuses.get(path)).toEqual({ status: 'success', recovery_warning: warning });
+		expect(calls.toastInfo).toContain(warning);
+		expect(calls.toastSuccess).toEqual([]);
+		expect(calls.navigateBrowse).toBe(0);
+
+		job.results[path].status = 'completed';
+		job.status = 'organizing';
+		const freshRequest = controller.organizeAll();
+		job.apply_generation = 2;
+		await freshRequest;
+		await vi.advanceTimersByTimeAsync(5);
+		// Old-generation warning is ignored, and ordinary success stays clean.
+		controller.handleWebSocketMessage({ ...event, recovery_warning: warning });
+		controller.handleWebSocketMessage({ ...event, apply_generation: 2 });
+		expect(fileStatuses.get(path)).toEqual({ status: 'success' });
+		job.status = 'organized';
+		await vi.advanceTimersByTimeAsync(30);
+		expect(fileStatuses.get(path)).toEqual({ status: 'success' });
+		expect(calls.navigateBrowse).toBe(1);
+		controller.cleanup();
+	});
+
+});

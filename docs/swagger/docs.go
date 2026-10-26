@@ -5180,6 +5180,9 @@ const docTemplate = `{
                 "part_suffix": {
                     "type": "string"
                 },
+                "recovery_warning": {
+                    "type": "string"
+                },
                 "result_id": {
                     "description": "Stable UUID — survives movie_id changes",
                     "type": "string"
@@ -7970,7 +7973,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "allow_revert": {
-                    "description": "Enable revert operations (default: false — opt-in for safety)",
+                    "description": "Retain Undo data for new operations (default: false); recovery stays enabled",
                     "type": "boolean"
                 },
                 "group_actress": {
