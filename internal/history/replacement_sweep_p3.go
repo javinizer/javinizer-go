@@ -635,7 +635,7 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 			claim.releaseAdmit()
 		}
 	}()
-	rows, err := s.repo.FindOperationsWithLedger(ctx)
+	rows, err := s.findReplacementBackupCandidates(ctx, entry.Backup)
 	if err != nil {
 		return false, fmt.Errorf("read live ledger: %w", err)
 	}

@@ -135,3 +135,16 @@ func (s *ReplacementSweeper) cleanupSuccessfulOperations(ctx context.Context) er
 	}
 	return errors.Join(errs...)
 }
+
+// findReplacementBackupCandidates keeps the authoritative shared-reference read
+// inside the existing destination claim. Production repositories can project a
+// conservative candidate set without hydrating historical NFO snapshots. Older
+// repository implementations retain the fail-closed full-ledger behavior.
+func (s *ReplacementSweeper) findReplacementBackupCandidates(ctx context.Context, backup string) ([]models.BatchFileOperation, error) {
+	if projected, ok := s.repo.(interface {
+		FindReplacementBackupCandidates(context.Context, string) ([]models.BatchFileOperation, error)
+	}); ok {
+		return projected.FindReplacementBackupCandidates(ctx, backup)
+	}
+	return s.repo.FindOperationsWithLedger(ctx)
+}
