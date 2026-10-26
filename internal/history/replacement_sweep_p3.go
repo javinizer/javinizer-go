@@ -485,24 +485,24 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 		consumed[opID][backup] = struct{}{}
 	}
 pruneEntries:
-	for i := range ops {
-		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
+	for _, op := range ops {
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", ops[i].ID, err))
+			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", op.ID, err))
 			continue
 		}
 		for j := range gf.Replacements {
 			entry := gf.Replacements[j]
 			if strings.TrimSpace(entry.Backup) == "" || strings.TrimSpace(entry.Destination) == "" {
-				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
+				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", op.ID))
 				continue
 			}
 			if !entry.Installed {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", ops[i].ID, entry.Backup))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", op.ID, entry.Backup))
 				continue
 			}
 			if entry.PendingKind() == models.RestorePendingKindRearmRefused {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", ops[i].ID, entry.Backup))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", op.ID, entry.Backup))
 				continue
 			}
 			if err := ctx.Err(); err != nil {
@@ -532,16 +532,16 @@ pruneEntries:
 				errs = append(errs, fmt.Errorf("claim destination %s was revoked before cleanup", entry.Destination))
 				continue
 			}
-			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, ops[i].ID, entry, candidateIDs, claim)
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, op.ID, entry, candidateIDs, claim)
 			claim.releaseAdmit()
 			claim.releaseDestLock()
 			untrack()
 			busyRelease()
 			if wasConsumed {
-				markConsumed(ops[i].ID, entry.Backup)
+				markConsumed(op.ID, entry.Backup)
 			}
 			if pruneErr != nil {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, pruneErr))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", op.ID, entry.Backup, pruneErr))
 			}
 		}
 	}

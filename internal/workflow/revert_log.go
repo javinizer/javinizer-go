@@ -1005,6 +1005,7 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 	id, err := strconv.ParseUint(opID, 10, 64)
 	if err != nil || id == 0 {
+		//nolint:nilerr // Match complete: non-database operation IDs have no journal backups to clean.
 		return nil
 	}
 	if err := history.NewReplacementSweeper(l.fs, l.repo).CleanupSuccessfulOperation(ctx, uint(id)); err != nil {
