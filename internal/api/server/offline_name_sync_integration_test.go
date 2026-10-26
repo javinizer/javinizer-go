@@ -519,3 +519,34 @@ func TestOfflineNameSyncAPIShutdownJoinsAndMissingSnapshotStaysCancelable(t *tes
 	require.Equal(t, actor, *unchanged)
 	assertOfflineSyncRows(t, reopened.db, 1, 1, 1)
 }
+
+func TestOfflineNameSyncExplicitReloadKeepsUnconfirmedConsentForSameDigest(t *testing.T) {
+	f := newOfflineSyncFixture(t)
+	s := f.open(t, nil)
+	actor := s.actor(t, 8123, "旧名")
+	review := s.review(t, f.ownerToken, actor.ID, f.sourceKeys[0])
+	// Saving unrelated runtime configuration must not activate new source or
+	// consent policy, even when the operator explicitly reloads artifact bytes.
+	cfg := s.rt.Snapshot().Config().Clone()
+	cfg.Metadata.ActressDatabase.OfflineNameSync = config.OfflineNameSyncConfig{
+		Enabled: false, ArtifactDirectory: filepath.Join(t.TempDir(), "different"),
+		MaxAgeHours: 240, MaxQueuedJobs: 1, MaxQueuedTasks: 1,
+	}
+	s.rt.ReplaceReloadable(cfg, s.rt.Snapshot().Registry())
+	info := decodeOfflineSync[actressnamesync.SourceInfo](t, s.request(t, http.MethodPost, "/sources/reload", f.ownerToken, `{}`), http.StatusOK)
+	require.Equal(t, f.digest, info.ArtifactDigest)
+	require.True(t, info.Enabled)
+	require.Equal(t, int64(24*60*60), info.MaxAgeSeconds)
+	require.True(t, info.RestartRequiredForConfigChanges)
+	require.True(t, info.Available)
+	assertOfflineSyncRows(t, s.db, 0, 0, 0)
+	stored, err := s.probe.FindByID(t.Context(), actor.ID)
+	require.NoError(t, err)
+	require.Equal(t, actor, *stored)
+	page := decodeOfflineSync[actressnamesync.SourcePage](t, s.request(t, http.MethodGet, "/sources?artifact_digest="+f.digest, f.ownerToken, ""), http.StatusOK)
+	require.Equal(t, f.digest, page.ArtifactDigest)
+	// The unchanged generation retains explicit review authority; reload itself
+	// neither creates a receipt nor applies metadata.
+	job := decodeOfflineSync[actressnamesync.JobView](t, s.request(t, http.MethodPost, "/jobs", f.ownerToken, offlineSyncConfirmBody(review.ReviewID)), http.StatusAccepted)
+	require.Equal(t, f.digest, job.SnapshotDigest)
+}

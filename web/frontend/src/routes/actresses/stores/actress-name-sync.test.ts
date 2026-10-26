@@ -47,6 +47,7 @@ function setup(initial?: string) {
 		status: vi.spyOn(client, 'status').mockResolvedValue({
 			enabled: true,
 			available: true,
+			artifact_digest: 'digest',
 			record_count: 1,
 			recovered: false,
 			max_age_seconds: 3600,
@@ -62,6 +63,7 @@ function setup(initial?: string) {
 			max_age_seconds: 3600,
 			proposals: [{ actress_id: 17, source, before_name: '旧名', after_name: '名前' }],
 		}),
+		reload: vi.spyOn(client, 'reload').mockImplementation(() => client.status()),
 		confirm: vi.spyOn(client, 'confirm').mockResolvedValue(job),
 		jobs: vi.spyOn(client, 'jobs').mockResolvedValue({ items: [job] }),
 		job: vi.spyOn(client, 'job').mockResolvedValue(job),
@@ -162,8 +164,8 @@ describe('offline name sync controller', () => {
 		d.resolve({
 			review_id: nonce,
 			expires_at: '2030-01-01T00:00:00Z',
-			artifact_digest: 'x',
-			max_age_seconds: 1,
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
 			proposals: [],
 		});
 		await p;
@@ -233,7 +235,7 @@ describe('offline name sync controller', () => {
 		const signal = h.api.sources.mock.calls[0][1]!;
 		h.c.setQuery('new');
 		expect(signal.aborted).toBe(true);
-		d.resolve({ items: [source], next_offset: null, artifact_digest: 'x' });
+		d.resolve({ items: [source], next_offset: null, artifact_digest: 'digest' });
 		await p;
 		expect(h.c.sourceItems).toEqual([]);
 		expect(h.c.query).toBe('new');
@@ -249,8 +251,8 @@ describe('offline name sync controller', () => {
 		d.resolve({
 			review_id: nonce,
 			expires_at: '2030-01-01T00:00:00Z',
-			artifact_digest: 'x',
-			max_age_seconds: 1,
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
 			proposals: [],
 		});
 		await p;
@@ -268,8 +270,8 @@ describe('offline name sync controller', () => {
 		d.resolve({
 			review_id: nonce,
 			expires_at: '2030-01-01T00:00:00Z',
-			artifact_digest: 'x',
-			max_age_seconds: 1,
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
 			proposals: [],
 		});
 		await p;
@@ -331,8 +333,8 @@ describe('offline name sync controller', () => {
 		h.api.review.mockResolvedValue({
 			review_id: nonce,
 			expires_at: '2000-01-01T00:00:00Z',
-			artifact_digest: 'x',
-			max_age_seconds: 1,
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
 			proposals: [],
 		});
 		await review(h);
@@ -438,7 +440,11 @@ describe('offline name sync controller', () => {
 	it('replaces source pages and preserves Back history on failed pagination', async () => {
 		const h = setup();
 		await open(h);
-		h.api.sources.mockResolvedValueOnce({ items: [source], next_offset: 20, artifact_digest: 'x' });
+		h.api.sources.mockResolvedValueOnce({
+			items: [source],
+			next_offset: 20,
+			artifact_digest: 'digest',
+		});
 		await h.c.searchSources();
 		h.api.sources.mockRejectedValueOnce(new Error('lost'));
 		await h.c.moreSources();
@@ -446,7 +452,7 @@ describe('offline name sync controller', () => {
 		h.api.sources.mockResolvedValueOnce({
 			items: [{ ...source, source_id: '2' }],
 			next_offset: null,
-			artifact_digest: 'x',
+			artifact_digest: 'digest',
 		});
 		await h.c.moreSources();
 		expect(h.c.sourceHasPrevious).toBe(true);
@@ -591,4 +597,211 @@ describe('offline name sync controller', () => {
 		await h.c.moreTasks();
 		expect(h.api.tasks).toHaveBeenCalledTimes(2);
 	});
+});
+
+describe('explicit evidence reload', () => {
+	it('pins discovery pages and reviews to the displayed digest', async () => {
+		const h = setup();
+		await review(h);
+		expect(h.api.sources.mock.lastCall?.[0]).toMatchObject({ artifact_digest: 'digest' });
+		expect(h.api.review.mock.lastCall?.[2]).toBe('digest');
+		expect(h.api.reload).not.toHaveBeenCalled();
+	});
+	it('preserves same-digest choices, review and consent without submitting', async () => {
+		const h = setup();
+		await review(h);
+		h.c.setConsent(true);
+		await h.c.reloadEvidence();
+		expect(h.c.reloadResult).toBe('unchanged');
+		expect(h.c.review?.review_id).toBe(nonce);
+		expect(h.c.consent).toBe(true);
+		expect(h.c.choices[17].source_key).toBe(source.source_key);
+		expect(h.api.confirm).not.toHaveBeenCalled();
+		expect(h.storage.setItem).not.toHaveBeenCalled();
+	});
+	it('clears changed-generation choices, pages, review and consent but not actors', async () => {
+		const h = setup();
+		await review(h);
+		h.c.setConsent(true);
+		h.api.reload.mockResolvedValue({ ...(await h.api.status()), artifact_digest: 'new' });
+		await h.c.reloadEvidence();
+		expect(h.c.reloadResult).toBe('changed');
+		expect(h.c.info?.artifact_digest).toBe('new');
+		expect(h.c.review).toBeNull();
+		expect(h.c.consent).toBe(false);
+		expect(h.c.choices).toEqual({});
+		expect(h.c.sourceItems).toEqual([]);
+		expect(h.c.actors.map((a) => a.id)).toEqual([17]);
+		expect(h.c.step).toBe('choose');
+		await h.c.confirm();
+		await h.c.requestReview();
+		expect(h.api.confirm).not.toHaveBeenCalled();
+		expect(h.api.review).toHaveBeenCalledTimes(1);
+	});
+	it('locks repeated reload and new reviews until settled, retaining evidence on failure', async () => {
+		const h = setup();
+		await review(h);
+		h.c.setConsent(true);
+		const d = deferred<Awaited<ReturnType<typeof h.api.reload>>>();
+		h.api.reload.mockReturnValueOnce(d.promise);
+		const p = h.c.reloadEvidence();
+		await h.c.reloadEvidence();
+		await h.c.requestReview();
+		await h.c.confirm();
+		h.c.backToChoices();
+		expect(h.api.reload).toHaveBeenCalledTimes(1);
+		expect(h.api.confirm).not.toHaveBeenCalled();
+		expect(h.c.step).toBe('review');
+		d.reject(new ApiError('raw path omitted', 'SYNC_RELOAD_FAILED'));
+		await p;
+		expect(h.c.errorCode).toBe('SYNC_RELOAD_FAILED');
+		expect(h.c.review?.review_id).toBe(nonce);
+		expect(h.c.consent).toBe(true);
+		expect(h.c.busy).toBeNull();
+		await h.c.reloadEvidence();
+		expect(h.api.reload).toHaveBeenCalledTimes(2);
+		expect(h.c.errorCode).toBe('');
+	});
+	it('fences old reload results and errors across close and reopen', async () => {
+		const h = setup();
+		await review(h);
+		const d = deferred<Awaited<ReturnType<typeof h.api.reload>>>();
+		h.api.reload.mockReturnValueOnce(d.promise);
+		const p = h.c.reloadEvidence();
+		h.c.close();
+		expect(h.api.reload.mock.lastCall?.[0]?.aborted).toBe(true);
+		await open(h);
+		d.resolve({ ...(await h.api.status()), artifact_digest: 'old-result' });
+		await p;
+		expect(h.c.info?.artifact_digest).toBe('digest');
+		expect(h.c.reloadResult).toBe('');
+		expect(h.api.reload).toHaveBeenCalledTimes(1);
+	});
+	it('aborts pending discovery at reload so an old page cannot replace new evidence', async () => {
+		const h = setup();
+		await open(h);
+		const d = deferred<Awaited<ReturnType<typeof h.api.sources>>>();
+		h.api.sources.mockReturnValueOnce(d.promise);
+		const p = h.c.searchSources();
+		h.api.reload.mockResolvedValue({ ...(await h.api.status()), artifact_digest: 'new' });
+		await h.c.reloadEvidence();
+		expect(h.api.sources.mock.lastCall?.[1]?.aborted).toBe(true);
+		d.resolve({ items: [source], next_offset: 20, artifact_digest: 'digest' });
+		await p;
+		expect(h.c.sourceItems).toEqual([]);
+		expect(h.c.sourceNextOffset).toBeNull();
+	});
+	it('status changes fence a pending review and preserve the pinned freshness policy', async () => {
+		const h = setup();
+		await choose(h);
+		const d = deferred<Awaited<ReturnType<typeof h.api.review>>>();
+		h.api.review.mockReturnValueOnce(d.promise);
+		const p = h.c.requestReview();
+		h.api.status.mockResolvedValue({ ...(await h.api.status()), artifact_digest: 'new' });
+		await h.c.loadInfo();
+		expect(h.api.review.mock.lastCall?.[1]?.aborted).toBe(true);
+		d.resolve({
+			review_id: nonce,
+			expires_at: '2030-01-01',
+			artifact_digest: 'digest',
+			max_age_seconds: 3600,
+			proposals: [],
+		});
+		await p;
+		expect(h.c.review).toBeNull();
+		expect(h.c.busy).toBeNull();
+		expect(h.c.info?.max_age_seconds).toBe(3600);
+		expect(h.c.info?.restart_required_for_config_changes).toBe(true);
+	});
+	it('stale server preconditions trigger only status reconciliation, not replay', async () => {
+		const h = setup();
+		await choose(h);
+		h.api.review.mockRejectedValue(new ApiError('changed', 'SYNC_STALE_GENERATION'));
+		await h.c.requestReview();
+		expect(h.c.choices).toEqual({});
+		expect(h.c.review).toBeNull();
+		expect(h.c.busy).toBeNull();
+		expect(h.api.status).toHaveBeenCalledTimes(2);
+		expect(h.api.review).toHaveBeenCalledTimes(1);
+		expect(h.api.reload).not.toHaveBeenCalled();
+		expect(h.api.confirm).not.toHaveBeenCalled();
+	});
+	it('rejects mismatched source pages and review responses without granting consent', async () => {
+		const h = setup();
+		await open(h);
+		h.api.sources.mockResolvedValueOnce({
+			items: [source],
+			next_offset: null,
+			artifact_digest: 'other',
+		});
+		await h.c.searchSources();
+		expect(h.c.sourceItems).toEqual([]);
+		await choose(h);
+		h.api.review.mockResolvedValue({
+			review_id: nonce,
+			expires_at: '2030-01-01',
+			artifact_digest: 'other',
+			max_age_seconds: 3600,
+			proposals: [],
+		});
+		await h.c.requestReview();
+		expect(h.c.review).toBeNull();
+		expect(h.c.choices).toEqual({});
+		expect(h.api.confirm).not.toHaveBeenCalled();
+	});
+	it('reload preserves historical receipts and uncertain submitted recovery without replay', async () => {
+		const h = setup(nonce);
+		await open(h);
+		await h.c.openJob(job.id);
+		h.api.reload.mockResolvedValue({ ...(await h.api.status()), artifact_digest: 'new' });
+		await h.c.reloadEvidence();
+		expect(h.c.step).toBe('job');
+		expect(h.c.job?.snapshot_digest).toBe(job.snapshot_digest);
+		expect(h.c.tasks).toHaveLength(1);
+		expect(h.c.recoveryReviewId).toBe(nonce);
+		expect(h.storage.getItem(key)).toBe(nonce);
+		expect(h.api.confirm).not.toHaveBeenCalled();
+		await h.c.retryConfirmation();
+		expect(h.api.confirm).toHaveBeenCalledExactlyOnceWith(nonce, expect.any(AbortSignal));
+	});
+});
+
+it('definitive expired confirmation clears stale displayed consent and refreshes status without replay', async () => {
+	const h = setup();
+	await review(h);
+	h.c.setConsent(true);
+	h.api.confirm.mockRejectedValueOnce(new ApiError('expired', 'SYNC_REVIEW_EXPIRED'));
+	h.api.status.mockResolvedValue({
+		...(await h.api.status()),
+		artifact_digest: 'changed-elsewhere',
+	});
+	await h.c.confirm();
+	await Promise.resolve();
+	expect(h.c.review).toBeNull();
+	expect(h.c.consent).toBe(false);
+	expect(h.c.choices).toEqual({});
+	expect(h.c.step).toBe('choose');
+	expect(h.c.recoveryReviewId).toBeNull();
+	expect(h.c.info?.artifact_digest).toBe('changed-elsewhere');
+	await h.c.confirm();
+	expect(h.api.confirm).toHaveBeenCalledTimes(1);
+	expect(h.api.reload).not.toHaveBeenCalled();
+});
+it('old expired confirmation cannot erase a newer session choice', async () => {
+	const h = setup();
+	await review(h);
+	h.c.setConsent(true);
+	const d = deferred<ActressNameSyncJob>();
+	h.api.confirm.mockReturnValueOnce(d.promise);
+	const pending = h.c.confirm();
+	h.c.close();
+	await open(h);
+	h.c.dismissRecovery();
+	await h.c.searchSources();
+	h.c.chooseSource(source);
+	d.reject(new ApiError('expired', 'SYNC_REVIEW_EXPIRED'));
+	await pending;
+	expect(h.c.choices[17]?.source_key).toBe(source.source_key);
+	expect(h.c.errorCode).toBe('');
+	expect(h.api.reload).not.toHaveBeenCalled();
 });

@@ -52,7 +52,8 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		tasks = $state<ActressNameSyncTask[]>([]),
 		tasksNextOffset = $state<number | null>(null),
 		taskOffset = $state(0);
-	let busy = $state<'review' | 'confirm' | 'cancel' | null>(null),
+	let busy = $state<'review' | 'confirm' | 'cancel' | 'reload' | null>(null),
+		reloadResult = $state<'' | 'changed' | 'unchanged'>(''),
 		errorCode = $state(''),
 		infoLoading = $state(false),
 		sourceLoading = $state(false),
@@ -95,6 +96,40 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 	}
 	function failure(e: unknown) {
 		errorCode = e instanceof ApiError ? (e.code ?? 'SYNC_NETWORK') : 'SYNC_NETWORK';
+		if (errorCode === 'SYNC_STALE_GENERATION') {
+			clearEvidence();
+			// Read-only reconciliation never resubmits a review, reload or confirmation.
+			void loadInfo();
+		}
+	}
+	function clearEvidence() {
+		stop('sources');
+		sourceLoading = false;
+		sourceItems = [];
+		sourceNextOffset = null;
+		sourceOffset = 0;
+		sourceBack = [];
+		searched = false;
+		choices = {};
+		review = null;
+		consent = false;
+		if (busy === 'review') {
+			stop('write');
+			busy = null;
+		}
+		if (step === 'review') step = 'choose';
+		// A submitted nonce and historical jobs are independent of current evidence.
+	}
+	function adoptInfo(value: ActressNameSyncStatus) {
+		const changed =
+			!!info &&
+			(info.artifact_digest !== value.artifact_digest ||
+				info.enabled !== value.enabled ||
+				info.available !== value.available ||
+				info.max_age_seconds !== value.max_age_seconds);
+		if (changed) clearEvidence();
+		info = value;
+		return changed;
 	}
 	function readRecovery() {
 		try {
@@ -131,15 +166,36 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		errorCode = '';
 	}
 	async function loadInfo() {
+		if (!isOpen || busy === 'reload') return;
 		const r = begin('info');
 		infoLoading = true;
 		try {
 			const value = await client.status(r.signal);
-			if (r.current()) info = value;
+			if (r.current() && adoptInfo(value)) reloadResult = 'changed';
 		} catch (e) {
 			if (r.current()) failure(e);
 		} finally {
 			if (r.current()) infoLoading = false;
+		}
+	}
+	async function reloadEvidence() {
+		if (!isOpen || busy || !info?.enabled) return;
+		// A reload races neither this dialog's source reads nor its writes. Other
+		// clients remain protected by the server's generation preconditions.
+		stop('info');
+		stop('sources');
+		infoLoading = sourceLoading = false;
+		const r = begin('reload');
+		busy = 'reload';
+		errorCode = '';
+		reloadResult = '';
+		try {
+			const value = await client.reload(r.signal);
+			if (r.current()) reloadResult = adoptInfo(value) ? 'changed' : 'unchanged';
+		} catch (e) {
+			if (r.current()) failure(e);
+		} finally {
+			if (r.current()) busy = null;
 		}
 	}
 	function open(selected: Actress[] = []) {
@@ -147,6 +203,7 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		isOpen = true;
 		errorCode = '';
 		info = null;
+		reloadResult = '';
 		review = null;
 		consent = false;
 		choices = {};
@@ -203,7 +260,8 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		setQuery('');
 	}
 	async function sourcePage(offset: number) {
-		if (!isOpen || !activeActorId || !info?.enabled || !info.available || busy) return;
+		if (!isOpen || !activeActorId || !info?.enabled || !info.available || infoLoading || busy)
+			return;
 		if (new TextEncoder().encode(query).length > 128) {
 			errorCode = 'SYNC_QUERY_LIMIT';
 			return;
@@ -213,8 +271,15 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		sourceLoading = true;
 		errorCode = '';
 		try {
-			const page = await client.sources({ q, offset, limit: 20 }, r.signal);
+			const page = await client.sources(
+				{ q, offset, limit: 20, artifact_digest: info.artifact_digest },
+				r.signal,
+			);
 			if (r.current()) {
+				if (page.artifact_digest !== info?.artifact_digest) {
+					failure(new ApiError('Evidence changed', 'SYNC_STALE_GENERATION'));
+					return;
+				}
 				sourceItems = page.items;
 				sourceNextOffset = page.next_offset;
 				sourceOffset = offset;
@@ -273,6 +338,7 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 			recoveryReviewId ||
 			!info?.enabled ||
 			!info.available ||
+			infoLoading ||
 			actors.length < 1 ||
 			actors.length > 500 ||
 			!actors.every((a) => choices[a.id])
@@ -286,8 +352,16 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 			const value = await client.review(
 				actors.map((a) => ({ actress_id: a.id, source_key: choices[a.id].source_key })),
 				r.signal,
+				info.artifact_digest,
 			);
 			if (r.current()) {
+				if (
+					value.artifact_digest !== info?.artifact_digest ||
+					value.max_age_seconds !== info.max_age_seconds
+				) {
+					failure(new ApiError('Evidence changed', 'SYNC_STALE_GENERATION'));
+					return;
+				}
 				review = value;
 				step = 'review';
 			}
@@ -298,7 +372,7 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		}
 	}
 	function backToChoices() {
-		if (busy === 'confirm' || busy === 'cancel' || recoveryReviewId) return;
+		if (busy === 'confirm' || busy === 'cancel' || busy === 'reload' || recoveryReviewId) return;
 		stopPoll();
 		stop('job');
 		stop('history');
@@ -331,7 +405,13 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		} catch (e) {
 			if (e instanceof ApiError && e.code === 'SYNC_REVIEW_EXPIRED') {
 				clearRecovery(id);
-				if (r.current()) confirmationUncertain = false;
+				if (r.current()) {
+					confirmationUncertain = false;
+					// Expiry can also mean another client reloaded the evidence.
+					// Do not leave a checked, unusable confirmation on screen.
+					clearEvidence();
+					void loadInfo();
+				}
 			}
 			if (r.current()) failure(e);
 		} finally {
@@ -544,6 +624,9 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		get busy() {
 			return busy;
 		},
+		get reloadResult() {
+			return reloadResult;
+		},
 		get errorCode() {
 			return errorCode;
 		},
@@ -574,6 +657,7 @@ export function createActressNameSyncController(deps: Dependencies = {}) {
 		open,
 		close,
 		loadInfo,
+		reloadEvidence,
 		selectActor,
 		setQuery,
 		searchSources,

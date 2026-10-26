@@ -2793,7 +2793,7 @@
   "actress_sync_unavailable": "離線證據無法使用或無效。無法審核新批次。",
   "actress_sync_provisioning": "管理員必須部署有效的離線資料檔、啟用離線姓名同步並重新啟動伺服器。此對話框不會變更設定。",
   "actress_sync_provisioning_docs": "閱讀離線部署說明",
-  "actress_sync_pinned": "證據及其時效原則在伺服器重新啟動前保持固定。資料檔可用本身並不能證明身分，也不代表獲准更新。",
+  "actress_sync_pinned": "證據僅在明確重新載入後切換。設定和時效原則在伺服器重新啟動前保持不變。可用資料本身不是身分憑證或更新授權。",
   "actress_sync_recovered": "伺服器已還原經過驗證的歷史資料檔。",
   "actress_sync_artifact": "資料檔摘要",
   "actress_sync_record_count": "{count} 筆來源紀錄",
@@ -2848,5 +2848,13 @@
   "actress_sync_error_security": "要求遭瀏覽器寫入安全檢查拒絕。請檢查要求來源（Origin）與伺服器設定。",
   "actress_sync_error_network": "操作未能完成。傳輸錯誤並不證明已提交的確認沒有生效。請查看歷程或重試同一次確認。",
   "actress_sync_error_generic": "伺服器拒絕了此操作。不會顯示原始內部診斷資訊。重試前，請檢查選擇、證據與持久化歷程。",
-  "actress_sync_refresh_history": "重新整理歷程"
+  "actress_sync_refresh_history": "重新整理歷程",
+  "actress_sync_reload": "重新載入離線證據",
+  "actress_sync_reload_retry": "重試證據載入",
+  "actress_sync_refresh_status": "重新整理證據狀態",
+  "actress_sync_reload_help": "重新讀取已設定的本機資料。不會下載資料、啟用同步、變更目錄或時效原則，也不會確認工作。證據變更會清除來源選擇和未提交的同意；現有工作繼續使用原有證據。",
+  "actress_sync_reload_changed": "證據已變更。來源選擇和未提交的同意已清除。請重新搜尋、選擇身分並檢閱後再確認。",
+  "actress_sync_reload_unchanged": "證據未變更。已保留現有選擇和未提交的檢閱；未提交任何工作。",
+  "actress_sync_reload_busy": "其他證據載入正在進行。請等待完成後重新整理狀態或重試載入。",
+  "actress_sync_reload_failed": "證據載入未完成。最後可用的證據已保留。請重新整理狀態核實目前證據，必要時明確重試。"
 }

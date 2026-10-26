@@ -20,6 +20,10 @@ const maxQueryBytes = 4096
 // decodeJSON rejects extra documents, invalid UTF-8, duplicate keys, unknown
 // fields (including nested choices), and bodies above a fixed memory budget.
 func decodeJSON(c *gin.Context, destination any) bool {
+	return decodeJSONBody(c, destination, false)
+}
+
+func decodeJSONBody(c *gin.Context, destination any, allowEmpty bool) bool {
 	body := http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	data, err := io.ReadAll(body)
 	if err != nil {
@@ -30,6 +34,9 @@ func decodeJSON(c *gin.Context, destination any) bool {
 			invalid(c)
 		}
 		return false
+	}
+	if allowEmpty && len(bytes.TrimSpace(data)) == 0 {
+		return true
 	}
 	if !utf8.Valid(data) || len(bytes.TrimSpace(data)) == 0 || bytes.TrimSpace(data)[0] != '{' {
 		invalid(c)
@@ -101,7 +108,7 @@ func uniqueJSONKeys(decoder *json.Decoder, depth int) error {
 // allowlist prevents those aliases from becoming hidden confirmation inputs.
 func requestField(name string) bool {
 	switch name {
-	case "choices", "actress_id", "source_key", "review_id", "confirmed":
+	case "choices", "actress_id", "source_key", "review_id", "confirmed", "artifact_digest":
 		return true
 	default:
 		return false

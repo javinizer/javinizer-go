@@ -2793,7 +2793,7 @@
   "actress_sync_unavailable": "离线证据不可用或无效。无法审核新批次。",
   "actress_sync_provisioning": "管理员必须部署有效的离线数据文件、启用离线姓名同步并重启服务器。此对话框不会更改配置。",
   "actress_sync_provisioning_docs": "阅读离线部署说明",
-  "actress_sync_pinned": "证据及其时效策略在服务器重启前保持固定。数据文件可用本身并不能证明身份，也不代表获准更新。",
+  "actress_sync_pinned": "证据仅在明确重新加载后切换。配置和时效策略在服务器重启前保持不变。可用数据本身不是身份凭证或更新授权。",
   "actress_sync_recovered": "服务器已恢复经过验证的历史数据文件。",
   "actress_sync_artifact": "数据文件摘要",
   "actress_sync_record_count": "{count} 条来源记录",
@@ -2848,5 +2848,13 @@
   "actress_sync_error_security": "请求被浏览器写入安全检查拒绝。请检查请求源（Origin）和服务器配置。",
   "actress_sync_error_network": "操作未能完成。传输错误并不证明已提交的确认没有生效。请查看历史或重试同一次确认。",
   "actress_sync_error_generic": "服务器拒绝了此操作。不会显示原始内部诊断信息。重试前，请检查选择、证据和持久化历史。",
-  "actress_sync_refresh_history": "刷新历史"
+  "actress_sync_refresh_history": "刷新历史",
+  "actress_sync_reload": "重新加载离线证据",
+  "actress_sync_reload_retry": "重试证据加载",
+  "actress_sync_refresh_status": "刷新证据状态",
+  "actress_sync_reload_help": "重新读取已配置的本地数据。不会下载数据、启用同步、更改目录或时效策略，也不会确认任务。证据变化会清除来源选择和未提交的同意；现有任务继续使用原有证据。",
+  "actress_sync_reload_changed": "证据已变化。来源选择和未提交的同意已清除。请重新搜索、选择身份并审阅后再确认。",
+  "actress_sync_reload_unchanged": "证据未变化。已保留现有选择和未提交的审阅；未提交任何任务。",
+  "actress_sync_reload_busy": "其他证据加载正在进行。请等待完成后刷新状态或重试加载。",
+  "actress_sync_reload_failed": "证据加载未完成。最后可用的证据已保留。请刷新状态核实当前证据，必要时明确重试。"
 }

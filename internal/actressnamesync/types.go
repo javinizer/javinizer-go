@@ -15,13 +15,16 @@ import (
 // Service admission errors are safe categories; underlying storage/path errors
 // must not be returned verbatim by an HTTP handler.
 var (
-	ErrDisabled       = errors.New("offline name sync is disabled")
-	ErrUnavailable    = errors.New("offline name evidence is unavailable")
-	ErrInvalid        = errors.New("invalid offline name sync request")
-	ErrReviewExpired  = errors.New("offline name review is unavailable or expired")
-	ErrPrincipal      = errors.New("offline name review belongs to another principal")
-	ErrReviewCapacity = errors.New("offline name review capacity reached")
-	ErrStopping       = errors.New("offline name sync is stopping")
+	ErrReloadBusy      = errors.New("offline evidence reload already running")
+	ErrReloadFailed    = errors.New("offline evidence reload failed")
+	ErrStaleGeneration = errors.New("offline evidence changed; review again")
+	ErrDisabled        = errors.New("offline name sync is disabled")
+	ErrUnavailable     = errors.New("offline name evidence is unavailable")
+	ErrInvalid         = errors.New("invalid offline name sync request")
+	ErrReviewExpired   = errors.New("offline name review is unavailable or expired")
+	ErrPrincipal       = errors.New("offline name review belongs to another principal")
+	ErrReviewCapacity  = errors.New("offline name review capacity reached")
+	ErrStopping        = errors.New("offline name sync is stopping")
 )
 
 // Repository is the capability used by the offline worker, not the broad actor API.
@@ -49,6 +52,7 @@ type Options struct {
 
 // SourceInfo describes a pinned, validated offline artifact, not source authenticity.
 type SourceInfo struct {
+	ReloadProblemCode               string `json:"reload_problem_code,omitempty"`
 	WorkerProblemCode               string `json:"worker_problem_code,omitempty"`
 	Enabled                         bool   `json:"enabled"`
 	Available                       bool   `json:"available"`

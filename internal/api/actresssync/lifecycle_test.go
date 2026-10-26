@@ -11,7 +11,7 @@ import (
 
 func TestShutdownCancelsAndJoinsAllServiceOperations(t *testing.T) {
 	for _, tc := range []struct{ method, path, body string }{
-		{"GET", "/status", ""}, {"GET", "/sources", ""}, {"GET", "/jobs", ""}, {"GET", "/jobs/" + testJobID, ""}, {"GET", "/jobs/" + testJobID + "/tasks", ""}, {"POST", "/reviews", reviewBody}, {"POST", "/jobs", confirmBody}, {"POST", "/jobs/" + testJobID + "/cancel", cancelBody},
+		{"POST", "/sources/reload", "{}"}, {"GET", "/status", ""}, {"GET", "/sources", ""}, {"GET", "/jobs", ""}, {"GET", "/jobs/" + testJobID, ""}, {"GET", "/jobs/" + testJobID + "/tasks", ""}, {"POST", "/reviews", reviewBody}, {"POST", "/jobs", confirmBody}, {"POST", "/jobs/" + testJobID + "/cancel", cancelBody},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
 			f := newFixture(t)
