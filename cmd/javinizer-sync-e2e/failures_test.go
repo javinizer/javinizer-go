@@ -125,6 +125,12 @@ func TestProvisionFailureBoundaries(t *testing.T) {
 	})
 }
 func TestInspectFailureBoundaries(t *testing.T) {
+	// These cases require a usable native fixture database URI. Calling inspect
+	// directly bypasses run's private-root gate; Windows rejects that gate and its
+	// backslash paths are not supported by this disposable POSIX fixture reader.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows fixture command fails closed before SQLite inspection")
+	}
 	t.Run("corrupt", func(t *testing.T) {
 		root := testRoot(t)
 		require.NoError(t, os.WriteFile(filepath.Join(root, "names.db"), []byte("not sqlite"), 0600))
@@ -306,4 +312,24 @@ func requireDirectoryWriteDenied(t *testing.T, dir string) {
 		t.Skip("current process can write mode-0500 directories")
 	}
 	require.ErrorIs(t, err, os.ErrPermission)
+}
+
+func TestInspectCommandRejectsUnenforceablePrivateRoot(t *testing.T) {
+	root := testRoot(t)
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	if info.Mode().Perm()&0077 == 0 {
+		t.Skip("platform enforces private fixture directories")
+	}
+	fixtureRunEnv(t, root)
+	os.Args = []string{"fixture", "inspect"}
+	path := filepath.Join(root, "names.db")
+	before := []byte("existing database must not be opened or replaced")
+	require.NoError(t, os.WriteFile(path, before, 0600))
+	require.ErrorContains(t, run(), "private directory")
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.NoFileExists(t, filepath.Join(root, "names.db-wal"))
+	require.NoFileExists(t, filepath.Join(root, "names.db-shm"))
 }
