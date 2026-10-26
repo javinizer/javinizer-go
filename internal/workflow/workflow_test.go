@@ -1002,8 +1002,10 @@ func TestRevertLog_DBAdapter_Complete_NilResult(t *testing.T) {
 	require.NotNil(t, ledger.ApplyTerminal)
 	assert.Equal(t, "failure", ledger.ApplyTerminal.Outcome)
 	assert.Len(t, ledger.ApplyTerminal.Fingerprint, 64)
-	assert.Equal(t, models.GeneratedFilesJSON{ApplyTerminal: ledger.ApplyTerminal}, ledger,
-		"nil-result failure must add only a terminal marker, without inventing inverse work")
+	require.NotNil(t, ledger.UndoRetention)
+	assert.False(t, *ledger.UndoRetention)
+	assert.Equal(t, models.GeneratedFilesJSON{UndoRetention: ledger.UndoRetention, ApplyTerminal: ledger.ApplyTerminal}, ledger,
+		"nil-result failure must preserve captured policy and add only a terminal marker, without inventing inverse work")
 }
 
 // TestNewRevertLogFromConfig_DisabledByDefault guards the regression where completed jobs

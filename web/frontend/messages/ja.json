@@ -2008,7 +2008,7 @@
   "settings_file_matching_regex_enable": "カスタム正規表現パターンを有効化",
   "settings_file_matching_regex_label": "正規表現パターン",
   "settings_file_matching_title": "ファイルマッチング設定",
-  "settings_file_ops_allow_revert_desc": "整理操作を取り消してファイルを元の場所へ戻す差し戻し機能を有効化。無効時、差し戻しボタンは非表示になり API 呼び出しはブロックされます。",
+  "settings_file_ops_allow_revert_desc": "既定では無効です。操作を開始する前に有効にすると、取り消し用に元のファイルのバックアップを保持します。無効時は、正常に完了した操作の所有する一時バックアップを削除します。操作や削除に失敗した場合、復旧用データが残ることがあります。変更は新しい操作に適用され、過去のバックアップには影響しません。",
   "settings_file_ops_allow_revert_label": "差し戻しを許可",
   "settings_file_ops_desc": "Javinizer がファイルを整理・移動する方法を制御",
   "settings_file_ops_mode_desc": "操作中のファイル整理方法を選択",

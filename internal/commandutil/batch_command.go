@@ -631,6 +631,9 @@ func cliBatchPostApply(emitter eventlog.EventEmitter, w io.Writer, jobID string,
 				skipCount.Add(1)
 			}
 		}
+		if afr.Err == nil && afr.Result != nil && afr.Result.RecoveryWarning != "" {
+			warnings = append(append([]string(nil), warnings...), afr.Result.RecoveryWarning)
+		}
 		if len(warnings) > 0 {
 			// Serialize with the event-handler prints (worker goroutines) so
 			// console lines never interleave mid-line.

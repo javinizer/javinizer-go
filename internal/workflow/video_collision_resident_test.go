@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIssue277DisabledUndoStillRecordsReplacement(t *testing.T) {
+func TestIssue277DisabledUndoCleansCommittedReplacement(t *testing.T) {
 	for _, move := range []bool{false, true} {
 		t.Run(map[bool]string{false: "copy", true: "move"}[move], func(t *testing.T) {
 			env := setupCopyIntentE2E(t, "issue277-no-undo")
@@ -25,7 +25,23 @@ func TestIssue277DisabledUndoStillRecordsReplacement(t *testing.T) {
 			result, err := env.orch.Execute(t.Context(), cmd)
 			require.NoError(t, err)
 			require.Equal(t, "replaced", result.VideoOutcome)
-			require.NotEmpty(t, p3Ledger(t, env.repo, result.OperationID).Replacements)
+			ledger := p3Ledger(t, env.repo, result.OperationID)
+			require.NotNil(t, ledger.UndoRetention)
+			require.False(t, *ledger.UndoRetention)
+			require.NotNil(t, ledger.ApplyTerminal)
+			require.Equal(t, "success", ledger.ApplyTerminal.Outcome)
+			require.Empty(t, ledger.Replacements, "only committed transaction backups may be discarded")
+			backups, err := filepath.Glob(plan.TargetPath + ".dlbak.*")
+			require.NoError(t, err)
+			require.Empty(t, backups)
+			body, err := os.ReadFile(plan.TargetPath)
+			require.NoError(t, err)
+			require.Equal(t, "video", string(body))
+			if !move {
+				body, err = os.ReadFile(env.source)
+				require.NoError(t, err)
+				require.Equal(t, "video", string(body))
+			}
 		})
 	}
 }

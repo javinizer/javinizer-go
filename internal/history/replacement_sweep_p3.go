@@ -485,24 +485,24 @@ func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []mo
 		consumed[opID][backup] = struct{}{}
 	}
 pruneEntries:
-	for i := range ops {
-		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
+	for _, op := range ops {
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", ops[i].ID, err))
+			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", op.ID, err))
 			continue
 		}
 		for j := range gf.Replacements {
 			entry := gf.Replacements[j]
 			if strings.TrimSpace(entry.Backup) == "" || strings.TrimSpace(entry.Destination) == "" {
-				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
+				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", op.ID))
 				continue
 			}
 			if !entry.Installed {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", ops[i].ID, entry.Backup))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", op.ID, entry.Backup))
 				continue
 			}
 			if entry.PendingKind() == models.RestorePendingKindRearmRefused {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", ops[i].ID, entry.Backup))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", op.ID, entry.Backup))
 				continue
 			}
 			if err := ctx.Err(); err != nil {
@@ -532,16 +532,16 @@ pruneEntries:
 				errs = append(errs, fmt.Errorf("claim destination %s was revoked before cleanup", entry.Destination))
 				continue
 			}
-			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, ops[i].ID, entry, candidateIDs, claim)
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, op.ID, entry, candidateIDs, claim)
 			claim.releaseAdmit()
 			claim.releaseDestLock()
 			untrack()
 			busyRelease()
 			if wasConsumed {
-				markConsumed(ops[i].ID, entry.Backup)
+				markConsumed(op.ID, entry.Backup)
 			}
 			if pruneErr != nil {
-				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, pruneErr))
+				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", op.ID, entry.Backup, pruneErr))
 			}
 		}
 	}
@@ -635,7 +635,7 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 			claim.releaseAdmit()
 		}
 	}()
-	rows, err := s.repo.FindOperationsWithLedger(ctx)
+	rows, err := s.findReplacementBackupCandidates(ctx, entry.Backup)
 	if err != nil {
 		return false, fmt.Errorf("read live ledger: %w", err)
 	}
@@ -661,10 +661,14 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
 		return false, fsutil.ErrReplacementBusy
 	}
-	if err := s.markPruneCleanupPending(opID, entry); err != nil {
+	if err := s.markPruneCleanupPending(ctx, opID, entry); err != nil {
 		return false, err
 	}
-	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, "organized-job prune", &entry, nil)
+	phase := "organized-job prune"
+	if discard, _ := ctx.Value(successCleanupContextKey{}).(bool); discard {
+		phase = "successful operation cleanup"
+	}
+	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, phase, &entry, nil)
 	if err != nil {
 		if hold != nil && hold.moved {
 			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
@@ -700,9 +704,28 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 
 // markPruneCleanupPending durably records the two-phase cleanup intent
 // before any backup bytes move. A crash leaves a retryable pending entry.
-func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
+func (s *ReplacementSweeper) markPruneCleanupPending(parent context.Context, opID uint, entry models.ReplacementEntry) error {
+	if discard, _ := parent.Value(successCleanupContextKey{}).(bool); discard {
+		return s.markSuccessfulCleanupPending(parent, opID, entry)
+	}
 	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
 	defer cancel()
+	// Ordinary history pruning can also encounter a successful opt-out row
+	// whose first cleanup was deferred. It is maintenance, never user Undo.
+	current, err := s.repo.FindByID(ctx, opID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("operation %d missing during prune admission", opID)
+	}
+	ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+	if err != nil {
+		return err
+	}
+	if ledger.SuccessfulUndoDisabled() {
+		return s.markSuccessfulCleanupPending(ctx, opID, entry)
+	}
 	if err := admitOperationUndo(ctx, s.repo, &models.BatchFileOperation{ID: opID}); err != nil {
 		return err
 	}
@@ -1018,6 +1041,9 @@ func journalEntryDestination(row *models.BatchFileOperation, backupSlash string)
 func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
+	}
+	if err := s.cleanupSuccessfulOperations(ctx); err != nil {
+		logging.Warnf("successful-operation backup cleanup pending: %v", err)
 	}
 	idx, err := s.index(ctx)
 	if err != nil {
@@ -1946,6 +1972,14 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 				durableEntry = gf.Replacements[i]
 				break
 			}
+		}
+		// Successful opt-out cleanup is maintenance, not user Undo. Setting
+		// UndoStarted here would strand still-busy sibling backups on restart.
+		if gf.SuccessfulUndoDisabled() {
+			if durableKind != models.RestorePendingKindPrune || !successfulCleanupProof(durableEntry) {
+				return gf, false, fmt.Errorf("successful cleanup ownership proof unavailable")
+			}
+			return gf, false, nil
 		}
 		persist := !gf.UndoStarted
 		gf.UndoStarted = true
