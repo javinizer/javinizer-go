@@ -199,6 +199,7 @@ func TestNewServer_RouteParity(t *testing.T) {
 		"DELETE /api/v1/tokens/:id",
 		"GET /api/v1/actress-name-sync/status",
 		"GET /api/v1/actress-name-sync/sources",
+		"POST /api/v1/actress-name-sync/sources/reload",
 		"GET /api/v1/actress-name-sync/jobs",
 		"GET /api/v1/actress-name-sync/jobs/:id",
 		"GET /api/v1/actress-name-sync/jobs/:id/tasks",

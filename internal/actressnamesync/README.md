@@ -3,7 +3,7 @@
 This service is a disabled-by-default, **one-shot user-confirmed batch update**,
 not recurring automatic sync. It does not fetch upstream data, scrape, infer actor
 identity from names, equate DMM and R18 numeric IDs, or refresh snapshots silently.
-The API enables a later UI to browse bounded source pages, select exact verified
+The API and catalog dialog browse bounded source pages, select exact verified
 local actors and source records, review the entire proposed batch, then explicitly
 confirm it. A source-name search is discovery, never identity authorization.
 
@@ -19,9 +19,13 @@ Windows supports validated reads only; artifact publication remains refused ther
 
 Enable `metadata.actress_database.offline_name_sync` and set its absolute clean
 `artifact_directory` only after provisioning. Actor database support must also be
-enabled. Settings and the validated current/previous recovery snapshot are pinned
-at server startup. Restart after changing settings or provisioning a new current
-snapshot. An unavailable or invalid snapshot gives an explicit unavailable status,
+enabled. Settings remain pinned until restart. The validated current/previous recovery
+snapshot is loaded at startup. After provisioning, explicitly POST
+`/actress-name-sync/sources/reload` (empty body or `{}`) to adopt the validated
+current artifact without restarting. Reload takes no path, URL, clock, data or
+digest input. It is authenticated, rate-limited and CSRF-protected. A failed,
+cancelled or previous-manifest recovery reload preserves the usable generation
+and exposes a bounded diagnostic rather than silently rolling back. An unavailable or invalid snapshot gives an explicit unavailable status,
 not a live fetch or an empty successful update.
 
 The existing private-directory, root-relative, regular-file and finite artifact
@@ -32,7 +36,11 @@ blocked with persistent bounded backoff and cancellable diagnostics.
 
 ## Confirmation authority
 
-Review accepts only explicit actor IDs and source keys. The repository generates
+Review accepts explicit actor IDs and source keys, plus an optional displayed
+`artifact_digest` equality precondition. Source pagination supports the same
+precondition. This digest never authorizes historical loading. Exact selected
+`r18dev` source references pass through the immutable metadata snapshot provider;
+no external-ID claim or name matching is enabled. The repository generates
 and validates names, actor fingerprints, freshness, source ownership and manual
 protection. Up to 500 choices, eight unconfirmed tickets and four concurrent review
 reads are admitted per service. Tickets expire after five minutes. Source and task
@@ -59,7 +67,16 @@ One lifecycle-managed worker initializes the source and processes one task per d
 job in bounded keyset passes. It claims two-minute leases and uses the repository's
 transaction fences for apply/cancel/manual-change races. Expired leases recover on
 restart; persistent diagnostics delay retries from five seconds up to five minutes.
-At most the pinned current snapshot and one historical snapshot are retained.
+Snapshot, search index, metadata provider, startup-pinned options and source status form one immutable
+generation. Reads never mix generations. Eight concurrent source reads, four
+review reads, one reload candidate, one confirmation and one worker/historical
+read bound generation retention; no generations are retained in a history map.
+Reload adds no worker. Same-digest reload preserves pending reviews. A changed
+generation invalidates all unconfirmed reviews, including reviews still being
+computed. Publication and final confirmation admission serialize: an admitted
+job remains pinned to its old digest; a reload published first requires a new
+review and explicit confirmation. Durable receipt retries still return the
+original job after reload. Existing bindings never grant recurring consent.
 
 Shutdown cancels requests/worker and joins them before database closure. An apply
 already committed remains applied. Cancellation never rolls back applied names;

@@ -1,0 +1,169 @@
+name: Offline name sync browser
+
+on:
+  pull_request:
+    paths:
+      - 'internal/actressnamesync/**'
+      - 'internal/api/actresssync/**'
+      - 'internal/api/core/offline_name_sync*'
+      - 'internal/api/server/**'
+      - 'internal/database/actress*'
+      - 'cmd/javinizer-sync-e2e/**'
+      - 'web/frontend/**'
+      - 'scripts/verify_offline_sync_browser*.py'
+      - 'scripts/build_offline_test_overlay.py'
+      - '.github/workflows/offline-name-sync-browser.yml'
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'internal/actressnamesync/**'
+      - 'internal/api/actresssync/**'
+      - 'internal/api/core/offline_name_sync*'
+      - 'internal/api/server/**'
+      - 'internal/database/actress*'
+      - 'cmd/javinizer-sync-e2e/**'
+      - 'web/frontend/**'
+      - 'scripts/verify_offline_sync_browser*.py'
+      - 'scripts/build_offline_test_overlay.py'
+      - '.github/workflows/offline-name-sync-browser.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OFFLINE_SYNC_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install locked dependencies and hosted Chromium before offline runtime
+        run: |
+          go mod download
+          npm ci --prefix web/frontend
+          cd web/frontend
+          node node_modules/@inlang/paraglide-js/bin/run.js compile --project ./project.inlang --outdir ./src/lib/paraglide
+          node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Build fixture with reviewed pre-DNS network guard
+        run: python scripts/build_offline_test_overlay.py --output offline-sync-browser/_overlay
+      - name: Run real fixture browser suite offline and verify every collected case
+        shell: python {0}
+        run: |
+          import json, os, pathlib, subprocess
+          root = pathlib.Path.cwd()
+          evidence = (root / 'offline-sync-browser').resolve()
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == os.environ['OFFLINE_SYNC_EXPECTED_SHA']
+          env = os.environ.copy()
+          env.update({'GOFLAGS': "'-overlay=" + (evidence / '_overlay/overlay.json').as_posix() + "'",
+                      'GOTOOLCHAIN': 'local', 'GOPROXY': 'off', 'GONOPROXY': 'none', 'GOSUMDB': 'off', 'GOVCS': '*:off', 'GODEBUG': 'netdns=go',
+                      'CI': '1', 'BROWSERSLIST_IGNORE_OLD_DATA': 'true',
+                      'NODE_OPTIONS': '--require=' + str(root / 'web/frontend/tests/sync/offline-node.cjs'),
+                      'OFFLINE279_AUDIT_LOG': str(evidence / 'backend.audit'),
+                      'OFFLINE_SYNC_NODE_AUDIT': str(evidence / 'node.audit')})
+          for name in ('JAVINIZER_RUN_LIVE_API_TESTS', 'JAVINIZER_RUN_FLARESOLVERR_TESTS'):
+              env.pop(name, None)
+          for name in ('backend.audit', 'node.audit'):
+              (evidence / name).write_text('')
+          subprocess.run(['python', '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'verify_offline_sync_browser_test.py'], check=True)
+          subprocess.run(['go', 'build', '-o', 'bin/javinizer-sync-e2e', './cmd/javinizer-sync-e2e'], env=env, check=True)
+          frontend = root / 'web/frontend'
+          canary = {**env, 'OFFLINE_SYNC_NODE_AUDIT': str(evidence / 'node-canary.audit')}
+          subprocess.run(['node', '--test', 'tests/sync/offline-node.test.cjs'], cwd=frontend, env=canary, check=True)
+          assert (evidence / 'node-canary.audit').read_text().splitlines() == ['OFFLINE_SYNC_NODE_BLOCKED'] * 3
+          command = ['node', 'node_modules/@playwright/test/cli.js', 'test', '--config', 'playwright.sync.config.ts', '--reporter=json']
+          env['PLAYWRIGHT_JSON_OUTPUT_FILE'] = str(evidence / 'inventory.json')
+          subprocess.run(command + ['--list'], cwd=frontend, env=env, check=True)
+          env['PLAYWRIGHT_JSON_OUTPUT_FILE'] = str(evidence / 'results.json')
+          with (evidence / 'browser.log').open('w') as log:
+              result = subprocess.run(command, cwd=frontend, env=env, stdout=log, stderr=subprocess.STDOUT)
+          (evidence / 'exit.txt').write_text(str(result.returncode) + '\n')
+          assert result.returncode == 0, 'Browser tests failed; inspect archived results and log'
+          subprocess.run(['python', 'scripts/verify_offline_sync_browser.py', str(evidence)], env=env, check=True)
+      - name: Archive exact-head browser proof (no browser auth state)
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-name-sync-browser
+          path: offline-sync-browser/
+          if-no-files-found: error
+          retention-days: 14
+
+  native-windows:
+    name: Offline reload native Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      OFFLINE_SYNC_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - name: Download dependencies before offline runtime
+        run: go mod download
+      - name: Build reviewed pre-DNS network guard
+        run: python scripts/build_offline_test_overlay.py --output offline-sync-native/_overlay
+      - name: Execute and verify every named native reload regression
+        shell: python {0}
+        run: |
+          import collections, json, os, pathlib, subprocess, sys
+          evidence = pathlib.Path('offline-sync-native').resolve()
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == os.environ['OFFLINE_SYNC_EXPECTED_SHA']
+          assert sys.platform == 'win32' and subprocess.check_output(['go', 'env', 'GOOS'], text=True).strip() == 'windows'
+          assert subprocess.check_output(['go', 'env', 'CGO_ENABLED'], text=True).strip() == '1'
+          audit = evidence / 'native.audit'
+          audit.write_text('')
+          env = {**os.environ, 'GOFLAGS': "'-overlay=" + (evidence / '_overlay/overlay.json').as_posix() + "'",
+                 'GOTOOLCHAIN': 'local', 'GOPROXY': 'off', 'GONOPROXY': 'none', 'GOSUMDB': 'off', 'GOVCS': '*:off',
+                 'GODEBUG': 'netdns=go', 'OFFLINE279_AUDIT_LOG': str(audit)}
+          packages = ['./internal/actressnamesync', './internal/api/actresssync', './internal/api/server']
+          pattern = '^TestReload|^TestOfflineNameSyncExplicitReload'
+          expected = []
+          for package in packages:
+              names = subprocess.check_output(['go', 'test', '-list', pattern, package], env=env, text=True).splitlines()
+              expected.extend(('github.com/javinizer/javinizer-go/' + package[2:], name) for name in names if name.startswith('Test'))
+          assert len(expected) >= 20 and len(expected) == len(set(expected)), 'Incomplete/duplicate native regression inventory'
+          required = {'TestReloadChangesGenerationRequiresNewReview', 'TestReloadSameDigestPreservesReviewAndGeneration',
+                      'TestReloadLostResponseReturnsOriginalReceiptAndWorkerUsesOldArtifact', 'TestReloadConcurrentReviewCannotResurrectOldTicket',
+                      'TestReloadConcurrentDiscoveryNeverMixesSnapshotAndIndex', 'TestReloadAlreadyLeasedJobRetainsOriginalSnapshot',
+                      'TestReloadCancellationWhileWaitingForStartup', 'TestReloadCancellationWhileWaitingForConfirmation',
+                      'TestReloadCancellationAfterConfirmationAdmissionBeforePublication', 'TestReloadRequiresAuthenticationIntentOriginAndWriteRateLimit',
+                      'TestOfflineNameSyncExplicitReloadKeepsUnconfirmedConsentForSameDigest'}
+          assert required <= {name for _, name in expected}, 'Required native reload scenarios missing'
+          (evidence / 'inventory.json').write_text(json.dumps(expected, indent=2))
+          with (evidence / 'tests.jsonl').open('w', encoding='utf-8') as log, (evidence / 'stderr.log').open('w', encoding='utf-8') as errors:
+              result = subprocess.run(['go', 'test', '-race', '-count=1', '-timeout=5m', '-json', '-run', pattern, *packages], env=env, stdout=log, stderr=errors)
+          events = [json.loads(line) for line in (evidence / 'tests.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]
+          assert result.returncode == 0 and not any(e['Action'] in ('fail', 'skip') for e in events)
+          passed = [(e['Package'], e['Test']) for e in events if e['Action'] == 'pass' and e.get('Test') and '/' not in e['Test']]
+          assert collections.Counter(passed) == collections.Counter(expected), 'Named native tests did not all execute exactly once'
+          assert not audit.read_text().strip(), 'Native tests attempted external network'
+          (evidence / 'proof.json').write_text(json.dumps({'head': actual, 'goos': 'windows', 'cgo': True, 'race': True, 'passed': passed, 'skipped': 0, 'external_network_events': 0}, indent=2))
+      - name: Archive native Windows proof
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-name-sync-native-windows
+          path: offline-sync-native/
+          if-no-files-found: error
+          retention-days: 14

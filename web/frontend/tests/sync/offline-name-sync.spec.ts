@@ -562,3 +562,92 @@ test('revoked session rejects confirmation and login never automatically replays
 	await history(page);
 	expect(await sync.inspect()).toEqual(before);
 });
+
+test('explicit same-digest evidence reload preserves reviewed consent but never submits', async ({
+	page,
+	sync,
+}) => {
+	await catalog(page, sync);
+	const before = await sync.inspect(),
+		a = sync.fixture.actors.managed;
+	await select(page, [a]);
+	await choose(page, a);
+	await review(page);
+	await dialog(page)
+		.getByRole('checkbox', { name: /I have checked/ })
+		.check();
+	await dialog(page).getByRole('button', { name: 'Reload offline evidence', exact: true }).click();
+	await expect(
+		dialog(page).getByRole('status').filter({ hasText: 'Evidence is unchanged.' }),
+	).toBeVisible();
+	await expect(dialog(page).getByRole('checkbox', { name: /I have checked/ })).toBeChecked();
+	await expect(
+		dialog(page).getByRole('button', { name: 'Confirm one-shot sync', exact: true }),
+	).toBeEnabled();
+	expect(await sync.inspect()).toEqual(before);
+	await confirm(page);
+	await completed(page);
+	expect((await sync.inspect()).jobs).toHaveLength(1);
+});
+
+test('changed evidence invalidates UI choices and consent without changing database state', async ({
+	page,
+	sync,
+}, testInfo) => {
+	await catalog(page, sync);
+	const before = await sync.inspect(),
+		a = sync.fixture.actors.managed;
+	await select(page, [a]);
+	await choose(page, a);
+	await review(page);
+	await dialog(page)
+		.getByRole('checkbox', { name: /I have checked/ })
+		.check();
+	await sync.replaceEvidence('stale');
+	await dialog(page).getByRole('button', { name: 'Reload offline evidence', exact: true }).click();
+	await expect(
+		dialog(page).getByRole('status').filter({ hasText: 'Evidence changed.' }),
+	).toBeVisible();
+	await expect(
+		dialog(page).getByRole('button', { name: 'Review proposed changes', exact: true }),
+	).toBeDisabled();
+	await expect(dialog(page).getByRole('checkbox', { name: /I have checked/ })).toHaveCount(0);
+	await expect(dialog(page).getByText(sync.fixture.digests.stale, { exact: false })).toBeVisible();
+	expect(await sync.inspect()).toEqual(before);
+	await page.screenshot({ path: testInfo.outputPath('changed-evidence.png'), fullPage: true });
+	await sync.replaceEvidence('ready');
+	await dialog(page).getByRole('button', { name: 'Reload offline evidence', exact: true }).click();
+	await expect(dialog(page).getByText(sync.fixture.digests.ready, { exact: false })).toBeVisible();
+	await choose(page, a);
+	await review(page);
+	await expect(
+		dialog(page).getByRole('button', { name: 'Confirm one-shot sync', exact: true }),
+	).toBeDisabled();
+	expect(await sync.inspect()).toEqual(before);
+});
+
+test('failed evidence reload preserves review and retries only by explicit action', async ({
+	page,
+	sync,
+}) => {
+	await catalog(page, sync);
+	const before = await sync.inspect(),
+		a = sync.fixture.actors.managed;
+	await select(page, [a]);
+	await choose(page, a);
+	await review(page);
+	await dialog(page)
+		.getByRole('checkbox', { name: /I have checked/ })
+		.check();
+	await sync.replaceEvidence('corrupt');
+	await dialog(page).getByRole('button', { name: 'Reload offline evidence', exact: true }).click();
+	await expect(dialog(page).getByRole('alert')).toContainText('last usable evidence');
+	await expect(dialog(page).getByRole('checkbox', { name: /I have checked/ })).toBeChecked();
+	expect(await sync.inspect()).toEqual(before);
+	await sync.replaceEvidence('ready');
+	await dialog(page).getByRole('button', { name: 'Retry evidence reload', exact: true }).click();
+	await expect(
+		dialog(page).getByRole('status').filter({ hasText: 'Evidence is unchanged.' }),
+	).toBeVisible();
+	expect(await sync.inspect()).toEqual(before);
+});

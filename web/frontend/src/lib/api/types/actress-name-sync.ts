@@ -6,6 +6,7 @@ export interface ActressNameSyncStatus {
 	available: boolean;
 	code?: string;
 	worker_problem_code?: string;
+	reload_problem_code?: string;
 	artifact_digest?: string;
 	record_count: number;
 	recovered: boolean;
@@ -72,6 +73,7 @@ export interface ActressNameSyncPageParams {
 }
 export interface ActressNameSyncSourcesParams extends ActressNameSyncPageParams {
 	q?: string;
+	artifact_digest?: string;
 }
 export interface ActressNameSyncJobsParams {
 	cursor?: string;

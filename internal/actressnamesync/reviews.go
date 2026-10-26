@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/javinizer/javinizer-go/internal/actresscache"
+	"github.com/javinizer/javinizer-go/internal/actressmetadata"
 	"github.com/javinizer/javinizer-go/internal/actresssync"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"gorm.io/gorm"
@@ -23,6 +25,11 @@ func requestKey(principal, nonce string) string {
 
 // Review retains server-generated proposals under bounded, expiring authority.
 func (s *Service) Review(ctx context.Context, principal string, choices []database.ActressSyncChoice) (*Review, error) {
+	return s.ReviewAt(ctx, principal, choices, "")
+}
+
+// ReviewAt accepts a displayed generation only as an equality precondition.
+func (s *Service) ReviewAt(ctx context.Context, principal string, choices []database.ActressSyncChoice, digest string) (*Review, error) {
 	ctx, done, err := s.request(ctx)
 	if err != nil {
 		return nil, err
@@ -44,18 +51,36 @@ func (s *Service) Review(ctx context.Context, principal string, choices []databa
 	default:
 		return nil, ErrReviewCapacity
 	}
-	snapshot, err := s.current()
+	g, err := s.currentGeneration(digest)
 	if err != nil {
 		return nil, err
 	}
+	snapshot := g.snapshot
+	// Only exact selected r18dev references reach the metadata adapter. No claims,
+	// numeric equivalence, names, aliases or existing bindings expand identity.
+	evidence := make(map[string]actresscache.Evidence, len(choices))
+	for _, c := range choices {
+		e, ok := snapshot.Get(c.SourceKey)
+		if !ok || e.Source != "r18dev" {
+			return nil, ErrInvalid
+		}
+		result, err := g.provider.LookupEvidence(ctx, actressmetadata.Query{Reference: &actressmetadata.Reference{Source: "r18dev", ID: e.SourceID}})
+		if err != nil {
+			return nil, err
+		}
+		if result.Outcome != actressmetadata.Available || result.SnapshotDigest != snapshot.Digest() || result.Evidence == nil {
+			return nil, ErrUnavailable
+		}
+		evidence[c.SourceKey] = *result.Evidence
+	}
 	now := s.now()
-	review, err := s.repo.ReviewOfflineNameSync(ctx, choices, snapshot, actresssync.Options{Now: now, MaxAge: s.opts.MaxAge, MaxActors: actresssync.MaxSelection})
+	review, err := s.repo.ReviewOfflineNameSync(ctx, choices, snapshot, actresssync.Options{Now: now, MaxAge: g.options.MaxAge, MaxActors: actresssync.MaxSelection})
 	if err != nil {
 		return nil, err
 	}
 	response := &Review{ArtifactDigest: review.SnapshotDigest, MaxAgeSeconds: int64(review.MaxAge.Seconds()), ExpiresAt: now.Add(reviewTTL), Proposals: make([]ReviewProposal, 0, len(review.Proposals))}
 	for _, p := range review.Proposals {
-		e, ok := snapshot.Get(p.SourceKey)
+		e, ok := evidence[p.SourceKey]
 		if !ok || len(p.BeforeName) > 4096 || len(p.AfterName) > 4096 {
 			return nil, ErrInvalid
 		}
@@ -68,6 +93,9 @@ func (s *Service) Review(ctx context.Context, principal string, choices []databa
 	response.ReviewID = nonce
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.generation != g {
+		return nil, ErrStaleGeneration
+	}
 	for id, t := range s.tickets {
 		if !s.now().Before(t.expires) {
 			delete(s.tickets, id)
@@ -124,11 +152,15 @@ func (s *Service) Confirm(ctx context.Context, principal, reviewID string, confi
 	if t.principal != principal {
 		return nil, ErrPrincipal
 	}
-	snapshot, err := s.current()
+	g, err := s.currentGeneration("")
 	if err != nil {
 		return nil, err
 	}
-	job, err := s.repo.SubmitConfirmedOfflineNameSyncWithLimits(ctx, key, t.review, snapshot, s.now(), s.opts.QueueLimits)
+	snapshot := g.snapshot
+	if snapshot.Digest() != t.review.SnapshotDigest {
+		return nil, ErrStaleGeneration
+	}
+	job, err := s.repo.SubmitConfirmedOfflineNameSyncWithLimits(ctx, key, t.review, snapshot, s.now(), g.options.QueueLimits)
 	if err != nil {
 		return nil, err
 	}

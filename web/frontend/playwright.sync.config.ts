@@ -26,7 +26,7 @@ export default defineConfig({
 		trace: 'retain-on-failure',
 	},
 	webServer: {
-		command: `npm run dev -- --config vite.fullstack.config.ts --port ${port} --strictPort`,
+		command: `node node_modules/vite/bin/vite.js dev --config vite.fullstack.config.ts --port ${port} --strictPort`,
 		cwd: frontend,
 		// Root SSR needs a per-test backend that does not exist until the fixture starts.
 		url: `http://localhost:${port}/@vite/client`,

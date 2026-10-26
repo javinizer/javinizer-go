@@ -237,14 +237,14 @@ func TestConfirmationUnavailableSnapshotKeepsAuthorityForRetry(t *testing.T) {
 	s, _ := f.service(t, f.repo)
 	s.initialize()
 	review := f.review(t, s)
-	snapshot := s.snapshot
-	s.snapshot = nil
+	generation := s.generation
+	s.generation = nil
 	job, err := s.Confirm(t.Context(), fixturePrincipal, review.ReviewID, true)
 	require.ErrorIs(t, err, ErrUnavailable)
 	require.Nil(t, job)
 	require.Contains(t, s.tickets, review.ReviewID)
 	requireServiceCounts(t, f.db, 0, 0)
-	s.snapshot = snapshot
+	s.generation = generation
 	job, err = s.Confirm(t.Context(), fixturePrincipal, review.ReviewID, true)
 	require.NoError(t, err)
 	require.NotNil(t, job)
@@ -289,7 +289,7 @@ func TestWorkerAlreadyCancelledLifetimeStillSignalsReadyAndExits(t *testing.T) {
 	go func() { s.Run(); close(done) }()
 	awaitServiceSignal(t, s.Ready())
 	awaitServiceSignal(t, done)
-	require.Nil(t, s.snapshot)
+	require.Nil(t, s.generation)
 	requireServiceCounts(t, f.db, 0, 0)
 }
 

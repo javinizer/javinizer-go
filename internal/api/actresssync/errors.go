@@ -30,6 +30,13 @@ func writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, actressnamesync.ErrInvalid):
 		invalid(c)
+	case errors.Is(err, actressnamesync.ErrReloadBusy):
+		c.Header("Retry-After", "5")
+		fail(c, http.StatusTooManyRequests, "SYNC_RELOAD_BUSY", "offline evidence reload is already running")
+	case errors.Is(err, actressnamesync.ErrReloadFailed):
+		fail(c, http.StatusServiceUnavailable, "SYNC_RELOAD_FAILED", "offline evidence reload failed; current evidence was preserved")
+	case errors.Is(err, actressnamesync.ErrStaleGeneration):
+		fail(c, http.StatusConflict, "SYNC_STALE_GENERATION", "offline evidence changed; reload sources and request a new review")
 	case errors.Is(err, actressnamesync.ErrDisabled):
 		fail(c, http.StatusServiceUnavailable, "SYNC_DISABLED", "offline name sync is disabled")
 	case errors.Is(err, actressnamesync.ErrUnavailable):

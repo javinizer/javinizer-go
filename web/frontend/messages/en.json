@@ -2799,7 +2799,7 @@
   "actress_sync_unavailable": "Offline evidence is unavailable or invalid. No new batch can be reviewed.",
   "actress_sync_provisioning": "An administrator must provision a valid offline artifact, enable offline name sync and restart the server. This dialog does not change configuration.",
   "actress_sync_provisioning_docs": "Read offline provisioning instructions",
-  "actress_sync_pinned": "Evidence and freshness policy are pinned until server restart. An available artifact alone is not identity proof or permission to update.",
+  "actress_sync_pinned": "Evidence changes only after an explicit reload. Configuration and freshness policy remain pinned until server restart. An available artifact alone is not identity proof or permission to update.",
   "actress_sync_recovered": "The server recovered a validated historical artifact.",
   "actress_sync_artifact": "Artifact digest",
   "actress_sync_record_count": "{count} source records",
@@ -2854,5 +2854,13 @@
   "actress_sync_error_security": "The request was rejected by browser write-safety checks. Check the origin and server configuration.",
   "actress_sync_error_network": "The operation could not finish. A transport error does not prove that a submitted confirmation did not commit. Check history or retry the same confirmation.",
   "actress_sync_error_generic": "The server rejected the operation. No raw internal diagnostic is displayed. Check selection, evidence and durable history before retrying.",
-  "actress_sync_refresh_history": "Refresh history"
+  "actress_sync_refresh_history": "Refresh history",
+  "actress_sync_reload": "Reload offline evidence",
+  "actress_sync_reload_retry": "Retry evidence reload",
+  "actress_sync_refresh_status": "Refresh evidence status",
+  "actress_sync_reload_help": "Reload reads the already configured local artifact. It does not fetch data, enable sync, change the directory or freshness policy, or confirm a job. Changed evidence clears source choices and unsubmitted consent; existing jobs keep their original evidence.",
+  "actress_sync_reload_changed": "Evidence changed. Source choices and unsubmitted consent were cleared. Search, choose identities and review again before confirming.",
+  "actress_sync_reload_unchanged": "Evidence is unchanged. Existing choices and unsubmitted reviews were preserved; no job was submitted.",
+  "actress_sync_reload_busy": "Another evidence reload is running. Refresh status or retry the reload after it finishes.",
+  "actress_sync_reload_failed": "Evidence reload did not complete. The last usable evidence remains available. Refresh status to check the current evidence, then explicitly retry if needed."
 }

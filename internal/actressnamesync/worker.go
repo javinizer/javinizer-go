@@ -78,7 +78,10 @@ func (s *Service) workPass(ctx context.Context, cursor string, historical *actre
 			continue
 		}
 		s.mu.RLock()
-		current := s.snapshot
+		var current *actresscache.Snapshot
+		if s.generation != nil {
+			current = s.generation.snapshot
+		}
 		s.mu.RUnlock()
 		if snapshot != current {
 			historical = snapshot
@@ -97,7 +100,10 @@ func (s *Service) workPass(ctx context.Context, cursor string, historical *actre
 
 func (s *Service) snapshotForJob(ctx context.Context, digest string, historical *actresscache.Snapshot) (*actresscache.Snapshot, error) {
 	s.mu.RLock()
-	current := s.snapshot
+	var current *actresscache.Snapshot
+	if s.generation != nil {
+		current = s.generation.snapshot
+	}
 	s.mu.RUnlock()
 	if current != nil && current.Digest() == digest {
 		return current, nil
