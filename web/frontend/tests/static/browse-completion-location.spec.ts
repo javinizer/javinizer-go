@@ -116,7 +116,7 @@ for (const operation of ['leave-in-place', 'organize'] as const) {
 		// completion handler and its delayed goto('/browse') navigation.
 		await page.waitForURL(/\/browse$/, { timeout: 45_000 });
 		await expect(path).toHaveValue(source);
-		await expect(page.getByRole('button', { name: /fixture-marker\.txt/ })).toBeVisible();
+		await expect(page.getByText('fixture-marker.txt', { exact: true })).toBeVisible();
 		expect(await page.evaluate(() => localStorage.getItem('javinizer_input_path'))).toBe(source);
 		await page.screenshot({
 			path: testInfo.outputPath(`${operation}-automatic-return.png`),
@@ -134,10 +134,10 @@ for (const operation of ['leave-in-place', 'organize'] as const) {
 		await expect(path).toHaveValue(source);
 		await page.reload();
 		await expect(path).toHaveValue(source);
-		await expect(page.getByRole('button', { name: /fixture-marker\.txt/ })).toBeVisible();
+		await expect(page.getByText('fixture-marker.txt', { exact: true })).toBeVisible();
 		await page.reload();
 		await expect(path).toHaveValue(source);
-		await expect(page.getByRole('button', { name: /fixture-marker\.txt/ })).toBeVisible();
+		await expect(page.getByText('fixture-marker.txt', { exact: true })).toBeVisible();
 		// Retain only this test's fresh directories as diagnostic evidence.
 	});
 }
