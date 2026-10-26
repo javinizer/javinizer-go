@@ -361,6 +361,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 	}
 
+	var recoveryWarning string
+	var publicationFinalized bool
 	// Step 6: Complete revert log AFTER all filesystem mutations succeed.
 	if o.revertLog != nil && opID != "" {
 		applyResult := &ApplyResult{
@@ -375,11 +377,18 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 			Steps:                steps,
 		}
 		if completeErr := o.revertLog.Complete(ctx, opID, applyResult); completeErr != nil {
-			if artifact != nil && artifact.residentPrimary {
-				applyResult.FailedStep = "revert_log_finalization"
-				return applyResult, fmt.Errorf("resident publication reconciliation failed: %w", completeErr)
+			publicationFinalized = errors.Is(completeErr, ErrBackupCleanupPending)
+			if artifact != nil && artifact.residentPrimary && !errors.Is(completeErr, ErrBackupCleanupPending) {
+				// Preserve the submitted checkpoint for exact reconciliation retries.
+				partial := *applyResult
+				partial.PublicationFinalized = false
+				partial.FailedStep = "revert_log_finalization"
+				return &partial, fmt.Errorf("resident publication reconciliation failed: %w", completeErr)
 			}
-			resolveLogger(o.logger).Warnf("[workflow] RevertLog.Complete failed for %s: %v (apply still succeeded)", cmd.Movie.ID, completeErr)
+			recoveryWarning = "Files were updated, but backup cleanup or journal finalization was incomplete at completion. Do not reapply just to clear this warning: " + completeErr.Error()
+			resolveLogger(o.logger).Warnf("[workflow] %s: %s", cmd.Movie.ID, recoveryWarning)
+		} else {
+			publicationFinalized = true
 		}
 	}
 
@@ -400,15 +409,17 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	}
 	progress.FromContext(ctx).Report(progress.ProgressStepApply, 1.0, "Completed")
 	return &ApplyResult{
-		VideoOutcome:   videoOutcome,
-		OrganizeResult: state.organizeResult,
-		Movie:          state.movie,
-		DownloadPaths:  state.downloadPaths,
-		NFOPath:        state.nfoPath,
-		FoundNFOPath:   state.foundNFOPath,
-		Merged:         state.merged,
-		OperationID:    opID,
-		Steps:          steps,
+		RecoveryWarning:      recoveryWarning,
+		PublicationFinalized: publicationFinalized,
+		VideoOutcome:         videoOutcome,
+		OrganizeResult:       state.organizeResult,
+		Movie:                state.movie,
+		DownloadPaths:        state.downloadPaths,
+		NFOPath:              state.nfoPath,
+		FoundNFOPath:         state.foundNFOPath,
+		Merged:               state.merged,
+		OperationID:          opID,
+		Steps:                steps,
 	}, nil
 }
 

@@ -16,6 +16,10 @@ type ApplyTerminal struct {
 // eliminate duplicate type definitions with drift risk. The JSON schema is a
 // persistence contract — one source of truth.
 type GeneratedFilesJSON struct {
+	// UndoRetention is captured before mutation. Nil preserves legacy history;
+	// false discards owned backups only after durable successful publication.
+	UndoRetention *bool `json:"undo_retention,omitempty"`
+
 	ApplyTerminal *ApplyTerminal `json:"apply_terminal,omitempty"`
 	// PublicationPending blocks Undo until resident publication or its rollback
 	// has been durably reconciled. A crash/write failure requires manual recovery.

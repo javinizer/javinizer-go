@@ -790,6 +790,11 @@ type ApplyPhaseConfig struct {
 	// from worker goroutines. Nil = no per-file success reporting.
 	OnFileOrganized func(filePath string)
 
+	// OnFileRecoveryWarning reports filesystem completion needing recovery
+	// maintenance even when the warning could not be persisted. It replaces
+	// OnFileOrganized, never OnFileFailed, and must retain the apply generation.
+	OnFileRecoveryWarning func(filePath, warning string)
+
 	// OnFileFailed is invoked after each file's apply fails, carrying the source
 	// file path and the error message. The API layer wires this to broadcast a
 	// per-file WebSocket ProgressMessage with Status "failed", FilePath set, and

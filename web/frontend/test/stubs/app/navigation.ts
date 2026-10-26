@@ -11,3 +11,5 @@ export const afterNavigate = vi.fn();
 export const onNavigate = vi.fn();
 export function applyAction() {}
 export function destroyUrl() {}
+
+export const replaceState = vi.fn();
