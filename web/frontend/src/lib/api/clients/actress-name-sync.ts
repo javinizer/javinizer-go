@@ -40,23 +40,34 @@ export class ActressNameSyncClient extends BaseClient {
 	async status(signal?: AbortSignal): Promise<ActressNameSyncStatus> {
 		return this.request(`${prefix}/status`, { signal });
 	}
+	async reload(signal?: AbortSignal): Promise<ActressNameSyncStatus> {
+		return this.request(`${prefix}/sources/reload`, {
+			method: 'POST',
+			headers: writeHeaders,
+			body: '{}',
+			signal,
+		});
+	}
 	async sources(
 		params?: ActressNameSyncSourcesParams,
 		signal?: AbortSignal,
 	): Promise<ActressNameSyncSourcePage> {
 		const q = pageQuery(params);
 		if (params?.q !== undefined) q.set('q', params.q);
+		if (params?.artifact_digest !== undefined) q.set('artifact_digest', params.artifact_digest);
 		return this.request(`${prefix}/sources${suffix(q)}`, { signal });
 	}
 	async review(
 		choices: readonly ActressNameSyncChoice[],
 		signal?: AbortSignal,
+		artifactDigest?: string,
 	): Promise<ActressNameSyncReview> {
 		return this.request(`${prefix}/reviews`, {
 			method: 'POST',
 			headers: writeHeaders,
 			body: JSON.stringify({
 				choices: choices.map(({ actress_id, source_key }) => ({ actress_id, source_key })),
+				artifact_digest: artifactDigest,
 			}),
 			signal,
 		});

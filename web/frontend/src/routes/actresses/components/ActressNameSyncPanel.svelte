@@ -10,7 +10,7 @@
  let opener: HTMLElement | null = null;
  let forget = $state(false);
  let now = $state(Date.now());
- let available = $derived(!!c.info?.enabled && !!c.info?.available);
+ let available = $derived(!!c.info?.enabled && !!c.info?.available && !c.infoLoading);
  let locked = $derived(!!c.busy || !!c.recoveryReviewId);
  let activeActor = $derived(c.actors.find(a => a.id === c.activeActorId));
  let expired = $derived(!!c.review && now >= Date.parse(c.review.expires_at));
@@ -35,6 +35,9 @@
    case 'SYNC_REVIEW_PRINCIPAL':return m.actress_sync_error_principal();
    case 'SYNC_PROTECTED':return m.actress_sync_error_protected();
    case 'SYNC_STALE':return m.actress_sync_error_stale();
+   case 'SYNC_STALE_GENERATION':return m.actress_sync_reload_changed();
+   case 'SYNC_RELOAD_BUSY':return m.actress_sync_reload_busy();
+   case 'SYNC_RELOAD_FAILED':return m.actress_sync_reload_failed();
    case 'SYNC_CONFLICT':return m.actress_sync_error_conflict();
    case 'SYNC_NOT_FOUND':return m.actress_sync_error_not_found();
    case 'SYNC_CAPACITY':return m.actress_sync_error_capacity();
@@ -74,6 +77,13 @@
     {#if !['choose','review'].includes(c.step) && c.actors.length && !c.recoveryReviewId}<Button variant="outline" onclick={c.backToChoices} disabled={!!c.busy}>{m.actress_sync_back()}</Button>{/if}
     {#if c.step !== 'history'}<Button variant="outline" onclick={c.showHistory} disabled={!!c.busy}>{m.actress_sync_history()}</Button>{/if}
    </nav>
+   <div class="actions">
+    <Button variant="outline" onclick={c.loadInfo} disabled={!!c.busy || c.infoLoading}>{m.actress_sync_refresh_status()}</Button>
+    {#if c.info?.enabled}<Button variant="outline" onclick={c.reloadEvidence} disabled={!!c.busy || c.infoLoading}>{c.errorCode === 'SYNC_RELOAD_FAILED' || c.errorCode === 'SYNC_RELOAD_BUSY' ? m.actress_sync_reload_retry() : m.actress_sync_reload()}</Button>{/if}
+   </div>
+   {#if c.info?.enabled}<p>{m.actress_sync_reload_help()}</p>{/if}
+   {#if c.reloadResult}<p role="status" class="notice">{c.reloadResult === 'changed' ? m.actress_sync_reload_changed() : m.actress_sync_reload_unchanged()}</p>{/if}
+   {#if c.info?.reload_problem_code && !c.errorCode}<p role="status" class="notice">{m.actress_sync_reload_failed()}</p>{/if}
    {#if c.infoLoading}<p role="status">{m.actress_sync_loading()}</p>
    {:else if c.info && !available}<aside class="notice stack"><p>{c.info.enabled ? m.actress_sync_unavailable() : m.actress_sync_disabled()}</p><p>{m.actress_sync_provisioning()}</p><a href="https://github.com/javinizer/javinizer-go/blob/main/docs/19-offline-actress-name-sync.md" target="_blank" rel="noopener noreferrer">{m.actress_sync_provisioning_docs()}</a></aside>{/if}
    {#if available && c.info && ['choose','review'].includes(c.step)}<aside class="notice stack"><p>{m.actress_sync_pinned()}</p>{#if c.info.recovered}<p>{m.actress_sync_recovered()}</p>{/if}<p class="break">{m.actress_sync_artifact()}: {c.info.artifact_digest}</p><p>{m.actress_sync_record_count({count:c.info.record_count})}</p></aside>{/if}

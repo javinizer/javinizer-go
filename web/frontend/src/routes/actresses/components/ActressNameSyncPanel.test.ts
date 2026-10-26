@@ -53,6 +53,7 @@ function setup(info = { enabled: true, available: true }) {
 	const api = {
 		status: vi.spyOn(client, 'status').mockResolvedValue({
 			...info,
+			artifact_digest: 'digest',
 			record_count: 1,
 			recovered: false,
 			max_age_seconds: 3600,
@@ -68,6 +69,7 @@ function setup(info = { enabled: true, available: true }) {
 			max_age_seconds: 3600,
 			proposals: [{ actress_id: 1, source, before_name: '旧名', after_name: '新名' }],
 		}),
+		reload: vi.spyOn(client, 'reload').mockImplementation(() => client.status()),
 		confirm: vi.spyOn(client, 'confirm').mockResolvedValue(job),
 		jobs: vi.spyOn(client, 'jobs').mockResolvedValue({ items: [job] }),
 		job: vi.spyOn(client, 'job').mockResolvedValue(job),
@@ -236,3 +238,19 @@ it.each(['javascript:alert(1)', 'data:text/html,bad', 'https://user:secret@examp
 		expect(h.getByText(url)).toBeTruthy();
 	},
 );
+
+it('shows explicit reload and read-only status actions without automatic writes', async () => {
+	const h = setup();
+	await choices(h);
+	await h.c.requestReview();
+	await tick();
+	await fireEvent.click(h.getByRole('checkbox'));
+	expect(h.api.reload).not.toHaveBeenCalled();
+	await fireEvent.click(h.getByRole('button', { name: 'Refresh evidence status' }));
+	await waitFor(() => expect(h.api.status).toHaveBeenCalledTimes(2));
+	expect(h.api.reload).not.toHaveBeenCalled();
+	await fireEvent.click(h.getByRole('button', { name: 'Reload offline evidence' }));
+	await waitFor(() => expect(h.getByText(/Evidence is unchanged/)).toBeTruthy());
+	expect(h.c.consent).toBe(true);
+	expect(h.api.confirm).not.toHaveBeenCalled();
+});

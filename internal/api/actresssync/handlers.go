@@ -61,11 +61,11 @@ func (h *handler) status(c *gin.Context) {
 }
 
 func (h *handler) sources(c *gin.Context) {
-	values, ok := query(c, "q", "offset", "limit")
+	values, ok := query(c, "q", "offset", "limit", "artifact_digest")
 	if !ok {
 		return
 	}
-	if len(values.Get("q")) > 128 {
+	if len(values.Get("q")) > 128 || (values.Get("artifact_digest") != "" && !validHexID(values.Get("artifact_digest"))) {
 		invalid(c)
 		return
 	}
@@ -74,7 +74,7 @@ func (h *handler) sources(c *gin.Context) {
 		return
 	}
 	h.execute(c, http.StatusOK, func(ctx context.Context, svc syncService) (any, error) {
-		return svc.Sources(ctx, values.Get("q"), offset, limit)
+		return svc.SourcesAt(ctx, values.Get("q"), offset, limit, values.Get("artifact_digest"))
 	})
 }
 
@@ -130,7 +130,8 @@ type choiceRequest struct {
 }
 
 type reviewRequest struct {
-	Choices []choiceRequest `json:"choices"`
+	Choices        []choiceRequest `json:"choices"`
+	ArtifactDigest string          `json:"artifact_digest,omitempty"`
 }
 
 func (h *handler) review(c *gin.Context) {
@@ -141,7 +142,7 @@ func (h *handler) review(c *gin.Context) {
 	if !decodeJSON(c, &request) {
 		return
 	}
-	if len(request.Choices) == 0 || len(request.Choices) > nameplan.MaxSelection {
+	if len(request.Choices) == 0 || len(request.Choices) > nameplan.MaxSelection || (request.ArtifactDigest != "" && !validHexID(request.ArtifactDigest)) {
 		invalid(c)
 		return
 	}
@@ -155,7 +156,9 @@ func (h *handler) review(c *gin.Context) {
 		ids[choice.ActressID], sources[choice.SourceKey] = true, true
 		choices = append(choices, database.ActressSyncChoice{ActressID: choice.ActressID, SourceKey: choice.SourceKey})
 	}
-	h.execute(c, http.StatusCreated, func(ctx context.Context, svc syncService) (any, error) { return svc.Review(ctx, principal(c), choices) })
+	h.execute(c, http.StatusCreated, func(ctx context.Context, svc syncService) (any, error) {
+		return svc.ReviewAt(ctx, principal(c), choices, request.ArtifactDigest)
+	})
 }
 
 type confirmRequest struct {
@@ -196,4 +199,16 @@ func (h *handler) cancel(c *gin.Context) {
 		return
 	}
 	h.execute(c, http.StatusOK, func(ctx context.Context, svc syncService) (any, error) { return svc.Cancel(ctx, id) })
+}
+
+// reload accepts no artifact authority; the service uses restart-pinned settings.
+func (h *handler) reload(c *gin.Context) {
+	if _, ok := query(c); !ok {
+		return
+	}
+	var request struct{}
+	if !decodeJSONBody(c, &request, true) {
+		return
+	}
+	h.execute(c, http.StatusOK, func(ctx context.Context, svc syncService) (any, error) { return svc.Reload(ctx) })
 }

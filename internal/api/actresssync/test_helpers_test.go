@@ -57,6 +57,7 @@ type serviceCall struct {
 	principal     string
 	id            string
 	query         string
+	digest        string
 	offset, limit int
 	choices       []database.ActressSyncChoice
 	confirmed     bool
@@ -87,12 +88,12 @@ func (s *serviceStub) Info(ctx context.Context) (actressnamesync.SourceInfo, err
 	err := s.called(ctx, serviceCall{method: "status"})
 	return actressnamesync.SourceInfo{Enabled: true, Available: true}, err
 }
-func (s *serviceStub) Sources(ctx context.Context, query string, offset, limit int) (*actressnamesync.SourcePage, error) {
-	err := s.called(ctx, serviceCall{method: "sources", query: query, offset: offset, limit: limit})
+func (s *serviceStub) SourcesAt(ctx context.Context, query string, offset, limit int, digest string) (*actressnamesync.SourcePage, error) {
+	err := s.called(ctx, serviceCall{method: "sources", query: query, offset: offset, limit: limit, digest: digest})
 	return &actressnamesync.SourcePage{Items: []actressnamesync.SourceChoice{{SourceKey: testSourceKey, JapaneseName: "名前"}}}, err
 }
-func (s *serviceStub) Review(ctx context.Context, principal string, choices []database.ActressSyncChoice) (*actressnamesync.Review, error) {
-	err := s.called(ctx, serviceCall{method: "review", principal: principal, choices: choices})
+func (s *serviceStub) ReviewAt(ctx context.Context, principal string, choices []database.ActressSyncChoice, digest string) (*actressnamesync.Review, error) {
+	err := s.called(ctx, serviceCall{method: "review", principal: principal, choices: choices, digest: digest})
 	return &actressnamesync.Review{ReviewID: testReviewID}, err
 }
 func (s *serviceStub) Confirm(ctx context.Context, principal, id string, confirmed bool) (*actressnamesync.JobView, error) {
@@ -152,4 +153,9 @@ func (f *fixture) serve(r *http.Request) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	f.router.ServeHTTP(w, r)
 	return w
+}
+
+func (s *serviceStub) Reload(ctx context.Context) (actressnamesync.SourceInfo, error) {
+	err := s.called(ctx, serviceCall{method: "reload"})
+	return actressnamesync.SourceInfo{Enabled: true, Available: true}, err
 }

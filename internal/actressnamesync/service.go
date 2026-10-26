@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/actresscache"
+	"github.com/javinizer/javinizer-go/internal/actressmetadata"
 	"github.com/javinizer/javinizer-go/internal/database"
 )
 
@@ -25,6 +26,15 @@ type indexedSource struct {
 	search string
 }
 
+// generation is immutable after construction; every read pins the whole bundle.
+type generation struct {
+	options  Options
+	snapshot *actresscache.Snapshot
+	sources  []indexedSource
+	provider *actressmetadata.SnapshotProvider
+	info     SourceInfo
+}
+
 // Service owns bounded ephemeral review authority and one durable worker.
 // A restart drops unconfirmed reviews; committed request keys remain replayable.
 type Service struct {
@@ -37,8 +47,9 @@ type Service struct {
 	confirm     chan struct{}
 	reviewSlots chan struct{}
 	mu          sync.RWMutex
-	snapshot    *actresscache.Snapshot
-	sources     []indexedSource
+	generation  *generation
+	reload      chan struct{}
+	readSlots   chan struct{}
 	info        SourceInfo
 	tickets     map[string]ticket
 	workerID    string
@@ -72,7 +83,7 @@ func New(lifetime context.Context, repo Repository, opts Options) (*Service, err
 	if err != nil {
 		return nil, err
 	}
-	return &Service{ctx: lifetime, repo: repo, opts: opts, ready: make(chan struct{}), wake: make(chan struct{}, 1), confirm: make(chan struct{}, 1), reviewSlots: make(chan struct{}, 4), tickets: make(map[string]ticket), workerID: "offline-" + id, now: time.Now, info: SourceInfo{Enabled: opts.Enabled, Code: "starting", MaxAgeSeconds: int64(opts.MaxAge / time.Second), RestartRequiredForConfigChanges: true}}, nil
+	return &Service{ctx: lifetime, repo: repo, opts: opts, ready: make(chan struct{}), wake: make(chan struct{}, 1), confirm: make(chan struct{}, 1), reload: make(chan struct{}, 1), readSlots: make(chan struct{}, 8), reviewSlots: make(chan struct{}, 4), tickets: make(map[string]ticket), workerID: "offline-" + id, now: time.Now, info: SourceInfo{Enabled: opts.Enabled, Code: "starting", MaxAgeSeconds: int64(opts.MaxAge / time.Second), RestartRequiredForConfigChanges: true}}, nil
 }
 
 func randomID() (string, error) {
@@ -123,14 +134,20 @@ func (s *Service) Info(ctx context.Context) (SourceInfo, error) {
 	defer s.mu.RUnlock()
 	return s.info, nil
 }
-func (s *Service) current() (*actresscache.Snapshot, error) {
+func (s *Service) currentGeneration(digest string) (*generation, error) {
+	if digest != "" && !validHex(digest) {
+		return nil, ErrInvalid
+	}
 	if !s.opts.Enabled {
 		return nil, ErrDisabled
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.snapshot == nil {
+	if s.generation == nil {
 		return nil, ErrUnavailable
 	}
-	return s.snapshot, nil
+	if digest != "" && digest != s.generation.snapshot.Digest() {
+		return nil, ErrStaleGeneration
+	}
+	return s.generation, nil
 }

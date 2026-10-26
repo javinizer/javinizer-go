@@ -1,7 +1,7 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, chmod, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, chmod, writeFile, readFile, rm, copyFile, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,7 @@ export class SyncHarness {
 	private error?: Error;
 	private output = '';
 	private options: SyncOptions;
+	private readyManifest?: Buffer;
 	constructor(
 		readonly root: string,
 		options: SyncOptions,
@@ -113,6 +114,7 @@ export class SyncHarness {
 				)
 				.toBe(true);
 			this.fixture = JSON.parse(await readFile(join(this.root, 'fixture.json'), 'utf8'));
+			this.readyManifest ??= await readFile(join(this.root, 'artifacts/ready/current.json'));
 		} catch (e) {
 			throw new Error(
 				`Could not start fixture. Build cmd/javinizer-sync-e2e first. ${String(e)}\n${this.output}`,
@@ -168,6 +170,25 @@ export class SyncHarness {
 		});
 		return JSON.parse(stdout);
 	}
+	/** Replace only disposable host fixture files; no application control API. */
+	async replaceEvidence(variant: 'ready' | 'stale' | 'corrupt') {
+		const target = join(this.root, 'artifacts/ready');
+		if (variant === 'corrupt') {
+			await writeFile(join(target, 'current.json'), 'broken fixture manifest', { mode: 0o600 });
+			return;
+		}
+		const manifest =
+			variant === 'ready'
+				? this.readyManifest!
+				: await readFile(join(this.root, 'artifacts', variant, 'current.json'));
+		if (variant !== 'ready')
+			await copyFile(
+				join(this.root, 'artifacts', variant, `${this.fixture.digests[variant]}.ndjson`),
+				join(target, `${this.fixture.digests[variant]}.ndjson`),
+			);
+		await writeFile(join(target, 'next-fixture.json'), manifest, { mode: 0o600 });
+		await rename(join(target, 'next-fixture.json'), join(target, 'current.json'));
+	}
 	async login(page: Page) {
 		const response = await page.request.post('/api/v1/auth/login', {
 			data: { username: 'admin', password: 'adminpassword123', remember_me: true },
@@ -197,5 +218,14 @@ export const test = base.extend<{ sync: SyncHarness; syncOptions: SyncOptions }>
 			}
 		}
 	},
+});
+// Browser integration is fixture-only, including third-party image/provenance URLs.
+// Keep network consumers disabled even when Chromium runs outside a socket sandbox.
+test.beforeEach(async ({ context }) => {
+	await context.route('**/*', async (route) => {
+		const host = new URL(route.request().url()).hostname;
+		if (['localhost', '127.0.0.1', '[::1]'].includes(host)) await route.continue();
+		else await route.abort('blockedbyclient');
+	});
 });
 export { expect };

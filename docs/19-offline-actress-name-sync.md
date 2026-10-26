@@ -1,10 +1,9 @@
 # Confirmed offline actress-name API
 
-This backend supports a one-time, explicitly reviewed Japanese-name update from
+The backend and catalog dialog support a one-time, explicitly reviewed Japanese-name update from
 an existing offline R18 artifact. It is disabled by default. It does not download
 upstream data, infer identity from names or equal numeric IDs, start from a scrape,
-refresh artifacts automatically, or provide recurring update consent. The review
-UI is not included in this backend slice.
+refresh artifacts automatically, or provide recurring update consent. The catalog dialog provides explicit selection, review, confirmation and history.
 
 ## Provision and enable
 
@@ -30,9 +29,9 @@ metadata:
 ```
 
 The directory must already exist and satisfy the artifact store's safety checks.
-Settings and the validated startup snapshot are pinned until restart. Saving
-configuration or publishing a new artifact does not replace a running service's
-policy or snapshot. `max_age_hours` must be 1–8760, `max_queued_jobs` 1–32, and
+Settings remain pinned until restart. Publishing a new artifact does not
+silently replace the running snapshot: explicitly reload it using the endpoint
+below. Saving configuration does not replace the running service's policy. `max_age_hours` must be 1–8760, `max_queued_jobs` 1–32, and
 `max_queued_tasks` 1–8192. An enabled service also requires the actress database.
 
 Do not delete immutable artifact objects referenced by outstanding jobs. Jobs
@@ -69,7 +68,7 @@ reference only while the current page remains loaded.
 
 The interface neither provisions an artifact nor enables configuration, fetches
 live metadata, updates images, or authorizes recurring sync. Administrator
-provisioning and a server restart remain separate steps.
+provisioning remains separate; enabling or changing configuration requires a server restart.
 
 ## Authentication and browser write safety
 
@@ -86,7 +85,7 @@ X-Requested-With: javinizer-offline-name-sync
 ```
 
 The intent header does not replace authentication or the user's confirmation.
-The three write routes use the server's existing write-rate-limited group.
+All write routes use the server's existing write-rate-limited group.
 
 Browser Origins must match the actual request's scheme, host and effective port,
 or an exact entry in `api.security.allowed_origins`. Wildcards, `null`, malformed
@@ -107,6 +106,7 @@ All successful responses are direct JSON objects, not a `data` wrapper.
 | --- | --- | --- |
 | GET | `/status` | 200 source availability and startup policy |
 | GET | `/sources?q=...&offset=0&limit=50` | 200 bounded offline source discovery |
+| POST | `/sources/reload` | 200 explicitly reloaded offline evidence status |
 | POST | `/reviews` | 201 server-held exact batch review |
 | POST | `/jobs` | 202 confirmed job or original idempotent receipt |
 | GET | `/jobs?cursor=...&limit=20` | 200 newest-first durable history |
@@ -263,3 +263,34 @@ joined before the database closes. Parsing an unfinished request body and writin
 a response to a stalled reader do not hold the database shutdown join. A transport
 failure or shutdown is not proof that confirmation or an apply did not commit:
 use idempotent confirmation retries and durable receipts to establish the outcome.
+
+
+## Explicit evidence reload
+
+In the catalog dialog, choose **Reload offline evidence** after provisioning. It
+never runs automatically. **Refresh evidence status** is read-only and can resolve
+an interrupted response; **Retry evidence reload** repeats only that explicit
+reload, never a review or confirmation. Close/Escape aborts the request and does
+not replay it on reopening.
+
+A changed digest clears displayed source pages, choices and unsubmitted consent.
+Select identities again and obtain a new review. An unchanged digest preserves
+choices and existing unsubmitted reviews without extending their expiry. Existing
+jobs, historical receipts and submitted-nonce recovery remain intact. An old
+status, source page or review response cannot restore discarded consent.
+
+After provisioning a new artifact into the configured directory, authenticated
+clients may POST `/api/v1/actress-name-sync/sources/reload` with no parameters and
+an empty body or `{}`. Configuration changes still require restart. Reload never
+fetches upstream evidence, rewrites observation time, changes actors or ownership,
+or starts a job. Previous-manifest recovery is not accepted as a refresh; failures
+keep the last usable generation and report a bounded `reload_problem_code`.
+
+Clients should send the displayed `artifact_digest` on source pagination and
+review creation as an equality precondition, not as historical load authority.
+After changed-generation reload, discard unconfirmed reviews and explicitly
+review/confirm again. Same-digest reload is harmless. Retrying a confirmation
+whose response was lost returns its original durable receipt, even after reload.
+Previously admitted jobs remain pinned to their original artifact; missing or
+corrupt historical evidence cannot be substituted with the new generation.
+This is one-shot offline sync, not recurring consent or live provider sync.

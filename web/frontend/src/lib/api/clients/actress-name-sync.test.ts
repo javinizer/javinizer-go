@@ -96,6 +96,9 @@ describe('ActressNameSyncClient', () => {
 		'SYNC_CAPACITY',
 		'SYNC_DISABLED',
 		'SYNC_UNAVAILABLE',
+		'SYNC_STALE_GENERATION',
+		'SYNC_RELOAD_BUSY',
+		'SYNC_RELOAD_FAILED',
 		'SYNC_STOPPING',
 	])('preserves structured %s errors without replaying', async (code) => {
 		fetchMock.mockResolvedValue({
@@ -123,24 +126,57 @@ describe('ActressNameSyncClient', () => {
 		await expect(client.status()).rejects.toBeInstanceOf(ApiError);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
-	it.each(['status', 'sources', 'review', 'confirm', 'jobs', 'job', 'tasks', 'cancel'] as const)(
-		'passes cancellation for %s without replay',
-		async (method) => {
-			const signal = new AbortController().signal;
-			fetchMock.mockRejectedValue(new DOMException('aborted', 'AbortError'));
-			const calls = {
-				status: () => client.status(signal),
-				sources: () => client.sources({}, signal),
-				review: () => client.review([], signal),
-				confirm: () => client.confirm('id', signal),
-				jobs: () => client.jobs({}, signal),
-				job: () => client.job('id', signal),
-				tasks: () => client.tasks('id', {}, signal),
-				cancel: () => client.cancel('id', signal),
-			};
-			await expect(calls[method]()).rejects.toMatchObject({ name: 'AbortError' });
-			expect(last()[1].signal).toBe(signal);
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-		},
+	it.each([
+		'status',
+		'reload',
+		'sources',
+		'review',
+		'confirm',
+		'jobs',
+		'job',
+		'tasks',
+		'cancel',
+	] as const)('passes cancellation for %s without replay', async (method) => {
+		const signal = new AbortController().signal;
+		fetchMock.mockRejectedValue(new DOMException('aborted', 'AbortError'));
+		const calls = {
+			status: () => client.status(signal),
+			reload: () => client.reload(signal),
+			sources: () => client.sources({}, signal),
+			review: () => client.review([], signal),
+			confirm: () => client.confirm('id', signal),
+			jobs: () => client.jobs({}, signal),
+			job: () => client.job('id', signal),
+			tasks: () => client.tasks('id', {}, signal),
+			cancel: () => client.cancel('id', signal),
+		};
+		await expect(calls[method]()).rejects.toMatchObject({ name: 'AbortError' });
+		expect(last()[1].signal).toBe(signal);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+});
+
+it('reload posts an empty authenticated-intent request without client artifact authority or retry', async () => {
+	const signal = new AbortController().signal;
+	await client.reload(signal);
+	expect(last()[0]).toMatch(/\/sources\/reload$/);
+	expect(last()[1].method).toBe('POST');
+	expect(last()[1].body).toBe('{}');
+	expect(last()[1].signal).toBe(signal);
+	expect(new Headers(last()[1].headers).get('X-Requested-With')).toBe(
+		'javinizer-offline-name-sync',
 	);
+	fetchMock.mockRejectedValue(new TypeError('lost response'));
+	await expect(client.reload()).rejects.toBeInstanceOf(TypeError);
+	expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+it('sends a displayed digest only as a discovery and review precondition', async () => {
+	const digest = 'a'.repeat(64);
+	await client.sources({ artifact_digest: digest });
+	expect(new URL(last()[0]).searchParams.get('artifact_digest')).toBe(digest);
+	await client.review([{ actress_id: 1, source_key: 'key' }], undefined, digest);
+	expect(JSON.parse(last()[1].body as string)).toEqual({
+		choices: [{ actress_id: 1, source_key: 'key' }],
+		artifact_digest: digest,
+	});
 });

@@ -16,8 +16,9 @@ const routePrefix = "/actress-name-sync"
 // syncService deliberately excludes repository, worker, artifact and clock access.
 type syncService interface {
 	Info(context.Context) (actressnamesync.SourceInfo, error)
-	Sources(context.Context, string, int, int) (*actressnamesync.SourcePage, error)
-	Review(context.Context, string, []database.ActressSyncChoice) (*actressnamesync.Review, error)
+	Reload(context.Context) (actressnamesync.SourceInfo, error)
+	SourcesAt(context.Context, string, int, int, string) (*actressnamesync.SourcePage, error)
+	ReviewAt(context.Context, string, []database.ActressSyncChoice, string) (*actressnamesync.Review, error)
 	Confirm(context.Context, string, string, bool) (*actressnamesync.JobView, error)
 	Job(context.Context, string) (*actressnamesync.JobView, error)
 	Tasks(context.Context, string, int, int) (*actressnamesync.TaskPage, error)
@@ -63,6 +64,7 @@ func (h *handler) register(protected, writeProtected *gin.RouterGroup) {
 	reads.GET("/jobs/:id/tasks", h.tasks)
 
 	writes := writeProtected.Group(routePrefix, h.authenticated, h.writeIntent)
+	writes.POST("/sources/reload", h.reload)
 	writes.POST("/reviews", h.review)
 	writes.POST("/jobs", h.confirm)
 	writes.POST("/jobs/:id/cancel", h.cancel)
