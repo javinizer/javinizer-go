@@ -1345,7 +1345,7 @@
   "settings_file_matching_regex_enable": "[ Ëñåblë Çüstöm Rëgëx Påttërñ ]",
   "settings_file_matching_regex_label": "[ Rëgëx Påttërñ ]",
   "settings_file_matching_title": "[ Fílë Måtçhíñg Šëttíñgs ]",
-  "settings_file_ops_allow_revert_desc": "[ Ëñåblë thë rëvërt fëåtürë tö üñdö örgåñízë öpëråtíöñs åñd rëstörë fílës tö thëír örígíñål löçåtíöñs. Whëñ dísåblëd, rëvërt büttöñs årë híddëñ åñd rëvërt ÅPÍ çålls årë blöçkëd. ]",
+  "settings_file_ops_allow_revert_desc": "[ Dísåblëd by dëfåült. Ëñåblë bëförë stårtíñg öpëråtíöñs tö rëtåíñ örígíñål-fílë båçküps för Üñdö. Whëñ dísåblëd, süççëssfül öpëråtíöñs çlëåñ üp thëír öwñëd tråñsåçtíöñ båçküps; fåílëd öpëråtíöñs ör çlëåñüp fåílürës måy rëtåíñ rëçövëry dåtå. Çhåñgës åpply tö ñëw öpëråtíöñs, ñöt hístöríçål båçküps. ]",
   "settings_file_ops_allow_revert_label": "[ Ållöw Rëvërt ]",
   "settings_file_ops_desc": "[ Çöñtröl höw Jåvíñízër örgåñízës åñd mövës yöür fílës ]",
   "settings_file_ops_mode_desc": "[ Çhöösë höw fílës årë örgåñízëd düríñg öpëråtíöñs ]",

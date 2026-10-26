@@ -3,7 +3,6 @@ package history
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -57,7 +56,7 @@ func (m *p3OpRepo) FindByID(_ context.Context, id uint) (*models.BatchFileOperat
 		cp := *op
 		return &cp, nil
 	}
-	return nil, errors.New("not found")
+	return nil, database.ErrNotFound // match the real repository missing-row contract
 }
 
 func (m *p3OpRepo) byPred(pred func(*models.BatchFileOperation) bool) []models.BatchFileOperation {

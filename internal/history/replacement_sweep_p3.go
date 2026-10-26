@@ -661,10 +661,14 @@ func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint
 	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
 		return false, fsutil.ErrReplacementBusy
 	}
-	if err := s.markPruneCleanupPending(opID, entry); err != nil {
+	if err := s.markPruneCleanupPending(ctx, opID, entry); err != nil {
 		return false, err
 	}
-	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, "organized-job prune", &entry, nil)
+	phase := "organized-job prune"
+	if discard, _ := ctx.Value(successCleanupContextKey{}).(bool); discard {
+		phase = "successful operation cleanup"
+	}
+	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, phase, &entry, nil)
 	if err != nil {
 		if hold != nil && hold.moved {
 			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
@@ -700,9 +704,28 @@ func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.Rep
 
 // markPruneCleanupPending durably records the two-phase cleanup intent
 // before any backup bytes move. A crash leaves a retryable pending entry.
-func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
+func (s *ReplacementSweeper) markPruneCleanupPending(parent context.Context, opID uint, entry models.ReplacementEntry) error {
+	if discard, _ := parent.Value(successCleanupContextKey{}).(bool); discard {
+		return s.markSuccessfulCleanupPending(parent, opID, entry)
+	}
 	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
 	defer cancel()
+	// Ordinary history pruning can also encounter a successful opt-out row
+	// whose first cleanup was deferred. It is maintenance, never user Undo.
+	current, err := s.repo.FindByID(ctx, opID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("operation %d missing during prune admission", opID)
+	}
+	ledger, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+	if err != nil {
+		return err
+	}
+	if ledger.SuccessfulUndoDisabled() {
+		return s.markSuccessfulCleanupPending(ctx, opID, entry)
+	}
 	if err := admitOperationUndo(ctx, s.repo, &models.BatchFileOperation{ID: opID}); err != nil {
 		return err
 	}
@@ -1018,6 +1041,9 @@ func journalEntryDestination(row *models.BatchFileOperation, backupSlash string)
 func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
+	}
+	if err := s.cleanupSuccessfulOperations(ctx); err != nil {
+		logging.Warnf("successful-operation backup cleanup pending: %v", err)
 	}
 	idx, err := s.index(ctx)
 	if err != nil {
@@ -1946,6 +1972,14 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 				durableEntry = gf.Replacements[i]
 				break
 			}
+		}
+		// Successful opt-out cleanup is maintenance, not user Undo. Setting
+		// UndoStarted here would strand still-busy sibling backups on restart.
+		if gf.SuccessfulUndoDisabled() {
+			if durableKind != models.RestorePendingKindPrune || !successfulCleanupProof(durableEntry) {
+				return gf, false, fmt.Errorf("successful cleanup ownership proof unavailable")
+			}
+			return gf, false, nil
 		}
 		persist := !gf.UndoStarted
 		gf.UndoStarted = true

@@ -52,6 +52,9 @@ func organizeMetadata(mode string, result *workflow.ApplyResult) string {
 	if result != nil && result.VideoOutcome != "" {
 		m["video_outcome"] = result.VideoOutcome
 	}
+	if result != nil && result.RecoveryWarning != "" {
+		m["recovery_warning"] = result.RecoveryWarning
+	}
 	if result != nil && result.OrganizeResult != nil && len(result.OrganizeResult.Warnings) > 0 {
 		m["warnings"] = result.OrganizeResult.Warnings
 	}

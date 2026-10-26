@@ -29,6 +29,7 @@ export interface ApplyRecoveryState {
 }
 
 export interface FileStatus {
+	recovery_warning?: string;
 	status: string;
 	error?: string;
 	error_code?: FileResultErrorCode;
@@ -155,6 +156,19 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		const expectedPaths = new Set(deps.getExpectedOrganizeFilePaths());
 		for (const [filePath, result] of Object.entries(job.results ?? {})) {
 			if (job.excluded?.[filePath] || !result.movie || !expectedPaths.has(filePath)) continue;
+			const recoveryWarning = result.recovery_warning || (
+				activeApplyGeneration !== undefined && job.apply_generation === activeApplyGeneration
+					? deps.getFileStatuses().get(filePath)?.recovery_warning
+					: undefined
+			);
+			// Warning certifies filesystem publication even when its failed receipt
+			// write leaves a prior attempt's Failed status in the result store.
+			if (recoveryWarning) {
+				updateFileStatus(filePath, { status: 'success', recovery_warning: recoveryWarning });
+				deps.recordApplySuccess?.(filePath);
+				forgetRecoveryRetryPath(filePath);
+				continue;
+			}
 			if (result.status === 'failed') {
 				updateFileStatus(filePath, {
 					status: 'failed',
@@ -214,6 +228,14 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			const skipped = Array.from(deps.getFileStatuses().values()).filter(
 				(s) => s.status === 'skipped',
 			).length;
+			const warnings = Array.from(deps.getFileStatuses().values()).flatMap((s) =>
+				s.recovery_warning ? [s.recovery_warning] : [],
+			);
+			if (warnings.length > 0) {
+				if (failures === 0) deps.clearApplyRecovery?.();
+				deps.toastInfo([...new Set(warnings)].join('\n'), 12000);
+				return; // Keep the warning visible; never auto-redirect or offer re-apply.
+			}
 			if (failures === 0 && skipped > 0) {
 				deps.clearApplyRecovery?.();
 				deps.toastInfo(
@@ -630,8 +652,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			(msg.status === 'organized' || msg.status === 'updated' || msg.status === 'replaced') &&
 			msg.file_path
 		) {
+			const recoveryWarning = msg.recovery_warning || deps.getFileStatuses().get(msg.file_path)?.recovery_warning;
 			updateFileStatus(msg.file_path, {
 				status: msg.status === 'replaced' ? 'replaced' : 'success',
+				...(recoveryWarning ? { recovery_warning: recoveryWarning } : {}),
 			});
 			deps.recordApplySuccess?.(msg.file_path);
 			forgetRecoveryRetryPath(msg.file_path);
@@ -669,7 +693,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			lastOrganizeOperation = recovery.organizeOperation;
 			lastRecoveryFailedPaths = Object.keys(recovery.failed);
 			for (const [filePath, result] of Object.entries(job?.results ?? {})) {
-				if (result.status === 'failed' && result.movie) lastRecoveryFailedPaths.push(filePath);
+				if (result.status === 'failed' && !result.recovery_warning && result.movie) lastRecoveryFailedPaths.push(filePath);
 			}
 			lastRecoveryFailedPaths = Array.from(new Set(lastRecoveryFailedPaths));
 			lastUpdateOptions = structuredClone(recovery.updateOptions);
@@ -692,7 +716,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		}
 		for (const [filePath, result] of Object.entries(job?.results ?? {})) {
 			if (
-				result.status === 'failed' &&
+				result.status === 'failed' && !result.recovery_warning &&
 				eligiblePaths.has(filePath) &&
 				!recovery?.failed[filePath]
 			) {

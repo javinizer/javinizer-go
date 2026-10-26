@@ -93,17 +93,18 @@ type BatchScrapeResponse struct {
 // BatchFileResult represents a per-file result in a batch job response.
 // Flattened from FileMatchInfo to match the frontend FileResult contract.
 type BatchFileResult struct {
-	VideoCollision *videocollision.ConflictError `json:"video_collision,omitempty"`
-	VideoOutcome   string                        `json:"video_outcome,omitempty"`
-	ResultID       string                        `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath       string                        `json:"file_path"`
-	MovieID        string                        `json:"movie_id"`
-	IsMultiPart    bool                          `json:"is_multi_part"`
-	PartNumber     int                           `json:"part_number"`
-	PartSuffix     string                        `json:"part_suffix"`
-	Status         models.JobStatus              `json:"status"`
-	Error          string                        `json:"error,omitempty"`
-	ErrorCode      string                        `json:"error_code,omitempty"`
+	VideoCollision  *videocollision.ConflictError `json:"video_collision,omitempty"`
+	RecoveryWarning string                        `json:"recovery_warning,omitempty"`
+	VideoOutcome    string                        `json:"video_outcome,omitempty"`
+	ResultID        string                        `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath        string                        `json:"file_path"`
+	MovieID         string                        `json:"movie_id"`
+	IsMultiPart     bool                          `json:"is_multi_part"`
+	PartNumber      int                           `json:"part_number"`
+	PartSuffix      string                        `json:"part_suffix"`
+	Status          models.JobStatus              `json:"status"`
+	Error           string                        `json:"error,omitempty"`
+	ErrorCode       string                        `json:"error_code,omitempty"`
 	// TranslationWarning is populated when metadata translation partially failed
 	// or degraded; empty when translation fully succeeded.
 	TranslationWarning string `json:"translation_warning,omitempty"`
@@ -122,17 +123,18 @@ type BatchFileResult struct {
 
 // BatchFileResultSlim is a lightweight per-file result without movie data.
 type BatchFileResultSlim struct {
-	VideoCollision *videocollision.ConflictError `json:"video_collision,omitempty"`
-	VideoOutcome   string                        `json:"video_outcome,omitempty"`
-	ResultID       string                        `json:"result_id"` // Stable UUID — survives movie_id changes
-	FilePath       string                        `json:"file_path"`
-	MovieID        string                        `json:"movie_id"`
-	IsMultiPart    bool                          `json:"is_multi_part"`
-	PartNumber     int                           `json:"part_number"`
-	PartSuffix     string                        `json:"part_suffix"`
-	Status         models.JobStatus              `json:"status"`
-	Error          string                        `json:"error,omitempty"`
-	ErrorCode      string                        `json:"error_code,omitempty"`
+	VideoCollision  *videocollision.ConflictError `json:"video_collision,omitempty"`
+	RecoveryWarning string                        `json:"recovery_warning,omitempty"`
+	VideoOutcome    string                        `json:"video_outcome,omitempty"`
+	ResultID        string                        `json:"result_id"` // Stable UUID — survives movie_id changes
+	FilePath        string                        `json:"file_path"`
+	MovieID         string                        `json:"movie_id"`
+	IsMultiPart     bool                          `json:"is_multi_part"`
+	PartNumber      int                           `json:"part_number"`
+	PartSuffix      string                        `json:"part_suffix"`
+	Status          models.JobStatus              `json:"status"`
+	Error           string                        `json:"error,omitempty"`
+	ErrorCode       string                        `json:"error_code,omitempty"`
 	// TranslationWarningCode is exposed on the slim payload (without the raw
 	// warning string) so the UI can badge mid-run with localized copy; the full
 	// BatchFileResult carries both fields.
