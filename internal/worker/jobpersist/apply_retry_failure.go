@@ -26,6 +26,7 @@ func ProjectApplyRetryFailures(results map[string]*resultstore.MovieResult, excl
 		if result.Status == models.JobStatusCompleted {
 			delta++
 		}
+		result.RecoveryWarning = ""
 		result.Status = models.JobStatusFailed
 		result.Error = failure.Error
 		result.ErrorCode = "APPLY_RECEIPT_PERSIST_FAILED"

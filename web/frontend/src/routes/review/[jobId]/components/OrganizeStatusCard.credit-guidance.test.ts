@@ -122,3 +122,29 @@ it('disables credit navigation while a guarded write is pending', () => {
 	expect(action.disabled).toBe(true);
 	expect(onReviewCredits).not.toHaveBeenCalled();
 });
+
+it('shows committed recovery warning without Retry or redirect promise', () => {
+	const warning = 'Output committed; backup cleanup pending. Do not re-apply.';
+	const { getByText, queryByRole, queryByText } = mount(null, null, false, {
+		organizeStatus: 'completed',
+		fileStatuses: new Map([['/synthetic/committed.mp4', { status: 'success', recovery_warning: warning }]]),
+	});
+	expect(getByText(warning)).toBeTruthy();
+	expect(queryByRole('button', { name: /Retry Failed/i })).toBeNull();
+	expect(queryByText(/Redirecting to browse/i)).toBeNull();
+});
+
+it('keeps a committed warning visible beside an ordinary retryable failure', async () => {
+	const warning = 'Output committed; backup cleanup pending. Do not re-apply.';
+	const { getByText, getByRole, onRetryFailed } = mount(null, null, false, {
+		organizeStatus: 'completed', retryAvailable: true,
+		fileStatuses: new Map<string, { status: string; recovery_warning?: string; error?: string }>([
+			['/synthetic/committed.mp4', { status: 'success', recovery_warning: warning }],
+			['/synthetic/failed.mp4', { status: 'failed', error: 'Permission denied' }],
+		]),
+	});
+	expect(getByText(warning)).toBeTruthy();
+	expect(getByText('Permission denied')).toBeTruthy();
+	await fireEvent.click(getByRole('button', { name: /Retry Failed/i }));
+	expect(onRetryFailed).toHaveBeenCalledOnce();
+});

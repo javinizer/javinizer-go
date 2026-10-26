@@ -219,3 +219,35 @@ it('rejects direct guidance navigation during a pending credit mutation', async 
 	await operation.finish();
 	expect(state.openCreditGuidance('/synthetic/movie.mp4')).toBe(true);
 });
+
+it.each(['completed', 'failed'])('restores a committed cleanup warning over %s on reload without offering retry', async (priorStatus) => {
+	const job = fixture('a');
+	job.status = 'organized';
+	const path = '/synthetic/movie.mp4';
+	const warning = 'Output committed; backup cleanup pending. Do not re-apply.';
+	job.results[path].status = priorStatus;
+	job.results[path].recovery_warning = warning;
+	vi.mocked(apiClient.getBatchJob).mockResolvedValue(job);
+	const apply = vi.spyOn(apiClient, 'organizeBatchJob').mockResolvedValue({} as never);
+	const { state } = await mount();
+	expect(state.organizeStatus).toBe('completed');
+	expect(state.displayedFileStatuses.get(path)).toEqual({ status: 'success', recovery_warning: warning });
+	expect(state.canRetryFailed).toBe(false);
+	expect(apply).not.toHaveBeenCalled();
+});
+
+it('keeps ordinary failed siblings distinct from committed cleanup warnings on reload', async () => {
+	const job = fixture('a');
+	job.status = 'organized';
+	const path = '/synthetic/movie.mp4';
+	job.results[path].recovery_warning = 'Output committed; cleanup pending.';
+	job.results['/synthetic/failed.mp4'] = {
+		...job.results[path], file_path: '/synthetic/failed.mp4',
+		status: 'failed', error: 'Permission denied', recovery_warning: undefined,
+	};
+	vi.mocked(apiClient.getBatchJob).mockResolvedValue(job);
+	const { state } = await mount();
+	expect(state.organizeStatus).toBe('failed');
+	expect(state.displayedFileStatuses.get(path)?.status).toBe('success');
+	expect(state.displayedFileStatuses.get('/synthetic/failed.mp4')?.status).toBe('failed');
+});

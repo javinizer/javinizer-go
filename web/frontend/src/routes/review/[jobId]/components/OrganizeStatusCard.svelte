@@ -41,6 +41,7 @@
 		reviewCreditsDisabled = false
 	}: Props = $props();
 
+	const recoveryWarnings = $derived(Array.from(fileStatuses.entries()).filter(([, s]) => s.recovery_warning));
 	const failures = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'failed'));
 	const skippedCount = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'skipped').length);
 	const successes = $derived(Array.from(fileStatuses.values()).filter((s) => s.status === 'success' || s.status === 'replaced'));
@@ -48,6 +49,17 @@
 		fileStatuses.size > 0 ? successes.length : expectedOrganizeFilePaths.length
 	);
 </script>
+
+{#if recoveryWarnings.length > 0}
+	<Card class="p-6 border-orange-500 dark:border-orange-700">
+		{#each recoveryWarnings as [filePath, status]}
+			<div role="status" class="flex items-start gap-2 text-sm text-orange-800 dark:text-orange-300">
+				<CircleAlert class="h-5 w-5 shrink-0" />
+				<div><div class="font-medium">{filePath.split(/[\\/]/).pop()}</div>{status.recovery_warning}</div>
+			</div>
+		{/each}
+	</Card>
+{/if}
 
 {#if organizeStatus === 'organizing'}
 	<Card class="p-6">
@@ -104,7 +116,7 @@
 						{isUpdateMode ? m.review_all_files_updated({ count: successCount }) : m.review_all_files_organized({ count: successCount })}
 						{#if skippedCount > 0}{m.review_video_skipped_count({count:skippedCount})}{/if}
 					</p>
-					<p class="text-xs text-green-700 dark:text-green-400">{m.review_redirecting_browse()}</p>
+					{#if recoveryWarnings.length === 0}<p class="text-xs text-green-700 dark:text-green-400">{m.review_redirecting_browse()}</p>{/if}
 					<div class="mt-4">
 						<Button onclick={onContinue} variant="outline">
 							{#snippet children()}
