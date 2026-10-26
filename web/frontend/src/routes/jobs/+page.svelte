@@ -445,18 +445,18 @@
 											<Button variant="destructive" size="sm" onclick={() => cancelJobMutation.mutate(job.id)} disabled={cancelJobMutation.isPending}>
 													{m.jobs_cancel()}
 											</Button>
-											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}?return=source`)}>
 												<Eye class="h-4 w-4 mr-1" />
 													{m.jobs_view()}
 											</Button>
 										{:else if job.status.toLowerCase() === 'completed'}
 											{#if job.completed > 0}
-												<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
+												<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}?return=source`)}>
 														{m.jobs_review_organize()}
 												</Button>
 											{/if}
 											{#if job.failed > 0}
-												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={m.jobs_view_failed_tooltip()}>
+												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed&return=source`)} title={m.jobs_view_failed_tooltip()}>
 													<Eye class="h-4 w-4 mr-1" />
 													{job.completed > 0 ? m.jobs_review_failed() : m.jobs_view_failed()}
 												</Button>
@@ -483,7 +483,7 @@
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'failed'}
-											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={m.jobs_view_failed_tooltip()}>
+											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed&return=source`)} title={m.jobs_view_failed_tooltip()}>
 												<Eye class="h-4 w-4 mr-1" />
 												{job.completed > 0 ? m.jobs_review() : m.jobs_view_failed()}
 											</Button>

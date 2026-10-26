@@ -5237,6 +5237,9 @@ const docTemplate = `{
                 "apply_plan": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
                 },
+                "browse_source_path": {
+                    "type": "string"
+                },
                 "completed": {
                     "type": "integer"
                 },

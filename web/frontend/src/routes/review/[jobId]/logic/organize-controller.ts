@@ -61,7 +61,7 @@ interface OrganizeControllerDeps {
 	recordApplySuccess?: (filePath: string) => void;
 	clearApplyRecovery?: () => void;
 	onApplyRejected?: () => void;
-	navigateBrowse: () => void;
+	navigateBrowse: (applyGeneration?: number) => void;
 	isCurrentOperation?: (jobId: string, generation: number) => boolean;
 	getRouteGeneration?: () => number;
 	api: {
@@ -204,6 +204,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			return;
 		}
 
+		const completedApplyGeneration = activeApplyGeneration;
 		clearOrganizePollTimer();
 		ignoreWebSocketMessages = true;
 		deps.setOrganizeProgress(100);
@@ -250,7 +251,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 					message || `All files ${action} successfully! Redirecting in 5 seconds...`,
 					8000,
 				);
-				organizeRedirectTimer = setTimeout(() => deps.navigateBrowse(), redirectDelayMs);
+				organizeRedirectTimer = setTimeout(() => deps.navigateBrowse(completedApplyGeneration), redirectDelayMs);
 			}
 		}, completionDelayMs);
 	}

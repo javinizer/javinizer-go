@@ -2,7 +2,7 @@ import { getCreditFailureKind, getCreditGuidance } from '../logic/credit-guidanc
 import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
-import { goto } from '$app/navigation';
+import { beforeNavigate, goto } from '$app/navigation';
 import {
 	VIEW_URL_PARAM,
 	viewModeToUrlParam as sharedViewModeToUrlParam,
@@ -252,11 +252,21 @@ function validRecoveryOptions(value: unknown): boolean {
 	return options.overrides === undefined || validRecoveryOptions(options.overrides);
 }
 
-export function createReviewState(getJobId: () => string) {
+export function createReviewState(getJobId: () => string, returnToJobSource: () => boolean = () => false) {
 	const teardownJobId = getJobId();
 	let jobId = $derived(getJobId());
 	let routeGeneration = 0;
 	let disposed = false;
+	let returnNavigationEpoch = 0;
+	let leavingReview = false;
+	beforeNavigate((navigation) => {
+		// Navigation intent precedes unmount when the destination is still loading.
+		// Same-page tab/view query synchronization must not cancel completion.
+		if (!navigation.to || navigation.to.url.pathname !== navigation.from?.url.pathname) {
+			returnNavigationEpoch += 1;
+			leavingReview = true;
+		}
+	});
 	let operationScope: { jobId: string; generation: number } | null = null;
 	const activeJobId = () => operationScope?.jobId ?? jobId;
 	const activeGeneration = () => operationScope?.generation ?? routeGeneration;
@@ -460,9 +470,9 @@ export function createReviewState(getJobId: () => string) {
 				return;
 			}
 			if (data?.id === jobId) {
-				job = JSON.parse(JSON.stringify(data));
+				acceptJobSnapshot(JSON.parse(JSON.stringify(data)));
 			} else if (isPending && !isPlaceholder) {
-				job = null;
+				acceptJobSnapshot(null);
 			}
 		});
 	});
@@ -589,7 +599,7 @@ export function createReviewState(getJobId: () => string) {
 		for (const [path, result] of Object.entries(job?.results ?? {})) {
 			if (result.status === 'failed' && !result.recovery_warning && result.movie) paths.add(path);
 		}
-		return Array.from(paths).filter((path) => !job?.excluded?.[path] && !job?.results?.[path]?.recovery_warning && !fileStatuses.get(path)?.recovery_warning);
+		return Array.from(paths).filter((path) => !job?.excluded?.[path] && !job?.results?.[path]?.recovery_warning && !fileStatuses.get(path)?.recovery_warning && !currentCommittedWarning(path));
 	}
 	function videoCollisionRequest() {
 		const options =
@@ -753,7 +763,7 @@ export function createReviewState(getJobId: () => string) {
 		const currentJobId = jobId;
 		if (activeApplyJobId === currentJobId) return;
 		untrack(() => {
-			job = null;
+			acceptJobSnapshot(null);
 			destinationPath = '';
 			forceOverwrite = false;
 			preserveNfo = false;
@@ -1098,7 +1108,7 @@ export function createReviewState(getJobId: () => string) {
 		getJob: () => job,
 		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
 			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
-				job = nextJob;
+				acceptJobSnapshot(nextJob);
 		},
 		skipJobSync: () => {
 			skipJobSync = true;
@@ -1273,7 +1283,7 @@ export function createReviewState(getJobId: () => string) {
 
 			if (result.job && jobId === targetJobId) {
 				skipJobSync = true;
-				job = JSON.parse(JSON.stringify(result.job));
+				acceptJobSnapshot(JSON.parse(JSON.stringify(result.job)));
 			}
 
 			void queryClient.invalidateQueries({ queryKey: ['batch-job', targetJobId] });
@@ -1492,7 +1502,7 @@ export function createReviewState(getJobId: () => string) {
 		getJob: () => job,
 		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
 			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
-				job = nextJob;
+				acceptJobSnapshot(nextJob);
 		},
 		getDestinationPath: () => destinationPath,
 		getOrganizeOperation: () => organizeOperation,
@@ -1540,6 +1550,7 @@ export function createReviewState(getJobId: () => string) {
 		toastError: (message, duration) => toastStore.error(message, duration),
 		toastInfo: (message, duration) => toastStore.info(message, duration),
 		recordApplyAccepted: (generation) => {
+			committedWarningViews.clear();
 			if (!currentApplyRecovery || currentApplyRecovery.jobId !== jobId) return;
 			currentApplyRecovery.acceptedApplyGeneration = generation;
 			writeOwnedApplyRecovery(currentApplyRecovery);
@@ -1552,6 +1563,7 @@ export function createReviewState(getJobId: () => string) {
 			}
 		},
 		recordApplySuccess: (filePath) => {
+			rememberCommittedWarnings();
 			const recovery = currentApplyRecovery ?? readApplyRecovery(jobId);
 			if (recovery) {
 				delete recovery.failed[filePath];
@@ -1569,8 +1581,37 @@ export function createReviewState(getJobId: () => string) {
 			if (ownsRecoveryStorage(jobId)) clearApplyRecovery(jobId);
 			recoveryWriteSnapshots.delete(jobId);
 		},
-		navigateBrowse: () => {
-			void goto('/browse');
+		navigateBrowse: async (completedApplyGeneration) => {
+			// Cleanup warnings may arrive after the controller scheduled its timer,
+			// or while source validation awaits I/O. Keep either live or REST warning visible.
+			const hasRecoveryWarning = () => expectedOrganizeFilePaths.some((path) =>
+				!job?.excluded?.[path] && (
+					!!fileStatuses.get(path)?.recovery_warning || !!job?.results?.[path]?.recovery_warning || !!currentCommittedWarning(path)
+				),
+			);
+			if (leavingReview || disposed || completedApplyGeneration === undefined ||
+				job?.apply_generation !== completedApplyGeneration || hasRecoveryWarning()) return;
+			// Only successful automatic completion from Jobs requests this job's
+			// source. Validate at return time, never by doing filesystem I/O on polls.
+			const targetJobId = jobId;
+			const targetGeneration = routeGeneration;
+			const targetApplyGeneration = completedApplyGeneration;
+			const targetNavigationEpoch = returnNavigationEpoch;
+			let source = returnToJobSource() && job?.id === targetJobId ? job.browse_source_path : undefined;
+			if (source) {
+				try {
+					const listing = await apiClient.browse({ path: source, scope: 'operation' }, { timeoutMs: 5000 });
+					source = listing.current_path || undefined;
+				} catch {
+					// Missing/moved, inaccessible, or legacy sources retain last Browse.
+					source = undefined;
+				}
+			}
+			// The user may leave Review or switch jobs while validation is in flight.
+			if (disposed || jobId !== targetJobId || routeGeneration !== targetGeneration ||
+				returnNavigationEpoch !== targetNavigationEpoch || job?.apply_generation !== targetApplyGeneration || organizing || organizeStatus !== 'completed' || hasRecoveryWarning()) return;
+			if (source) void goto('/browse', { state: { browseReturnPath: source } });
+			else void goto('/browse');
 		},
 		isCurrentOperation: (candidateJobId, candidateGeneration) =>
 			candidateJobId === jobId && candidateGeneration === routeGeneration,
@@ -1582,6 +1623,50 @@ export function createReviewState(getJobId: () => string) {
 		},
 	});
 
+	// View-only committed warnings are sticky within their admitted operation.
+	// A same-generation warningless/Failed snapshot is not a cleanup receipt.
+	const committedWarningViews = new SvelteMap<string, { generation: number; warning: string }>();
+	function rememberCommittedWarnings() {
+		const generation = organizeController.retryOptions?.acceptedApplyGeneration;
+		if (generation === undefined || job?.id !== jobId || job.apply_generation !== generation) return;
+		for (const path of expectedOrganizeFilePaths) {
+			if (job.excluded?.[path]) continue;
+			// A running N+1 snapshot can still contain N's unprocessed result.
+			// Only terminal REST reconciliation or validated live success proves publication.
+			const terminal = ['completed', 'organized', 'reverted', 'failed', 'cancelled'].includes(job.status);
+			const warning = fileStatuses.get(path)?.recovery_warning || (terminal ? job.results?.[path]?.recovery_warning : undefined);
+			if (!warning) continue;
+			const previous = committedWarningViews.get(path);
+			if (previous?.generation !== generation || previous.warning !== warning) {
+				committedWarningViews.set(path, { generation, warning });
+			}
+		}
+	}
+	function acceptJobSnapshot(nextJob: BatchJobResponse | null) {
+		job = nextJob;
+		// Capture positive evidence at validated state ingress, even if another
+		// same-generation snapshot replaces it before a render/effect flush.
+		rememberCommittedWarnings();
+	}
+	$effect(() => {
+		const jobGeneration = job?.apply_generation;
+		const paths = expectedOrganizeFilePaths;
+		const generation = organizeController.retryOptions?.acceptedApplyGeneration;
+		untrack(() => {
+			for (const [path, previous] of committedWarningViews) {
+				if (!paths.includes(path) || (generation !== undefined && previous.generation !== generation) ||
+					(jobGeneration !== undefined && jobGeneration > previous.generation)) committedWarningViews.delete(path);
+			}
+		});
+	});
+	function currentCommittedWarning(path: string): string | undefined {
+		const observation = committedWarningViews.get(path);
+		const generation = organizeController.retryOptions?.acceptedApplyGeneration;
+		return generation !== undefined && observation?.generation === generation && job?.id === jobId &&
+			job?.apply_generation === generation && expectedOrganizeFilePaths.includes(path) && !job?.excluded?.[path]
+			? observation.warning : undefined;
+	}
+
 	const rescrapeController = createRescrapeController({
 		getJobId: activeJobId,
 		isCurrentOperation: (candidateJobId, candidateGeneration) =>
@@ -1591,7 +1676,7 @@ export function createReviewState(getJobId: () => string) {
 		getJob: () => job,
 		setJob: (nextJob, expectedJobId = nextJob.id, expectedGeneration = routeGeneration) => {
 			if (expectedJobId === jobId && expectedGeneration === routeGeneration && nextJob.id === jobId)
-				job = nextJob;
+				acceptJobSnapshot(nextJob);
 		},
 		getEditedMovies: () => editedMovies,
 		getAvailableScrapers: () => availableScrapers,
@@ -1997,6 +2082,8 @@ export function createReviewState(getJobId: () => string) {
 		if (lastRouteJobId === currentJobId) return;
 		const previousJobId = lastRouteJobId;
 		lastRouteJobId = currentJobId;
+		leavingReview = false;
+		committedWarningViews.clear();
 		if (previousJobId) cancelJobDetailQuery(previousJobId);
 		routeGeneration += 1;
 		pendingMovieSave = null;
@@ -2024,7 +2111,7 @@ export function createReviewState(getJobId: () => string) {
 
 		untrack(() => {
 			skipJobSync = false;
-			job = null;
+			acceptJobSnapshot(null);
 			currentMovieIndex = 0;
 			selection.reset();
 			organizing = false;
@@ -2440,7 +2527,7 @@ export function createReviewState(getJobId: () => string) {
 				return;
 			collisionRefreshError = null;
 			skipJobSync = true;
-			job = nextJob;
+			acceptJobSnapshot(nextJob);
 		} catch (error) {
 			if (
 				jobId !== targetJobId ||
@@ -2599,7 +2686,16 @@ export function createReviewState(getJobId: () => string) {
 			return creditGuidanceRequest;
 		},
 		get displayedFileStatuses() {
-			return fileStatuses.size > 0 ? fileStatuses : recoveredApplyStatuses;
+			if (fileStatuses.size === 0) return organizing ? fileStatuses : recoveredApplyStatuses;
+			let displayed: Map<string, FileStatus> | undefined;
+			for (const path of expectedOrganizeFilePaths) {
+				const warning = currentCommittedWarning(path);
+				if (!warning) continue;
+				const live = fileStatuses.get(path);
+				displayed ??= new Map(fileStatuses);
+				displayed.set(path, { status: live?.status === 'replaced' ? 'replaced' : 'success', recovery_warning: warning });
+			}
+			return displayed ?? fileStatuses;
 		},
 		get fileStatuses() {
 			return fileStatuses;

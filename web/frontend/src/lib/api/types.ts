@@ -489,6 +489,8 @@ export interface FileResult {
 }
 
 export interface BatchJobResponse {
+	/** Unambiguous original source directory; validate availability when returning. */
+	browse_source_path?: string;
 	id: string;
 	status: string;
 	total_files: number;

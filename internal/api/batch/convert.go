@@ -21,6 +21,7 @@ type batchJobBaseResponse struct {
 	Excluded              map[string]bool
 	Progress              float64
 	Destination           string
+	BrowseSourcePath      string
 	StartedAt             string
 	CompletedAt           *string
 	OperationModeOverride operationmode.OperationMode
@@ -43,6 +44,7 @@ func toBaseResponse(job *worker.BatchJobStatus) batchJobBaseResponse {
 		Excluded:              job.Excluded,
 		Progress:              job.Progress,
 		Destination:           job.Destination,
+		BrowseSourcePath:      batchBrowseSourcePath(job.Files, job.TotalFiles),
 		StartedAt:             contracts.FormatTime(job.StartedAt),
 		CompletedAt:           contracts.FormatTimePtr(job.CompletedAt),
 		OperationModeOverride: job.OperationModeOverride,
@@ -140,6 +142,7 @@ func buildBatchJobResponse(job *worker.BatchJobStatus) *contracts.BatchJobRespon
 		Excluded:              base.Excluded,
 		Progress:              base.Progress,
 		Destination:           base.Destination,
+		BrowseSourcePath:      base.BrowseSourcePath,
 		Files:                 job.Files,
 		Results:               results,
 		StartedAt:             base.StartedAt,
@@ -175,6 +178,7 @@ func buildBatchJobSlimResponse(job *worker.BatchJobStatus) *contracts.BatchJobRe
 		Excluded:              base.Excluded,
 		Progress:              base.Progress,
 		Destination:           base.Destination,
+		BrowseSourcePath:      base.BrowseSourcePath,
 		Results:               results,
 		StartedAt:             base.StartedAt,
 		CompletedAt:           base.CompletedAt,
