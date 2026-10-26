@@ -353,6 +353,9 @@ func videoContainerCollision(fs afero.Fs, plan *organizer.OrganizePlan, source, 
 }
 
 func inspectMultipartVideoCollisions(ctx context.Context, fs afero.Fs, source, target, scope string, selected map[string]bool) ([]videocollision.Collision, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := afero.ReadDir(fs, filepath.Dir(source))
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -362,6 +365,9 @@ func inspectMultipartVideoCollisions(ctx context.Context, fs afero.Fs, source, t
 	}
 	var collisions []videocollision.Collision
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if entry.IsDir() || entry.Name() == filepath.Base(source) || !isStagedArtifactVideoSibling(filepath.Base(source), entry.Name()) {
 			continue
 		}
@@ -392,6 +398,9 @@ func inspectMultipartVideoCollisions(ctx context.Context, fs afero.Fs, source, t
 			}
 		}
 		collisions = append(collisions, *collision)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return collisions, nil
 }

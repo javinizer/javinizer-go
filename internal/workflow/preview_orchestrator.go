@@ -138,23 +138,59 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 	encodingInfo := organizer.DetectPathEncodingInfo(sourcePath, destination)
 
 	preview := runner.executePreview(ctx, movie, fileResults, destination, operationMode, skipNFO, skipDownload, sharedEngine, strategy, encodingInfo)
+	// A canceled planning phase returns an empty preview, not permission to start
+	// another planning pass for collision inspection.
+	select {
+	case <-ctx.Done():
+		return &PreviewResult{OperationMode: operationMode}, nil
+	default:
+	}
 	if operationMode.RequiresOrganize() {
 		for _, match := range fileResults {
-			if _, err := lstatArtifactSource(o.fs, match.Path); os.IsNotExist(err) {
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
+			}
+			_, sourceErr := lstatArtifactSource(o.fs, match.Path)
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
+			}
+			if os.IsNotExist(sourceErr) {
 				continue
 			}
 			plan, err := strategy.Plan(match, movie, destination, false)
+			// Plan does not accept a context. Let an in-flight call finish, but
+			// do not inspect its result or the filesystem after cancellation.
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
+			}
 			if err != nil {
 				return nil, err
 			}
 			encoded := plan.EncodePaths(encodingInfo)
-			if collision := videoContainerCollision(o.fs, plan, match.Path, encoded.TargetPath); collision != nil {
-				preview.VideoCollisions = append(preview.VideoCollisions, *collision)
+			containerCollision := videoContainerCollision(o.fs, plan, match.Path, encoded.TargetPath)
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
+			}
+			if containerCollision != nil {
+				preview.VideoCollisions = append(preview.VideoCollisions, *containerCollision)
 				continue
 			}
 			collision, err := inspectVideoCollision(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan))
 			if err != nil {
 				return nil, err
+			}
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
 			}
 			if collision != nil {
 				preview.VideoCollisions = append(preview.VideoCollisions, *collision)
@@ -162,6 +198,11 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 			siblings, err := inspectMultipartVideoCollisions(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan), cmd.VideoCollisionSelectedSources)
 			if err != nil {
 				return nil, err
+			}
+			select {
+			case <-ctx.Done():
+				return &PreviewResult{OperationMode: operationMode}, nil
+			default:
 			}
 			preview.VideoCollisions = append(preview.VideoCollisions, siblings...)
 		}
