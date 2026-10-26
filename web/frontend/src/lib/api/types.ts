@@ -461,6 +461,7 @@ export type FileResultErrorCode =
 	| 'credit_status_unavailable';
 
 export interface FileResult {
+	recovery_warning?: string;
 	video_collision?: { code: string; collision: VideoCollision };
 	video_outcome?: 'installed' | 'replaced' | 'skipped' | 'same-file';
 	result_id: string;
@@ -488,6 +489,8 @@ export interface FileResult {
 }
 
 export interface BatchJobResponse {
+	/** Unambiguous original source directory; validate availability when returning. */
+	browse_source_path?: string;
 	id: string;
 	status: string;
 	total_files: number;
@@ -513,6 +516,7 @@ export interface BatchJobResponse {
 }
 
 export interface ProgressMessage {
+	recovery_warning?: string;
 	job_id: string;
 	file_index: number;
 	file_path: string;

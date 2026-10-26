@@ -2008,7 +2008,7 @@
   "settings_file_matching_regex_enable": "啟用自訂正規表示式",
   "settings_file_matching_regex_label": "正規表示式",
   "settings_file_matching_title": "檔案比對設定",
-  "settings_file_ops_allow_revert_desc": "啟用還原功能以復原整理操作並將檔案還原至原始位置。停用時隱藏還原按鈕並封鎖還原 API 呼叫。",
+  "settings_file_ops_allow_revert_desc": "預設停用。在開始操作前啟用可保留原始檔案備份以供復原。停用時，成功完成的操作會清理其擁有的交易備份；操作或清理失敗時可能保留復原資料。變更僅適用於新操作，不影響歷史備份。",
   "settings_file_ops_allow_revert_label": "允許還原",
   "settings_file_ops_desc": "控制 Javinizer 如何整理與移動您的檔案",
   "settings_file_ops_mode_desc": "選擇操作時檔案的整理方式",

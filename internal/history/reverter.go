@@ -1487,6 +1487,9 @@ func admitOperationUndo(ctx context.Context, repo database.BatchFileOperationRep
 		if err != nil {
 			return models.GeneratedFilesJSON{}, false, err
 		}
+		if ledger.SuccessfulUndoDisabled() {
+			return models.GeneratedFilesJSON{}, false, fmt.Errorf("undo was disabled when this operation started; successful output cannot be reverted")
+		}
 		if ledger.PublicationPending {
 			return models.GeneratedFilesJSON{}, false, fmt.Errorf("resident publication reconciliation is pending; manual recovery required")
 		}

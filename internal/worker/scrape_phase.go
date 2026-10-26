@@ -553,6 +553,7 @@ func persistScrapeOutcomes(ctx context.Context, ch <-chan scrapeFileOutcome, inp
 					logging.Errorf("persistScrapeOutcome panic recovered: %v", r)
 					recorded[o.FilePath] = true
 					_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+						current.RecoveryWarning = ""
 						current.Status = models.JobStatusFailed
 						current.Error = fmt.Sprintf("persist panic: %v", r)
 						return current, nil
@@ -610,6 +611,7 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
 		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+			current.RecoveryWarning = ""
 			current.Status = models.JobStatusFailed
 			current.Error = fmt.Sprintf("persist failed: %v", err)
 			return current, nil

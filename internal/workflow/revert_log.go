@@ -13,6 +13,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/nfo"
@@ -41,7 +42,8 @@ type OperationID = string
 // RevertLog is the seam for revert-history lifecycle.
 // Per CONTEXT.md: Begin is called before Apply mutates the filesystem (crash-safety guarantee).
 // Complete is called after Apply succeeds (records the outcome for undo).
-// Disabled by default — enabled via config.Output.AllowRevert.
+// Recovery recording is always active when configured; persistent Undo backup
+// retention is opt-in via output.allow_revert.
 //
 // Begin writes a database record with movie ID, original path, and operation
 // type — no filesystem access. CaptureSnapshot reads the NFO and updates the record.
@@ -368,7 +370,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 		return newRaw
 	}
 	prior, err := models.ParseGeneratedFiles(priorRaw)
-	if err != nil || (prior.ApplyTerminal == nil && !prior.UndoStarted && !prior.PublicationPending && prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
+	if err != nil || (prior.UndoRetention == nil && prior.ApplyTerminal == nil && !prior.UndoStarted && !prior.PublicationPending && prior.DirectoryMove == nil && !prior.PrimaryResident && prior.PrimaryUndo == nil && len(prior.Replacements) == 0 && len(prior.Roots) == 0 && len(prior.MoveBack) == 0 && len(prior.Delete) == 0 && len(prior.PlannedDeletes) == 0) {
 		return newRaw
 	}
 	if newRaw == "" {
@@ -391,12 +393,13 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 			}
 			retained = kept
 		}
-		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{ApplyTerminal: prior.ApplyTerminal, UndoStarted: prior.UndoStarted, PublicationPending: prior.PublicationPending, DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{UndoRetention: prior.UndoRetention, ApplyTerminal: prior.ApplyTerminal, UndoStarted: prior.UndoStarted, PublicationPending: prior.PublicationPending, DirectoryMove: prior.DirectoryMove, PrimaryUndo: prior.PrimaryUndo, PrimaryResident: prior.PrimaryResident, Replacements: prior.Replacements, Roots: prior.Roots, MoveBack: prior.MoveBack, Delete: prior.Delete, PlannedDeletes: retained})
 	}
 	fresh, err := models.ParseGeneratedFiles(newRaw)
 	if err != nil {
 		return newRaw
 	}
+	fresh.UndoRetention = prior.UndoRetention
 	fresh.ApplyTerminal = prior.ApplyTerminal
 	fresh.UndoStarted = fresh.UndoStarted || prior.UndoStarted
 	fresh.PublicationPending = fresh.PublicationPending || prior.PublicationPending
@@ -678,10 +681,12 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 	// Seed the discovery root NOW, pre-mutation: the row must name where
 	// downloads will land even if the process dies before any journal entry
 	// exists (codex P3 R3-3 — the pre-journal crash window).
-	seed, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{cmd.DestPath}})
-	if cmd.DestPath == "" {
-		seed = nil
+	retainUndo := l.cfg == nil || l.cfg.AllowRevert
+	seedLedger := models.GeneratedFilesJSON{UndoRetention: &retainUndo}
+	if cmd.DestPath != "" {
+		seedLedger.Roots = []string{cmd.DestPath}
 	}
+	seed, _ := json.Marshal(seedLedger)
 	preRecord := newPreOrganizeRecord(
 		l.jobID, cmd.Movie.ID, cmd.Match.Path,
 		"", "", sourceDir, // no snapshot yet
@@ -990,6 +995,30 @@ func noopJournal(result *ApplyResult) bool {
 
 // ctx is accepted for future use when repository methods support context propagation
 func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *ApplyResult) error {
+	if err := l.complete(ctx, opID, result); err != nil {
+		return err
+	}
+	// Only the final checkpoint, outside the publication fence, may discard
+	// transaction backups. Intermediate Complete calls must remain reversible.
+	if result == nil || !result.PublicationFinalized || opID == "" {
+		return nil
+	}
+	id, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || id == 0 {
+		//nolint:nilerr // Match complete: non-database operation IDs have no journal backups to clean.
+		return nil
+	}
+	if err := history.NewReplacementSweeper(l.fs, l.repo).CleanupSuccessfulOperation(ctx, uint(id)); err != nil {
+		return fmt.Errorf("%w: %w", ErrBackupCleanupPending, err)
+	}
+	return nil
+}
+
+// ErrBackupCleanupPending means publication committed but an owned recovery
+// artifact could not yet be removed. The ledger is retained for startup retry.
+var ErrBackupCleanupPending = errors.New("operation succeeded; transaction backup cleanup pending")
+
+func (l *dbRevertLog) complete(ctx context.Context, opID OperationID, result *ApplyResult) error {
 	if opID == "" {
 		return nil
 	}
@@ -1480,7 +1509,8 @@ func nextDestSequence(ctx context.Context, repo database.BatchFileOperationRepos
 // Operation recording is independent of the AllowRevert toggle: BatchFileOperation
 // records are always persisted (when a repository is available) so that the
 // operations list and per-file history remain visible even when revert is not
-// opted in. config.Output.Operation.AllowRevert gates only the revert *action*,
+// opted in. The captured AllowRevert policy also controls successful backup
+// retention; failed/incomplete operations retain durable recovery. The setting gates the revert *action*,
 // which is enforced separately by the revert/revert-check HTTP handlers (they
 // return 403 when AllowRevert is false).
 //

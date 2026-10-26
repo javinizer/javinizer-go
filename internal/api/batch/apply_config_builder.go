@@ -280,6 +280,7 @@ func wireApplyProgressCallbacks(applyOpts *worker.ApplyPhaseConfig, job worker.B
 	applyOpts.OnFileProgress = makeOrganizeProgressBroadcaster(job, isUpdate, sink, generationRef)
 	applyOpts.OnFileOrganizeStart = makeOrganizeFileStartBroadcaster(job, isUpdate, sink, generationRef)
 	applyOpts.OnFileOrganized = makeOrganizeFileOrganizedBroadcaster(job, isUpdate, sink, generationRef)
+	applyOpts.OnFileRecoveryWarning = makeOrganizeFileRecoveryWarningBroadcaster(job, isUpdate, sink, generationRef)
 	applyOpts.OnFileFailed = makeOrganizeFileFailedBroadcaster(job, isUpdate, sink, generationRef)
 	return generationRef
 }
@@ -378,16 +379,21 @@ func makeOrganizeFileOrganizedBroadcaster(job worker.BatchJobInterface, isUpdate
 	}
 	return func(filePath string) {
 		fileStatus := status
+		recoveryWarning := ""
 		if snapshot := job.GetStatus(); snapshot != nil {
-			if result := snapshot.Results[filePath]; result != nil && result.VideoOutcome == "replaced" {
-				fileStatus = websocket.ProgressStatus("replaced")
+			if result := snapshot.Results[filePath]; result != nil {
+				recoveryWarning = result.RecoveryWarning
+				if result.VideoOutcome == "replaced" {
+					fileStatus = websocket.ProgressStatus("replaced")
+				}
 			}
 		}
 		sink(stampJobCountsForApply(&websocket.ProgressMessage{
-			JobID:    job.GetID(),
-			FilePath: filePath,
-			Status:   fileStatus,
-			Progress: 100,
+			JobID:           job.GetID(),
+			FilePath:        filePath,
+			Status:          fileStatus,
+			RecoveryWarning: recoveryWarning,
+			Progress:        100,
 		}, job, generationRef...))
 	}
 }

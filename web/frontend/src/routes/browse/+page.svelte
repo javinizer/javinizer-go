@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+	import { page } from '$app/stores';
 	import { MediaQuery } from 'svelte/reactivity';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 	import { flip } from 'svelte/animate';
@@ -16,7 +17,7 @@
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import { startJob } from '$lib/stores/background-job.svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import {
 		setPendingScrape,
 		clearPendingScrape,
@@ -40,6 +41,14 @@
 		}
 		return null;
 	});
+	// A completed Jobs review hands off a server-resolved source exactly once.
+	// Do not mutate global storage until FileBrowser successfully lists it.
+	const returnPath = untrack(() => $page.state?.browseReturnPath || '');
+	onMount(() => {
+		if (!returnPath) return;
+		const { browseReturnPath: _consumed, ...state } = $page.state;
+		replaceState($page.url, state);
+	});
 	const serverInitialPath = untrack(() => data.initialPath ?? '');
 	const serverInitialBrowse = untrack(() => data.initialBrowse ?? null);
 	let bootstrappedPlan: BatchApplyPlan | null = null;
@@ -56,13 +65,13 @@
 	let recursiveScan = $state(false);
 	let selectedFolders: string[] = $state([]);
 	let triggerScan = $state(0);
-	let initialPath = $state(serverInitialBrowse?.current_path || serverInitialPath || browseBootstrap?.initialPath || '');
+	let initialPath = $state(returnPath || serverInitialBrowse?.current_path || serverInitialPath || browseBootstrap?.initialPath || '');
 	let destinationPath = $state(browseBootstrap?.destinationPath ?? '');
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let currentBrowserPath = $state('');
 	let browserReset = $state(0);
-	let activeInitialBrowse = $derived(browserReset === 0 ? serverInitialBrowse : null);
+	let activeInitialBrowse = $derived(!returnPath && browserReset === 0 ? serverInitialBrowse : null);
 	const configQuery = createConfigQuery();
 	const scrapersQuery = createScrapersQuery();
 	const queryClient = useQueryClient();
@@ -96,7 +105,7 @@
 		if (pathInitialized) return;
 		const savedInputPath = readStoredPath(STORAGE_KEY_INPUT);
 		const cwd = cwdQuery.data?.path;
-		if (serverInitialBrowse?.current_path) {
+		if (!returnPath && serverInitialBrowse?.current_path) {
 			// A server snapshot is already a successful, canonical browse.
 			currentBrowserPath = serverInitialBrowse.current_path;
 			saveStoredPath(STORAGE_KEY_INPUT, currentBrowserPath);
@@ -104,7 +113,7 @@
 		// Layout bootstrap data survives client-side navigation. Restore the live
 		// saved path before mounting FileBrowser, not after its first request.
 		// An actual server browse snapshot stays authoritative for hydration.
-		if (!serverInitialBrowse && !serverInitialPath) {
+		if (!returnPath && !serverInitialBrowse && !serverInitialPath) {
 			initialPath = savedInputPath || initialPath || cwd || '';
 		}
 		// Restore destination from localStorage even when cwdQuery is disabled

@@ -4,11 +4,13 @@
 	let {
 		jobId,
 		capture,
+		fromJobs = false,
 	}: {
 		jobId: string;
+		fromJobs?: boolean;
 		capture: (value: ReturnType<typeof createReviewState>) => void;
 	} = $props();
-	const state = createReviewState(() => jobId);
+	const state = createReviewState(() => jobId, () => fromJobs);
 	untrack(() => capture(state));
 </script>
 <div>{state.job?.id ?? 'loading'}</div>

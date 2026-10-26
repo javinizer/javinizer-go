@@ -386,6 +386,8 @@ func TestResidentPublicationTerminalWrites(t *testing.T) {
 				require.FileExists(t, env.subtitle)
 			} else {
 				require.Equal(t, "revert_log_finalization", result.FailedStep)
+				require.False(t, result.PublicationFinalized)
+				require.True(t, log.saved.PublicationFinalized, "submitted checkpoint remains intact for exact retry")
 				require.True(t, ledger.PublicationPending)
 				fs := &publicationNoMutationFS{Fs: env.fs}
 				refused, e := history.NewReverter(fs, env.repo).RevertBatch(t.Context(), env.jobID)

@@ -731,6 +731,17 @@ output:
   download_actress: false
 ```
 
+### Undo and transaction backups
+
+```yaml
+output:
+  allow_revert: false  # Default: Undo is opt-in
+```
+
+Enable **Allow Revert** before starting operations you want to undo. Each operation records this setting when it starts. When enabled, Javinizer retains displaced originals as journaled backups (such as `.nfo.dlbak.…`) for Undo. When disabled, successfully completed operations clean up their owned transaction backups instead of keeping persistent Undo data.
+
+Temporary backups may still be needed while an update is in progress. Failed or interrupted operations, and cleanup failures, retain recovery data until it can be handled safely. Changing this setting does not delete historical backups, change an in-progress operation's recorded policy, or recreate Undo data for operations that completed with Undo disabled. Do not delete files merely because their names contain `.dlbak`; a retained file may be needed for recovery.
+
 ### Naming Templates
 
 **folder_format**: Template for folder names. Example result (title abbreviated — IPX-535's actual title is much longer, and special characters are sanitized for filesystem compatibility):

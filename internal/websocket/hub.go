@@ -23,6 +23,7 @@ import (
 // file. The omitempty keeps the wire compact for older/tests paths that don't
 // stamp them.
 type ProgressMessage struct {
+	RecoveryWarning string         `json:"recovery_warning,omitempty"`
 	JobID           string         `json:"job_id"`
 	FileIndex       int            `json:"file_index"`
 	FilePath        string         `json:"file_path"`
