@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll, beforeAll } from 'vitest';
 import { cleanup, render, fireEvent, waitFor, within } from '@testing-library/svelte';
-import { QueryClient } from '@tanstack/svelte-query';
+import { tick } from 'svelte';
+import { QueryClient, notifyManager } from '@tanstack/svelte-query';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import BrowsePage from './+page.svelte';
 import { goto as mockGoto } from '$app/navigation';
@@ -725,4 +726,111 @@ it('diagnostic: failed input-path writes leave stale local storage authoritative
 	// This is the currently observed defect, NOT the desired behavior.
 	await waitFor(() => expect(apiClient.browse).toHaveBeenCalledExactlyOnceWith({ path: '/old', scope: 'operation' }));
 	expect(after.getByDisplayValue('/old')).toBeTruthy();
+});
+
+
+it.each(['before leaving Browse', 'after returning from Review'])(
+	'does not let a held old listing overwrite source storage %s', async (releasePoint) => {
+		let releaseOld!: (value: ReturnType<typeof mockBrowseResponse>) => void;
+		const oldListing = new Promise<ReturnType<typeof mockBrowseResponse>>((resolve) => { releaseOld = resolve; });
+		try {
+			const data = { browseBootstrap: { version: 1, applyPlan: null, initialPath: '/old', destinationPath: '/output', forceRefresh: false, showScraperSelector: false, selectedScrapers: [], manualScrapeMode: false, planExpanded: true } };
+			apiClient.browse.mockImplementation(({ path }) => path === '/old' ? oldListing as never : Promise.resolve(mockBrowseResponse(path)) as never);
+			const first = renderPage({ data });
+			await waitFor(() => expect(apiClient.browse).toHaveBeenCalledWith({ path: '/old', scope: 'operation' }));
+			const input = first.getByPlaceholderText('Enter path (e.g., /path/to/videos)');
+			await fireEvent.input(input, { target: { value: '/new' } });
+			await fireEvent.keyDown(input, { key: 'Enter' });
+			await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/new'));
+			if (releasePoint === 'before leaving Browse') {
+				releaseOld(mockBrowseResponse('/old'));
+				await oldListing;
+				await tick();
+				expect(first.getByDisplayValue('/new')).toBeTruthy();
+			}
+			// This explicit unmount models leaving Browse; the static test owns
+			// real SvelteKit navigation proof. Retain the query client/layout seed.
+			await first.unmount();
+			const returned = renderPage({ data });
+			await returned.findByRole('button', { name: /a.mp4/ });
+			expect(apiClient.browse.mock.calls.filter(([request]) => request.path === '/new')).toHaveLength(2);
+			await waitFor(() => expect(returned.getByDisplayValue('/new')).toBeTruthy());
+			if (releasePoint === 'after returning from Review') {
+				releaseOld(mockBrowseResponse('/old'));
+				await oldListing;
+				await tick();
+			}
+			expect(localStorage.getItem('javinizer_input_path')).toBe('/new');
+			expect(returned.getByDisplayValue('/new')).toBeTruthy();
+			const raw = document.cookie.split('; ').find((value) => value.startsWith('javinizer_browse_bootstrap='))?.split('=')[1];
+			expect(raw && decodeBrowseBootstrap(raw)?.initialPath).toBe('/new');
+		} finally {
+			releaseOld(mockBrowseResponse('/old'));
+			await oldListing;
+			await tick();
+		}
+	});
+
+it('does not let an older shared CWD query replace the latest source on return', async () => {
+	let releaseCwd!: (value: { path: string }) => void;
+	const oldCwd = new Promise<{ path: string }>((resolve) => { releaseCwd = resolve; });
+	// The root QueryClient can retain a dashboard/CWD request while leaves change.
+	const request = client.fetchQuery({ queryKey: ['cwd'], queryFn: () => oldCwd });
+	try {
+		localStorage.setItem('javinizer_input_path', '/new');
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const first = renderPage();
+		await waitFor(() => expect((first.getByPlaceholderText('Enter path (e.g., /path/to/videos)') as HTMLInputElement).value).toBe('/new'));
+		await first.unmount();
+		const returned = renderPage();
+		await returned.findByRole('button', { name: /a.mp4/ });
+		await waitFor(() => expect((returned.getByPlaceholderText('Enter path (e.g., /path/to/videos)') as HTMLInputElement).value).toBe('/new'));
+		releaseCwd({ path: '/old' });
+		await request;
+		// Queue a barrier behind TanStack's scheduled observer notifications.
+		await new Promise<void>((resolve) => notifyManager.schedule(resolve));
+		await tick();
+		expect(client.getQueryData(['cwd'])).toEqual({ path: '/old' });
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/new');
+		expect((returned.getByPlaceholderText('Enter path (e.g., /path/to/videos)') as HTMLInputElement).value).toBe('/new');
+		expect(apiClient.browse.mock.calls.map(([request]) => request.path)).toEqual(['/new', '/new']);
+	} finally {
+		releaseCwd({ path: '/old' });
+		await request.catch(() => {});
+	}
+});
+
+it('does not let an unsuperseded refresh from an unmounted browser overwrite the returned source', async () => {
+	let releaseRefresh!: (value: ReturnType<typeof mockBrowseResponse>) => void;
+	const heldRefresh = new Promise<ReturnType<typeof mockBrowseResponse>>((resolve) => { releaseRefresh = resolve; });
+	let oldRequests = 0;
+	localStorage.setItem('javinizer_input_path', '/old');
+	localStorage.setItem('javinizer_output_path', '/output');
+	apiClient.browse.mockImplementation(({ path }) => {
+		if (path === '/old' && ++oldRequests === 2) return heldRefresh as never;
+		return Promise.resolve(mockBrowseResponse(path)) as never;
+	});
+	try {
+		const first = renderPage();
+		await first.findByRole('button', { name: /a.mp4/ });
+		await fireEvent.click(first.getByTitle('Refresh'));
+		await waitFor(() => expect(oldRequests).toBe(2));
+		// No newer request exists on this instance: only destruction fences it.
+		await first.unmount();
+		const returned = renderPage();
+		await returned.findByRole('button', { name: /a.mp4/ });
+		const input = returned.getByPlaceholderText('Enter path (e.g., /path/to/videos)');
+		await fireEvent.input(input, { target: { value: '/new' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/new'));
+		releaseRefresh(mockBrowseResponse('/old'));
+		await heldRefresh;
+		await tick();
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/new');
+		expect((input as HTMLInputElement).value).toBe('/new');
+	} finally {
+		releaseRefresh(mockBrowseResponse('/old'));
+		await heldRefresh;
+		await tick();
+	}
 });
