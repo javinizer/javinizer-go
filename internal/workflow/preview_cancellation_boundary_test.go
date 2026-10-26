@@ -128,7 +128,7 @@ func TestPreviewCancellationStopsCollisionPlanning(t *testing.T) {
 		operationmode.OperationModeInPlaceNoRenameFolder,
 	} {
 		t.Run(string(mode), func(t *testing.T) {
-			for _, phase := range []string{"active", "nil-context", "before-preview", "resolver", "first-plan", "collision-plan", "before-collision-loop", "next-collision", "last-missing-source", "source-stat", "primary-inspection", "multipart-directory"} {
+			for _, phase := range []string{"active", "nil-context", "before-preview", "resolver", "first-plan", "collision-plan", "before-collision-loop", "next-collision", "last-missing-source", "source-stat", "primary-inspection", "primary-inspection-error", "multipart-directory", "multipart-read-error", "multipart-read", "multipart-sibling"} {
 				t.Run(phase, func(t *testing.T) {
 					ctx, cancel := context.WithCancel(t.Context())
 					defer cancel()
@@ -176,7 +176,7 @@ func TestPreviewCancellationStopsCollisionPlanning(t *testing.T) {
 							}
 							return nil
 						}
-					case "primary-inspection":
+					case "primary-inspection", "primary-inspection-error":
 						wantCalls = 4
 						target := filepath.Join(root, "output", "TEST-001", "TEST-001.mp4")
 						if mode != operationmode.OperationModeOrganize {
@@ -185,16 +185,42 @@ func TestPreviewCancellationStopsCollisionPlanning(t *testing.T) {
 						fs.beforeLstat = func(path string) error {
 							if !strategy.inPlan && strategy.calls == 4 && path == target {
 								cancel()
+								if phase == "primary-inspection-error" {
+									return os.ErrPermission
+								}
 								return os.ErrNotExist
 							}
 							return nil
 						}
-					case "multipart-directory":
+					case "multipart-directory", "multipart-read-error":
 						wantCalls = 4
 						fs.beforeOpen = func(path string) error {
 							if !strategy.inPlan && strategy.calls == 4 && path == filepath.Dir(files[0].Path) {
 								cancel()
+								if phase == "multipart-read-error" {
+									return os.ErrPermission
+								}
 								return os.ErrNotExist
+							}
+							return nil
+						}
+					case "multipart-read":
+						wantCalls = 4
+						fs.afterReadDir = cancel
+					case "multipart-sibling":
+						wantCalls = 4
+						target := filepath.Join(root, "output", "TEST-001", "TEST-001-cd2.mp4")
+						if mode != operationmode.OperationModeOrganize {
+							target = filepath.Join(filepath.Dir(files[0].Path), "TEST-001-cd2.mp4")
+						}
+						inspections := 0
+						fs.beforeLstat = func(path string) error {
+							if !strategy.inPlan && strategy.calls == 4 && path == target {
+								inspections++
+								if inspections == 2 {
+									cancel()
+									return os.ErrNotExist
+								}
 							}
 							return nil
 						}

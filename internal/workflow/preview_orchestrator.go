@@ -184,25 +184,25 @@ func (o *previewOrchImpl) Execute(ctx context.Context, cmd PreviewCmd) (*Preview
 				continue
 			}
 			collision, err := inspectVideoCollision(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan))
-			if err != nil {
-				return nil, err
-			}
 			select {
 			case <-ctx.Done():
 				return &PreviewResult{OperationMode: operationMode}, nil
 			default:
+			}
+			if err != nil {
+				return nil, err
 			}
 			if collision != nil {
 				preview.VideoCollisions = append(preview.VideoCollisions, *collision)
 			}
 			siblings, err := inspectMultipartVideoCollisions(ctx, o.fs, match.Path, encoded.TargetPath, videoReviewScope(cmd.VideoCollisionScope, movie.RenderGeneration, cmd.VideoCollisionGeneration, plan), cmd.VideoCollisionSelectedSources)
-			if err != nil {
-				return nil, err
-			}
 			select {
 			case <-ctx.Done():
 				return &PreviewResult{OperationMode: operationMode}, nil
 			default:
+			}
+			if err != nil {
+				return nil, err
 			}
 			preview.VideoCollisions = append(preview.VideoCollisions, siblings...)
 		}
