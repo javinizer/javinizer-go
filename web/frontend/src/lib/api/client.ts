@@ -126,8 +126,8 @@ class APIClient {
 	async scan(request: Parameters<FileClient['scan']>[0]) {
 		return this.files.scan(request);
 	}
-	async browse(request: Parameters<FileClient['browse']>[0]) {
-		return this.files.browse(request);
+	async browse(request: Parameters<FileClient['browse']>[0], options?: RequestOptions) {
+		return this.files.browse(request, options);
 	}
 	async autocompletePath(request: Parameters<FileClient['autocompletePath']>[0]) {
 		return this.files.autocompletePath(request);

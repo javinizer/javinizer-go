@@ -453,6 +453,9 @@ output:
     # Move files instead of copying (default: false / copy). Persisted by the TUI Settings toggle.
     move_files: false
     rename_file: true
+    # Opt-in Undo: retain original-file backups for operations started while enabled.
+    # Disabled: clean owned transaction backups after successful completion.
+    # Interrupted operations or cleanup failures retain recovery data; historical backups are unchanged.
     allow_revert: false
     group_actress: false
     # Minimum number of actresses to trigger group substitution; grouping applies

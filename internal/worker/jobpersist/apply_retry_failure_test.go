@@ -11,7 +11,7 @@ import (
 func TestApplyRetryFailureProjectionGuardsAndRoundTrip(t *testing.T) {
 	for _, variant := range []string{"matching", "already-failed", "blank-id", "missing-row", "new-revision", "new-identity", "other-path", "excluded", "no-movie", "running"} {
 		t.Run(variant, func(t *testing.T) {
-			row := &resultstore.MovieResult{ResultID: "r1", Revision: 7, Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-123"}}
+			row := &resultstore.MovieResult{ResultID: "r1", Revision: 7, RecoveryWarning: "previous apply warning", Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "ABC-123"}}
 			failures := map[string]ApplyRetryFailure{"a": {ResultID: "r1", Revision: 7, Error: "fenced"}}
 			excluded := map[string]bool{}
 			switch variant {
@@ -51,6 +51,7 @@ func TestApplyRetryFailureProjectionGuardsAndRoundTrip(t *testing.T) {
 				} else {
 					require.Zero(t, delta)
 				}
+				require.Empty(t, restored.Results["a"].RecoveryWarning)
 				require.Equal(t, models.JobStatusFailed, restored.Results["a"].Status)
 				require.Equal(t, uint64(7), restored.Results["a"].Revision)
 			} else {

@@ -2008,7 +2008,7 @@
   "settings_file_matching_regex_enable": "启用自定义正则模式",
   "settings_file_matching_regex_label": "正则模式",
   "settings_file_matching_title": "文件匹配设置",
-  "settings_file_ops_allow_revert_desc": "启用还原功能以撤销整理操作并将文件恢复到原始位置。禁用后，还原按钮将被隐藏，还原 API 调用将被阻止。",
+  "settings_file_ops_allow_revert_desc": "默认禁用。在开始操作前启用可保留原始文件备份以供撤销。禁用时，成功完成的操作会清理其拥有的事务备份；操作或清理失败时可能保留恢复数据。更改仅适用于新操作，不影响历史备份。",
   "settings_file_ops_allow_revert_label": "允许还原",
   "settings_file_ops_desc": "控制在操作过程中 Javinizer 如何整理和移动您的文件",
   "settings_file_ops_mode_desc": "选择操作过程中文件的整理方式",

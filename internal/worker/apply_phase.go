@@ -343,6 +343,7 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, filePath string, fileResult *resultstore.MovieResult, reason, errorCode string) {
 	now := time.Now()
 	err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		current.RecoveryWarning = ""
 		current.Status = models.JobStatusFailed
 		current.Error = reason
 		current.ErrorCode = errorCode
@@ -1017,6 +1018,7 @@ func interpretApplyResult(
 					conflict := *videoConflict
 					current.VideoCollision = &conflict
 				}
+				current.RecoveryWarning = "" // A genuine later apply failure supersedes the prior operation warning.
 				current.Status = fileStatus
 				current.Error = errMsg
 				current.StartedAt = startTime
@@ -1142,10 +1144,24 @@ func interpretApplyResult(
 				// failed refresh committed and discard its recovery state.
 				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
 			} else {
-				err2 := withApplyPublicationFence(taskCtx, inputs, movie, afc, func() error {
+				writeCtx := taskCtx
+				if result.RecoveryWarning != "" {
+					// Warning reporting survives request cancellation. If finalization is
+					// unproven, the callback below writes ONLY the warning, never a receipt.
+					var cancel context.CancelFunc
+					writeCtx, cancel = context.WithTimeout(context.WithoutCancel(taskCtx), applyFailureWritebackTimeout)
+					defer cancel()
+				}
+				err2 := withApplyPublicationFence(writeCtx, inputs, movie, afc, func() error {
 					return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 						if applyWritebackIdentityMismatch(movie, current) {
 							logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+							return current, prov, nil
+						}
+						current.RecoveryWarning = result.RecoveryWarning
+						if result.RecoveryWarning != "" && !result.PublicationFinalized {
+							// The filesystem changed, but its final journal receipt is unproven.
+							// Preserve status, movie, provenance and all ownership evidence.
 							return current, prov, nil
 						}
 						current.VideoOutcome = result.VideoOutcome
@@ -1187,19 +1203,29 @@ func interpretApplyResult(
 		outcome.Movie = result.Movie
 	}
 
+	completionMessage := fmt.Sprintf("Applied %s successfully", movie.ID)
+	if result != nil && result.RecoveryWarning != "" {
+		completionMessage = fmt.Sprintf("Applied %s; %s", movie.ID, result.RecoveryWarning)
+	}
 	inputs.Broadcaster.Send(JobEvent{
 		JobID:     inputs.JobID,
 		MovieID:   movie.ID,
 		Phase:     jobEventPhaseApply,
 		Step:      StepComplete,
 		Progress:  1.0,
-		Message:   fmt.Sprintf("Applied %s successfully", movie.ID),
+		Message:   completionMessage,
 		Timestamp: time.Now(),
 	})
 	// Broadcast per-file success over WebSocket so the frontend's fileStatuses
 	// map populates per file and OrganizeStatusCard renders live per-file rows.
 	// Mirrors main's process_organize.go per-file 'organized' WS message.
-	if cfg.OnFileOrganized != nil {
+	if result != nil && result.RecoveryWarning != "" {
+		// Do not read this warning back from storage: a failed/refused write
+		// must not turn an acknowledged recovery warning into a clean success.
+		if cfg.OnFileRecoveryWarning != nil {
+			cfg.OnFileRecoveryWarning(filePath, result.RecoveryWarning)
+		}
+	} else if cfg.OnFileOrganized != nil {
 		cfg.OnFileOrganized(filePath)
 	}
 	outcome.Success = true

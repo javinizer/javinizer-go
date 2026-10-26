@@ -5,7 +5,10 @@ declare global {
 		// interface Error {}
 		// interface Locals {}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/** One-shot successful Jobs review return; never a destination path. */
+			browseReturnPath?: string;
+		}
 		// interface Platform {}
 	}
 }

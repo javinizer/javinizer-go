@@ -244,8 +244,9 @@ export class FileClient extends BaseClient {
 		});
 	}
 
-	async browse(request: BrowseRequest): Promise<BrowseResponse> {
+	async browse(request: BrowseRequest, options?: RequestOptions): Promise<BrowseResponse> {
 		return this.request<BrowseResponse>('/api/v1/browse', {
+			...options,
 			method: 'POST',
 			body: JSON.stringify(request),
 		});
