@@ -292,7 +292,7 @@ type OutputTemplateConfig struct {
 type OutputOperationConfig struct {
 	OperationMode           operationmode.OperationMode `yaml:"operation_mode" json:"operation_mode"`
 	RenameFile              bool                        `yaml:"rename_file" json:"rename_file"`                               // Rename files using file_format template (default: true)
-	AllowRevert             bool                        `yaml:"allow_revert" json:"allow_revert"`                             // Enable revert operations (default: false — opt-in for safety)
+	AllowRevert             bool                        `yaml:"allow_revert" json:"allow_revert"`                             // Retain Undo data for new operations (default: false); recovery stays enabled
 	GroupActress            bool                        `yaml:"group_actress" json:"group_actress"`                           // Replace multiple actresses with group name in templates (default: false)
 	GroupActressMin         int                         `yaml:"group_actress_min" json:"group_actress_min"`                   // Minimum number of actresses to trigger group substitution; grouping applies when count >= this value (default: 2; 0 or negative treated as 2)
 	GroupActressName        string                      `yaml:"group_actress_name" json:"group_actress_name"`                 // Folder name when group_actress is enabled and multiple actresses (default: "@Group")

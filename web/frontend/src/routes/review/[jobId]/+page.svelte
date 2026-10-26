@@ -40,7 +40,10 @@
 		Film
 	} from 'lucide-svelte';
 
-	const s = createReviewState(() => $page.params.jobId as string);
+	const s = createReviewState(
+		() => $page.params.jobId as string,
+		() => $page.url.searchParams.get('return') === 'source',
+	);
 
 	const tabFromUrl = (url: URL): ReviewTabId =>
 		url.searchParams.get('tab') === 'failed' ? 'failed' : 'movies';

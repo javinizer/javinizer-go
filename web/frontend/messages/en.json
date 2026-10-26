@@ -2006,7 +2006,7 @@
   "settings_file_matching_regex_enable": "Enable Custom Regex Pattern",
   "settings_file_matching_regex_label": "Regex Pattern",
   "settings_file_matching_title": "File Matching Settings",
-  "settings_file_ops_allow_revert_desc": "Enable the revert feature to undo organize operations and restore files to their original locations. When disabled, revert buttons are hidden and revert API calls are blocked.",
+  "settings_file_ops_allow_revert_desc": "Disabled by default. Enable before starting operations to retain original-file backups for Undo. When disabled, successful operations clean up their owned transaction backups; failed operations or cleanup failures may retain recovery data. Changes apply to new operations, not historical backups.",
   "settings_file_ops_allow_revert_label": "Allow Revert",
   "settings_file_ops_desc": "Control how Javinizer organizes and moves your files",
   "settings_file_ops_mode_desc": "Choose how files are organized during operations",
