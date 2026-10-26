@@ -2,7 +2,7 @@ import { getCreditFailureKind, getCreditGuidance } from '../logic/credit-guidanc
 import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
-import { goto } from '$app/navigation';
+import { beforeNavigate, goto } from '$app/navigation';
 import {
 	VIEW_URL_PARAM,
 	viewModeToUrlParam as sharedViewModeToUrlParam,
@@ -252,11 +252,21 @@ function validRecoveryOptions(value: unknown): boolean {
 	return options.overrides === undefined || validRecoveryOptions(options.overrides);
 }
 
-export function createReviewState(getJobId: () => string) {
+export function createReviewState(getJobId: () => string, returnToJobSource: () => boolean = () => false) {
 	const teardownJobId = getJobId();
 	let jobId = $derived(getJobId());
 	let routeGeneration = 0;
 	let disposed = false;
+	let returnNavigationEpoch = 0;
+	let leavingReview = false;
+	beforeNavigate((navigation) => {
+		// Navigation intent precedes unmount when the destination is still loading.
+		// Same-page tab/view query synchronization must not cancel completion.
+		if (!navigation.to || navigation.to.url.pathname !== navigation.from?.url.pathname) {
+			returnNavigationEpoch += 1;
+			leavingReview = true;
+		}
+	});
 	let operationScope: { jobId: string; generation: number } | null = null;
 	const activeJobId = () => operationScope?.jobId ?? jobId;
 	const activeGeneration = () => operationScope?.generation ?? routeGeneration;
@@ -1549,8 +1559,29 @@ export function createReviewState(getJobId: () => string) {
 			if (ownsRecoveryStorage(jobId)) clearApplyRecovery(jobId);
 			recoveryWriteSnapshots.delete(jobId);
 		},
-		navigateBrowse: () => {
-			void goto('/browse');
+		navigateBrowse: async () => {
+			if (leavingReview || disposed) return;
+			// Only successful automatic completion from Jobs requests this job's
+			// source. Validate at return time, never by doing filesystem I/O on polls.
+			const targetJobId = jobId;
+			const targetGeneration = routeGeneration;
+			const targetApplyGeneration = job?.apply_generation;
+			const targetNavigationEpoch = returnNavigationEpoch;
+			let source = returnToJobSource() && job?.id === targetJobId ? job.browse_source_path : undefined;
+			if (source) {
+				try {
+					const listing = await apiClient.browse({ path: source, scope: 'operation' }, { timeoutMs: 5000 });
+					source = listing.current_path || undefined;
+				} catch {
+					// Missing/moved, inaccessible, or legacy sources retain last Browse.
+					source = undefined;
+				}
+			}
+			// The user may leave Review or switch jobs while validation is in flight.
+			if (disposed || jobId !== targetJobId || routeGeneration !== targetGeneration ||
+				returnNavigationEpoch !== targetNavigationEpoch || job?.apply_generation !== targetApplyGeneration || organizing || organizeStatus !== 'completed') return;
+			if (source) void goto('/browse', { state: { browseReturnPath: source } });
+			else void goto('/browse');
 		},
 		isCurrentOperation: (candidateJobId, candidateGeneration) =>
 			candidateJobId === jobId && candidateGeneration === routeGeneration,
@@ -1977,6 +2008,7 @@ export function createReviewState(getJobId: () => string) {
 		if (lastRouteJobId === currentJobId) return;
 		const previousJobId = lastRouteJobId;
 		lastRouteJobId = currentJobId;
+		leavingReview = false;
 		if (previousJobId) cancelJobDetailQuery(previousJobId);
 		routeGeneration += 1;
 		pendingMovieSave = null;

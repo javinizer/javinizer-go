@@ -4,9 +4,15 @@ import { tick } from 'svelte';
 import { QueryClient, notifyManager } from '@tanstack/svelte-query';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import BrowsePage from './+page.svelte';
-import { goto as mockGoto } from '$app/navigation';
+import { goto as mockGoto, replaceState as mockReplaceState } from '$app/navigation';
 import { createOrganizeController, type OrganizeStatus } from '../review/[jobId]/logic/organize-controller';
 import { decodeBrowseBootstrap, encodeBrowseBootstrap } from '$lib/browse-bootstrap';
+
+const navigationPage = vi.hoisted(() => ({ state: {} as App.PageState, url: new URL('http://localhost/browse') }));
+vi.mock('$app/stores', async () => {
+	const { readable } = await import('svelte/store');
+	return { page: readable(navigationPage) };
+});
 
 // STORAGE_KEY must mirror +page.svelte exactly. A Back round-trip from /manual
 // preserves /browse selection because this snapshot is re-read on mount.
@@ -138,6 +144,8 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	navigationPage.state = {};
+	vi.mocked(mockReplaceState).mockImplementation((_url, state) => { navigationPage.state = state; });
 	client.clear();
 	document.cookie = 'javinizer_browse_bootstrap=; Max-Age=0; Path=/';
 	apiClient.getConfig.mockResolvedValue(mockConfig() as never);
@@ -833,4 +841,52 @@ it('does not let an unsuperseded refresh from an unmounted browser overwrite the
 		await heldRefresh;
 		await tick();
 	}
+});
+
+
+describe('Jobs completion source handoff', () => {
+	it('uses the one-shot authoritative job source instead of stale global Browse and consumes it', async () => {
+		localStorage.setItem('javinizer_input_path', '/old');
+		navigationPage.state = { browseReturnPath: '/job-source' };
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const first = renderPage();
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledWith(expect.objectContaining({ path: '/job-source' })));
+		await waitFor(() => expect(localStorage.getItem('javinizer_input_path')).toBe('/job-source'));
+		expect(navigationPage.state.browseReturnPath).toBeUndefined();
+		first.unmount();
+		localStorage.setItem('javinizer_input_path', '/later');
+		apiClient.browse.mockClear();
+		renderPage();
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledWith(expect.objectContaining({ path: '/later' })));
+	});
+	it('honors the one-shot source even when persistent input writes fail', async () => {
+		localStorage.setItem('javinizer_input_path', '/old');
+		navigationPage.state = { browseReturnPath: '/job-source' };
+		const save = localStorage.setItem.bind(localStorage);
+		vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+			if (key === 'javinizer_input_path') throw new DOMException('blocked', 'QuotaExceededError');
+			save(key, value);
+		});
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		const view = renderPage();
+		await view.findByDisplayValue('/job-source');
+		await view.findByText('a.mp4', { exact: true });
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/old');
+		expect(navigationPage.state.browseReturnPath).toBeUndefined();
+	});
+
+	it('does not persist a source that disappears after preflight; next visit uses saved fallback', async () => {
+		localStorage.setItem('javinizer_input_path', '/old');
+		navigationPage.state = { browseReturnPath: '/vanished' };
+		apiClient.browse.mockRejectedValueOnce(new Error('synthetic missing source'));
+		const view = renderPage();
+		await view.findByText('synthetic missing source');
+		expect(localStorage.getItem('javinizer_input_path')).toBe('/old');
+		expect(navigationPage.state.browseReturnPath).toBeUndefined();
+		view.unmount(); apiClient.browse.mockClear();
+		apiClient.browse.mockImplementation(async ({ path }) => mockBrowseResponse(path) as never);
+		renderPage();
+		await waitFor(() => expect(apiClient.browse).toHaveBeenCalledWith({ path: '/old', scope: 'operation' }));
+	});
+
 });

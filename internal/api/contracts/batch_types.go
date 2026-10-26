@@ -159,6 +159,7 @@ type BatchJobResponse struct {
 	Excluded              map[string]bool             `json:"excluded"`
 	Progress              float64                     `json:"progress"`
 	Destination           string                      `json:"destination"`
+	BrowseSourcePath      string                      `json:"browse_source_path,omitempty"`
 	Files                 []string                    `json:"files,omitempty"`
 	Results               map[string]*BatchFileResult `json:"results"`
 	StartedAt             string                      `json:"started_at"`
@@ -180,6 +181,7 @@ type BatchJobResponseSlim struct {
 	Excluded              map[string]bool                 `json:"excluded"`
 	Progress              float64                         `json:"progress"`
 	Destination           string                          `json:"destination"`
+	BrowseSourcePath      string                          `json:"browse_source_path,omitempty"`
 	Files                 []string                        `json:"files,omitempty"`
 	Results               map[string]*BatchFileResultSlim `json:"results"`
 	StartedAt             string                          `json:"started_at"`
