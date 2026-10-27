@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 	"github.com/javinizer/javinizer-go/internal/videocollision"
 )
 
@@ -11,8 +12,10 @@ import (
 // separated from MovieResult. Provenance is an API-presentation concern;
 // the apply phase never reads it.
 type ProvenanceData struct {
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	// OfflineEvidence is read-only, operation-pinned source evidence, never Movie authority.
+	OfflineEvidence *scrapeevidence.Report `json:"offline_evidence,omitempty"`
+	FieldSources    map[string]string      `json:"field_sources,omitempty"`
+	ActressSources  map[string]string      `json:"actress_sources,omitempty"`
 	// ScraperResults holds the raw per-scraper results that produced the
 	// aggregated Movie, retained so the review page can offer per-field source
 	// overrides without a re-scrape. Persisted in the job envelope (unlike the
@@ -28,6 +31,7 @@ func (p *ProvenanceData) Clone() *ProvenanceData {
 		return nil
 	}
 	copied := *p
+	copied.OfflineEvidence = p.OfflineEvidence.Clone()
 	if p.FieldSources != nil {
 		copied.FieldSources = make(map[string]string, len(p.FieldSources))
 		for k, v := range p.FieldSources {

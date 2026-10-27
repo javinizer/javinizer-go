@@ -224,11 +224,15 @@ func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *results
 	case frozen == nil && live == nil:
 		return nil
 	case live == nil:
-		return frozen.Clone()
+		out := frozen.Clone()
+		out.OfflineEvidence = nil
+		return out
 	case frozen == nil:
 		return live.Clone()
 	}
 	out := frozen.Clone()
+	// Evidence is an indivisible live snapshot, including an intentional clear.
+	out.OfflineEvidence = live.OfflineEvidence.Clone()
 	out.FieldSources = mergeSourceMap(frozen.FieldSources, live.FieldSources)
 	out.ActressSources = mergeSourceMap(frozen.ActressSources, live.ActressSources)
 	if live.ScraperResults != nil && !reflect.DeepEqual(frozen.ScraperResults, live.ScraperResults) {
@@ -241,6 +245,8 @@ func mergeWriteBackProvenance(frozen, live *resultstore.ProvenanceData) *results
 // the concrete result store supports the lock-held upsert seam. Test doubles
 // that only implement the older interface retain the safe two-call fallback.
 func upsertWriteBackResultWithProvenance(updater resultstore.ResultUpdater, filePath string, result *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
+	// Missing live rows cannot resurrect a phase-frozen report.
+	prov = mergeWriteBackProvenance(prov, nil)
 	if atomic, ok := updater.(interface {
 		UpsertFileResultWithProvenance(string, *resultstore.MovieResult, *resultstore.ProvenanceData)
 	}); ok {

@@ -137,3 +137,10 @@ describe('buildManualScrapeRequest', () => {
 		expect(req.apply_plan).toMatchObject({ video_operation: 'metadata-artwork', nfo_output: 'skip', media_policy: 'missing' });
 	});
 });
+
+it.each([undefined, false, true])('offline evidence is operation-only and serialized only for true (%s)', (enabled) => {
+	const request = buildManualScrapeRequest([{ filePath: '/movie.mp4', input: 'ABC-001' }], { show_offline_evidence: enabled });
+	if (enabled) expect(request.show_offline_evidence).toBe(true);
+	else expect(request).not.toHaveProperty('show_offline_evidence');
+	expect(request).not.toHaveProperty('offline_evidence');
+});

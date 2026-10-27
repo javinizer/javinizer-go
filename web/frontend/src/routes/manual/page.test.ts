@@ -196,3 +196,13 @@ describe('/manual tracer', () => {
 		}));
 	});
 });
+
+it.each([false,true])('manual evidence choice is fresh, explicit and reset after accepted submission (%s)', async (enabled) => {
+	setPendingScrape(Object.assign(snapshot(),{showOfflineEvidence:true})); const view=renderPage();
+	const option=view.getByRole('checkbox',{name:/Show offline R18/}) as HTMLInputElement; expect(option.checked).toBe(false);
+	await fireEvent.input(view.getByLabelText('Manual input for /library/a.mp4'),{target:{value:'IPX-123'}});
+	if(enabled) await fireEvent.click(option); await fireEvent.click(view.getByRole('button',{name:'Start manual scrape'}));
+	await waitFor(()=>expect(mockBatchScrape).toHaveBeenCalledTimes(1)); const request=mockBatchScrape.mock.calls[0][0];
+	if(enabled) expect(request.show_offline_evidence).toBe(true); else expect(request).not.toHaveProperty('show_offline_evidence');
+	await waitFor(()=>expect(option.checked).toBe(false));
+});

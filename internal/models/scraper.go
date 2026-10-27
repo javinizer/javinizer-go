@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"path"
 	"strings"
@@ -45,6 +46,10 @@ const (
 
 // ScraperResult represents the raw data returned by a scraper.
 type ScraperResult struct {
+	// r18DumpActorReferences is retained only at the reviewed local
+	// derived_actress boundary. JSON and legacy numeric DMMID carry no authority.
+	r18DumpActorReferences []string
+
 	CastNameProvenance []CastNameProvenance `json:"cast_name_provenance,omitempty"`
 
 	CastNameEvidence []CastNameEvidence `json:"-"`
@@ -82,6 +87,9 @@ func (r *ScraperResult) Clone() *ScraperResult {
 		return nil
 	}
 	copied := *r
+	if r.r18DumpActorReferences != nil {
+		copied.r18DumpActorReferences = append([]string{}, r.r18DumpActorReferences...)
+	}
 	if r.CastNameProvenance != nil {
 		copied.CastNameProvenance = append([]CastNameProvenance{}, r.CastNameProvenance...)
 	}
@@ -113,6 +121,39 @@ func (r *ScraperResult) Clone() *ScraperResult {
 		copy(copied.Translations, r.Translations)
 	}
 	return &copied
+}
+
+// SetR18DumpActorReferences retains exact server-observed derived_actress keys.
+// Only the local dump adapter may establish this authority; HTTP IDs, names,
+// user input and numeric DMMID projections are not interchangeable references.
+// One overflow sentinel lets the reader reject a cast exceeding its 64-key cap.
+func (r *ScraperResult) SetR18DumpActorReferences(ids []string) {
+	if ids == nil {
+		r.r18DumpActorReferences = nil
+		return
+	}
+	r.r18DumpActorReferences = append([]string{}, ids[:min(len(ids), 65)]...)
+}
+
+// R18DumpActorReferences returns owned exact keys, or nil without source authority.
+func (r *ScraperResult) R18DumpActorReferences() []string {
+	if r == nil || r.r18DumpActorReferences == nil {
+		return nil
+	}
+	return append([]string{}, r.r18DumpActorReferences...)
+}
+
+// UnmarshalJSON never grants or preserves transient source-reference authority,
+// including when a previously trusted result is reused as the decode target.
+func (r *ScraperResult) UnmarshalJSON(data []byte) error {
+	r.r18DumpActorReferences = nil
+	type publicResult ScraperResult
+	decoded := publicResult(*r)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = ScraperResult(decoded)
+	return nil
 }
 
 // NormalizeMediaURLs applies post-scrape media URL normalization hooks.

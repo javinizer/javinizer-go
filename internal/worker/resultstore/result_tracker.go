@@ -61,9 +61,13 @@ func NewFromSnapshot(
 	if results == nil {
 		results = make(map[string]*MovieResult)
 	}
-	if provenance == nil {
-		provenance = make(map[string]*ProvenanceData)
+	// Restored presentation data belongs to the store, not to the decoder or
+	// caller's envelope. In particular historical evidence must stay immutable.
+	ownedProvenance := make(map[string]*ProvenanceData, len(provenance))
+	for path, prov := range provenance {
+		ownedProvenance[path] = prov.Clone()
 	}
+	provenance = ownedProvenance
 	if fileMatchInfo == nil {
 		fileMatchInfo = make(map[string]models.FileMatchInfo)
 	}

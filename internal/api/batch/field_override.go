@@ -56,7 +56,11 @@ func getBatchMovieSources(rt *core.APIRuntime) gin.HandlerFunc {
 				results = []*models.ScraperResult{synth}
 			}
 		}
-		c.JSON(http.StatusOK, contracts.SourceResultsResponse{Results: results})
+		response := contracts.SourceResultsResponse{Results: results}
+		if prov != nil {
+			response.OfflineEvidence = prov.OfflineEvidence.Clone()
+		}
+		c.JSON(http.StatusOK, response)
 	}
 }
 

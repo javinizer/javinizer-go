@@ -199,3 +199,20 @@ describe('review mutations route-change reconciliation', () => {
 		expect(editedMovies.has(secondPath)).toBe(true);
 	});
 });
+
+it.each([undefined,false,true])('bulk request serializes only explicit evidence opt-in (%s)', async (enabled) => {
+	const bulkRescrapeMovies=vi.fn().mockResolvedValue({results:[],succeeded:0,failed:0});
+	const deps={getQueryClient:()=>new QueryClient(),getJobId:()=> 'job-a',getRouteGeneration:()=>1,isCurrentOperation:()=>false,bulkRescrapeMovies} as unknown as Parameters<typeof createReviewMutations>[0];
+	await createReviewMutations(deps).bulkRescrapeMutation.mutateAsync({jobId:'job-a',generation:1,movieIds:['ABC-001'],selectedScrapers:['r18dev'],showOfflineEvidence:enabled});
+	const request=bulkRescrapeMovies.mock.calls[0][1]; if(enabled) expect(request.show_offline_evidence).toBe(true); else expect(request).not.toHaveProperty('show_offline_evidence');
+});
+it.each([false,true])('late bulk snapshot preserves newer evidence presence=%s and editor geometry', async (present) => {
+	const file='/media/a.mp4'; let current=makeJob(file,makeMovie('EVIDENCE-001')); const report={outcome:'evidence_available',admitted_at:'stored',snapshot_digest:'A'};
+	let deliver!:(value:unknown)=>void; const response=new Promise(resolve=>{deliver=resolve;}); const edited=new Map([[file,{...makeMovie('EVIDENCE-001'),poster_crop_source_full:true}]]);
+	const deps={getQueryClient:()=>new QueryClient(),getJobId:()=> 'job-a',getRouteGeneration:()=>1,getJob:()=>current,setJob:(job:BatchJobResponse)=>{current=job;},isCurrentOperation:()=>true,skipJobSync:vi.fn(),getEditedMovies:()=>edited,toastSuccess:vi.fn(),toastError:vi.fn(),bulkRescrapeMovies:()=>response} as unknown as Parameters<typeof createReviewMutations>[0];
+	const pending=createReviewMutations(deps).bulkRescrapeMutation.mutateAsync({jobId:'job-a',generation:1,movieIds:['EVIDENCE-001'],selectedScrapers:['r18dev'],showOfflineEvidence:true});
+	const returned=structuredClone(current); returned.results[file].revision=2; returned.results[file].offline_evidence=present?undefined:report;
+	current=structuredClone(current); current.results[file].revision=3; current.results[file].offline_evidence=present?report:undefined; const latest=current.results[file];
+	deliver({job:returned,results:[{movie_id:'EVIDENCE-001',status:'success'}],succeeded:1,failed:0}); await pending;
+	expect(current.results[file]).toBe(latest); expect(edited.get(file)?.poster_crop_source_full).toBe(true);
+});

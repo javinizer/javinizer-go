@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { test as setupTest, expect } from '@playwright/test';
 
 import { ensureFixtureDirs } from './helpers/fixtures';
+import { installOfflineEvidenceBrowserGuard } from './helpers/offline-evidence-browser.cjs';
 
 const STORAGE_DIR = dirname(fileURLToPath(import.meta.url));
 const STORAGE_PATH = resolve(STORAGE_DIR, '.auth', 'auth-state.json');
@@ -73,10 +74,12 @@ setupTest(
 		const loginJson = await loginResp.json();
 		expect(loginJson.authenticated).toBeTruthy();
 
-		for (const actress of [
-			{ dmm_id: 1, first_name: 'Test', last_name: 'Actor' },
-			{ dmm_id: 2, first_name: 'Asahi', last_name: 'Serina', japanese_name: '朝日芹奈' },
-		]) {
+		for (const actress of process.env.JAVINIZER_E2E_OFFLINE_EVIDENCE === 'true'
+			? []
+			: [
+					{ dmm_id: 1, first_name: 'Test', last_name: 'Actor' },
+					{ dmm_id: 2, first_name: 'Asahi', last_name: 'Serina', japanese_name: '朝日芹奈' },
+				]) {
 			const actressResp = await request.post('/api/v1/actresses', { data: actress });
 			expect(
 				actressResp.ok(),
@@ -103,7 +106,10 @@ setupTest(
 		// context.storageState(). The base URL is the Vite dev server
 		// (5175 by default) — Vite's proxy forwards /api to the backend on
 		// 18080, so domain/localhost cookies apply at the Vite level.
-		const context = await browser.newContext({ baseURL });
+		const context = await browser.newContext({ baseURL, serviceWorkers: 'block' });
+		if (process.env.JAVINIZER_E2E_OFFLINE_EVIDENCE === 'true') {
+			await installOfflineEvidenceBrowserGuard(context);
+		}
 		await context.addCookies(cookies);
 
 		// Sanity check: load the app's root page and verify it doesn't crash.

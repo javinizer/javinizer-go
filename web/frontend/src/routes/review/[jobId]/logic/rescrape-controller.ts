@@ -5,6 +5,7 @@ import type {
 	Movie,
 	Scraper,
 } from '$lib/api/types';
+import { acceptsResultSnapshot } from '../stores/reconcile-job-snapshot';
 
 export type ScalarStrategy =
 	| ''
@@ -50,6 +51,7 @@ interface RescrapeControllerDeps {
 			jobId: string,
 			movieId: string,
 			req: {
+				show_offline_evidence?: boolean;
 				force?: boolean;
 				selected_scrapers?: string[];
 				manual_search_input?: string;
@@ -114,7 +116,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 		deps.setShowRescrapeModal(true);
 	}
 
-	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string }) {
+	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string; showOfflineEvidence?: boolean }) {
 		const selectedScrapers = deps.getSelectedScrapers();
 		if (selectedScrapers.length === 0) {
 			deps.toastError('Please select at least one scraper');
@@ -150,6 +152,7 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 
 			const response = await deps.api.rescrapeBatchMovie(operationJobId, rescrapeResultId, {
 				force: true,
+				...(mode?.showOfflineEvidence ? { show_offline_evidence: true } : {}),
 				selected_scrapers: selectedScrapers,
 				manual_search_input: effectiveManualSearchMode
 					? effectiveManualSearchInput.trim()
@@ -163,6 +166,11 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 
 			if (deps.isCurrentOperation && !deps.isCurrentOperation(operationJobId, operationGeneration)) return;
 
+			const liveJob = deps.getJob();
+			const liveResult = liveJob?.results[currentResult.file_path];
+			if (liveJob?.id !== operationJobId || !liveResult ||
+				!acceptsResultSnapshot(liveResult, { ...currentResult, revision: response.revision })) return;
+
 			const updatedMovie = response.movie;
 			if (deps.getJob() && currentResult.file_path) {
 				const filePath = currentResult.file_path;
@@ -172,6 +180,8 @@ export function createRescrapeController(deps: RescrapeControllerDeps) {
 					...newResults[filePath],
 					status: 'completed',
 					movie: updatedMovie,
+					// Absence clears the previous operation's report as a whole.
+					offline_evidence: response.offline_evidence,
 					field_sources: response.field_sources ?? newResults[filePath]?.field_sources,
 					actress_sources: response.actress_sources ?? newResults[filePath]?.actress_sources,
 					// The single-result rescrape endpoint issues no progress broadcast,

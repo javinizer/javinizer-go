@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,6 +45,13 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		admitted, err := rt.AdmitOfflineEvidenceOperation(req.ShowOfflineEvidence)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+		defer admitted()
+
 		// Security: Validate all submitted files against directory security settings
 		deps := rt.Deps()
 		snap := rt.Snapshot()
@@ -71,14 +79,15 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			update = &req.Update
 		}
 		output, err := StartScrapeUseCase(c.Request.Context(), rt, StartScrapeInput{
-			Files:          req.Files,
-			Destination:    req.Destination,
-			OperationMode:  req.OperationMode,
-			Preset:         req.Preset,
-			ScalarStrategy: req.ScalarStrategy,
-			ArrayStrategy:  req.ArrayStrategy,
-			Update:         update,
-			ApplyPlan:      req.ApplyPlan,
+			Files:               req.Files,
+			ShowOfflineEvidence: req.ShowOfflineEvidence,
+			Destination:         req.Destination,
+			OperationMode:       req.OperationMode,
+			Preset:              req.Preset,
+			ScalarStrategy:      req.ScalarStrategy,
+			ArrayStrategy:       req.ArrayStrategy,
+			Update:              update,
+			ApplyPlan:           req.ApplyPlan,
 			MirrorPresence: planMirrors{
 				destinationPresent: req.Has("destination"),
 				operationPresent:   req.Has("operation_mode"),
@@ -93,7 +102,11 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			ManualInputs:     sanitizedManualInputs,
 		})
 		if err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			status := http.StatusBadRequest
+			if req.ShowOfflineEvidence && (errors.Is(err, core.ErrOfflineEvidenceShuttingDown) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				status = http.StatusServiceUnavailable
+			}
+			c.JSON(status, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 

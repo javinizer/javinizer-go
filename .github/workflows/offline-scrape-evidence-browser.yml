@@ -1,0 +1,176 @@
+name: Offline scrape evidence browser
+
+on:
+  pull_request:
+    paths:
+      - 'internal/scrapeevidence/**'
+      - 'internal/actresscache/**'
+      - 'internal/actressmetadata/**'
+      - 'internal/r18devdump/**'
+      - 'internal/scraper/r18dev/**'
+      - 'internal/scrape/**'
+      - 'internal/scraperutil/**'
+      - 'internal/models/**'
+      - 'internal/config/**'
+      - 'internal/api/**'
+      - 'internal/worker/**'
+      - 'internal/workflow/**'
+      - 'internal/resultstore/**'
+      - 'internal/commandutil/**'
+      - 'cmd/javinizer-e2e/**'
+      - 'web/frontend/**'
+      - 'scripts/verify_offline_evidence_browser*.py'
+      - 'scripts/verify_offline_sync_browser.py'
+      - 'scripts/build_offline_test_overlay.py'
+      - 'test/offlineguard/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/offline-scrape-evidence-browser.yml'
+  push:
+    branches: [main, master, develop]
+    paths:
+      - 'internal/scrapeevidence/**'
+      - 'internal/actresscache/**'
+      - 'internal/actressmetadata/**'
+      - 'internal/r18devdump/**'
+      - 'internal/scraper/r18dev/**'
+      - 'internal/scrape/**'
+      - 'internal/scraperutil/**'
+      - 'internal/models/**'
+      - 'internal/config/**'
+      - 'internal/api/**'
+      - 'internal/worker/**'
+      - 'internal/workflow/**'
+      - 'internal/resultstore/**'
+      - 'internal/commandutil/**'
+      - 'cmd/javinizer-e2e/**'
+      - 'web/frontend/**'
+      - 'scripts/verify_offline_evidence_browser*.py'
+      - 'scripts/verify_offline_sync_browser.py'
+      - 'scripts/build_offline_test_overlay.py'
+      - 'test/offlineguard/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/offline-scrape-evidence-browser.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    name: Genuine R18 source desktop and mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OFFLINE_EVIDENCE_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - name: Install locked dependencies and hosted Chromium before offline runtime
+        run: |
+          go mod download
+          npm ci --prefix web/frontend
+          cd web/frontend
+          node node_modules/@inlang/paraglide-js/bin/run.js compile --project ./project.inlang --outdir ./src/lib/paraglide
+          node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Prepare reviewed pre-DNS Go network guard
+        run: python -B scripts/build_offline_test_overlay.py --output offline-scrape-evidence-browser/_overlay
+      - name: Prove guards and run exact-head real-source browser suite offline
+        shell: python {0}
+        run: |
+          import collections, json, os, pathlib, shutil, signal, subprocess
+          root = pathlib.Path.cwd()
+          evidence = (root / 'offline-scrape-evidence-browser').resolve()
+          frontend = root / 'web/frontend'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == os.environ['OFFLINE_EVIDENCE_EXPECTED_SHA']
+          fixture = pathlib.Path(os.environ['RUNNER_TEMP']) / 'offline-evidence-fixture'
+          env = {**os.environ,
+                 'GOFLAGS': '-overlay=' + str(evidence / '_overlay/overlay.json'),
+                 'GOTOOLCHAIN': 'local', 'GOPROXY': 'off', 'GONOPROXY': 'none', 'GOSUMDB': 'off', 'GOVCS': '*:off',
+                 'GODEBUG': 'netdns=go', 'GOMAXPROCS': '2', 'CI': '1', 'BROWSERSLIST_IGNORE_OLD_DATA': 'true',
+                 'NODE_OPTIONS': '--require=' + str(frontend / 'tests/sync/offline-node.cjs'),
+                 'OFFLINE279_AUDIT_LOG': str(evidence / 'backend.audit'),
+                 'OFFLINE_SYNC_NODE_AUDIT': str(evidence / 'node.audit'),
+                 'OFFLINE_EVIDENCE_BROWSER_AUDIT': str(evidence / 'browser.audit'),
+                 'JAVINIZER_E2E_OFFLINE_EVIDENCE': 'true',
+                 'JAVINIZER_E2E_INPUT_DIR': str(fixture / 'input'),
+                 'JAVINIZER_E2E_OUTPUT_DIR': str(fixture / 'output'),
+                 'E2E_EVIDENCE_BACKEND_COMMAND': str(root / 'bin/javinizer-e2e')}
+          for name in ('JAVINIZER_RUN_LIVE_API_TESTS', 'JAVINIZER_RUN_FLARESOLVERR_TESTS'):
+              env.pop(name, None)
+          for name in ('backend.audit', 'node.audit', 'browser.audit', 'backend-canary.audit', 'node-canary.audit'):
+              (evidence / name).write_text('')
+          def run_logged(name, command, cwd=root, runtime=env, timeout=300):
+              with (evidence / name).open('w') as log:
+                  subprocess.run(command, cwd=cwd, env=runtime, stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=True)
+          run_logged('verifier-tests.log', ['python', '-B', '-m', 'unittest', 'discover', '-s', 'scripts', '-p', 'verify_offline_evidence_browser_test.py'])
+          canary = {**env, 'OFFLINE279_AUDIT_LOG': str(evidence / 'backend-canary.audit')}
+          run_logged('backend-canary.log', ['go', 'test', '-p', '2', '-count=1', '-timeout=2m', '.'], root / 'test/offlineguard', canary)
+          assert collections.Counter((evidence / 'backend-canary.audit').read_text().splitlines()) == {'OFFLINE279_BLOCKED': 26, 'OFFLINE279_BLOCKED_HTTP_TARGET': 4}
+          canary = {**env, 'OFFLINE_SYNC_NODE_AUDIT': str(evidence / 'node-canary.audit')}
+          run_logged('node-canary.log', ['node', '--test', 'tests/sync/offline-node.test.cjs'], frontend, canary)
+          assert (evidence / 'node-canary.audit').read_text().splitlines() == ['OFFLINE_SYNC_NODE_BLOCKED'] * 3
+          run_logged('browser-guard-tests.log', ['node', '--test', 'tests/fullstack/helpers/offline-evidence-browser.test.cjs'], frontend)
+          required_api = {'TestOfflineEvidenceFixtureUsesGenuineDumpAndPublishedArtifact',
+                          'TestOfflineEvidenceFixtureRejectsLiveFallback',
+                          'TestOfflineEvidenceFixtureConcurrentSearchAndCleanup',
+                          'TestOfflineEvidenceFixtureGenuineSourceThroughBatchAPI'}
+          pattern = '^(' + '|'.join(sorted(required_api)) + ')$'
+          run_logged('genuine-source-api-tests.jsonl', ['go', 'test', '-p', '2', '-count=1', '-timeout=120s', '-json', '-run', pattern, './cmd/javinizer-e2e'])
+          events = [json.loads(line) for line in (evidence / 'genuine-source-api-tests.jsonl').read_text().splitlines() if line.strip()]
+          assert not any(event['Action'] in ('fail', 'skip') for event in events), 'Genuine-source API fixture skipped or failed'
+          passed = [event['Test'] for event in events if event['Action'] == 'pass' and event.get('Test') and '/' not in event['Test']]
+          assert collections.Counter(passed) == collections.Counter(required_api), 'Genuine-source API cases did not all execute exactly once'
+          run_logged('backend-build.log', ['go', 'build', '-p', '2', '-o', 'bin/javinizer-e2e', './cmd/javinizer-e2e'])
+          command = ['node', 'node_modules/@playwright/test/cli.js', 'test', '--config', 'playwright.offline-evidence.config.ts', '--reporter=json']
+          env['PLAYWRIGHT_JSON_OUTPUT_FILE'] = str(evidence / 'inventory.json')
+          run_logged('inventory.log', command + ['--list'], frontend, timeout=60)
+          env['PLAYWRIGHT_JSON_OUTPUT_FILE'] = str(evidence / 'results.json')
+          with (evidence / 'browser.log').open('w') as log:
+              process = subprocess.Popen(command, cwd=frontend, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+              try:
+                  code = process.wait(timeout=300)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGTERM)
+                  try:
+                      process.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      os.killpg(process.pid, signal.SIGKILL)
+                      process.wait()
+                  code = 124
+          (evidence / 'exit.txt').write_text(str(code) + '\n')
+          artifacts = frontend / 'test-results-offline-evidence'
+          if artifacts.exists():
+              shutil.copytree(artifacts, evidence / 'browser-artifacts', dirs_exist_ok=True,
+                              ignore=shutil.ignore_patterns('.auth', '*auth-state*', '*.zip', '*.har', '*.webm', '*.mp4'))
+              # This dedicated generated directory is not source or auth state.
+              shutil.rmtree(artifacts)
+          assert code == 0, 'Browser tests failed; inspect archived results and log'
+          # Keep verifier stdout outside its own hash inventory.
+          subprocess.run(['python', '-B', 'scripts/verify_offline_evidence_browser.py', str(evidence)], env=env, check=True, timeout=60)
+      - name: Archive exact-head source/browser proof without auth state or recordings
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: offline-scrape-evidence-browser
+          path: offline-scrape-evidence-browser/
+          if-no-files-found: error
+          # Preserve hashed metadata such as .last-run.json; auth is excluded and rejected above.
+          include-hidden-files: true
+          retention-days: 14

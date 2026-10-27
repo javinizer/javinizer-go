@@ -107,3 +107,23 @@ it('clears the preset when a custom merge strategy is chosen', async () => {
 		);
 	});
 });
+
+it('stacks the heading and wraps actions on narrow screens without dropping controls', async () => {
+	const onClose = vi.fn();
+	const onOrganizeAll = vi.fn();
+	const view = renderHeader({ onClose, onOrganizeAll });
+	const headingRow = view.getByRole('heading', { name: 'Review & Edit Metadata' })
+		.parentElement!.parentElement!;
+	expect(headingRow.classList.contains('flex-col')).toBe(true);
+	expect(headingRow.classList.contains('xl:flex-row')).toBe(true);
+	const actions = view.getByRole('button', { name: 'Cancel' }).parentElement!;
+	expect(actions.classList.contains('flex-wrap')).toBe(true);
+	expect(actions.classList.contains('min-w-0')).toBe(true);
+	for (const name of ['Detail', 'Poster', 'Cover']) {
+		expect(view.getByRole('button', { name })).toBeTruthy();
+	}
+	await fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
+	await fireEvent.click(view.getByRole('button', { name: 'Organize 2 Files' }));
+	expect(onClose).toHaveBeenCalledOnce();
+	expect(onOrganizeAll).toHaveBeenCalledOnce();
+});

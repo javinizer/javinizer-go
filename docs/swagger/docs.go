@@ -5174,6 +5174,9 @@ const docTemplate = `{
                 "movie_id": {
                     "type": "string"
                 },
+                "offline_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report"
+                },
                 "part_number": {
                     "type": "integer"
                 },
@@ -5341,6 +5344,9 @@ const docTemplate = `{
                         "r18dev",
                         "dmm"
                     ]
+                },
+                "show_offline_evidence": {
+                    "type": "boolean"
                 }
             }
         },
@@ -5361,6 +5367,9 @@ const docTemplate = `{
                 },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "offline_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report"
                 },
                 "revision": {
                     "description": "Revision is the fresh post-commit revision of the rescraped result\n(D12) — clients advance their CAS baseline from it.",
@@ -5446,6 +5455,9 @@ const docTemplate = `{
                         "r18dev",
                         "dmm"
                     ]
+                },
+                "show_offline_evidence": {
+                    "type": "boolean"
                 },
                 "strict": {
                     "type": "boolean",
@@ -5938,6 +5950,9 @@ const docTemplate = `{
                 },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "offline_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report"
                 },
                 "provenance": {
                     "description": "Field-level data source tracking",
@@ -6829,6 +6844,9 @@ const docTemplate = `{
                         "r18dev",
                         "dmm"
                     ]
+                },
+                "show_offline_evidence": {
+                    "type": "boolean"
                 }
             }
         },
@@ -7036,6 +7054,9 @@ const docTemplate = `{
                         "r18dev",
                         "dmm"
                     ]
+                },
+                "show_offline_evidence": {
+                    "type": "boolean"
                 }
             }
         },
@@ -7054,6 +7075,9 @@ const docTemplate = `{
                 },
                 "movie": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView"
+                },
+                "offline_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report"
                 },
                 "sources_used": {
                     "type": "integer",
@@ -7135,6 +7159,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse": {
             "type": "object",
             "properties": {
+                "offline_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report"
+                },
                 "results": {
                     "type": "array",
                     "items": {
@@ -7675,6 +7702,9 @@ const docTemplate = `{
                 "nfo": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig"
                 },
+                "offline_scrape_evidence": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.OfflineScrapeEvidenceConfig"
+                },
                 "priority": {
                     "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig"
                 },
@@ -7845,6 +7875,20 @@ const docTemplate = `{
                 },
                 "max_queued_tasks": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_config.OfflineScrapeEvidenceConfig": {
+            "type": "object",
+            "properties": {
+                "artifact_directory": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "max_age_hours": {
+                    "type": "number"
                 }
             }
         },
@@ -9219,6 +9263,97 @@ const docTemplate = `{
                 "OperationModeMetadataArtwork",
                 "OperationModePreview"
             ]
+        },
+        "github_com_javinizer_javinizer-go_internal_scrapeevidence.Observation": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dataset_sha256": {
+                    "type": "string"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "observed_at": {
+                    "type": "string"
+                },
+                "outcome": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome"
+                },
+                "parser_revision": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome": {
+            "type": "string",
+            "enum": [
+                "disabled",
+                "unavailable",
+                "busy",
+                "no_source_reference",
+                "unsupported_identity",
+                "stale",
+                "future",
+                "unmatched",
+                "ambiguous",
+                "evidence_available",
+                "provider_failed",
+                "cancelled",
+                "budget_exceeded"
+            ],
+            "x-enum-varnames": [
+                "Disabled",
+                "Unavailable",
+                "Busy",
+                "NoSourceReference",
+                "UnsupportedIdentity",
+                "Stale",
+                "Future",
+                "Unmatched",
+                "Ambiguous",
+                "Available",
+                "ProviderFailed",
+                "Cancelled",
+                "BudgetExceeded"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_scrapeevidence.Report": {
+            "type": "object",
+            "properties": {
+                "admitted_at": {
+                    "type": "string"
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Observation"
+                    }
+                },
+                "outcome": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome"
+                },
+                "recovered": {
+                    "type": "boolean"
+                },
+                "snapshot_digest": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride": {
             "type": "object",

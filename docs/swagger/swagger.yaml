@@ -251,6 +251,8 @@ definitions:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
       movie_id:
         type: string
+      offline_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report'
       part_number:
         type: integer
       part_suffix:
@@ -378,6 +380,8 @@ definitions:
         items:
           type: string
         type: array
+      show_offline_evidence:
+        type: boolean
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchRescrapeResponse:
     properties:
@@ -391,6 +395,8 @@ definitions:
         type: object
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      offline_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report'
       revision:
         description: |-
           Revision is the fresh post-commit revision of the rescraped result
@@ -462,6 +468,8 @@ definitions:
         items:
           type: string
         type: array
+      show_offline_evidence:
+        type: boolean
       strict:
         example: false
         type: boolean
@@ -827,6 +835,8 @@ definitions:
         description: Merge statistics when NFO merging occurred
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      offline_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report'
       provenance:
         additionalProperties:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.DataSource'
@@ -1470,6 +1480,8 @@ definitions:
         items:
           type: string
         type: array
+      show_offline_evidence:
+        type: boolean
     required:
     - selected_scrapers
     type: object
@@ -1608,6 +1620,8 @@ definitions:
         items:
           type: string
         type: array
+      show_offline_evidence:
+        type: boolean
     required:
     - id
     type: object
@@ -1622,6 +1636,8 @@ definitions:
         type: array
       movie:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.MovieView'
+      offline_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report'
       sources_used:
         example: 2
         type: integer
@@ -1684,6 +1700,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.SourceResultsResponse:
     properties:
+      offline_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Report'
       results:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_models.ScraperResult'
@@ -2062,6 +2080,8 @@ definitions:
         type: array
       nfo:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.NFOConfig'
+      offline_scrape_evidence:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.OfflineScrapeEvidenceConfig'
       priority:
         $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_config.PriorityConfig'
       r18dev_dump:
@@ -2170,6 +2190,15 @@ definitions:
         type: integer
       max_queued_tasks:
         type: integer
+    type: object
+  github_com_javinizer_javinizer-go_internal_config.OfflineScrapeEvidenceConfig:
+    properties:
+      artifact_directory:
+        type: string
+      enabled:
+        type: boolean
+      max_age_hours:
+        type: number
     type: object
   github_com_javinizer_javinizer-go_internal_config.OpenAICompatibleTranslationConfig:
     properties:
@@ -3180,6 +3209,74 @@ definitions:
     - OperationModeInPlaceNoRenameFolder
     - OperationModeMetadataArtwork
     - OperationModePreview
+  github_com_javinizer_javinizer-go_internal_scrapeevidence.Observation:
+    properties:
+      aliases:
+        items:
+          type: string
+        type: array
+      dataset_sha256:
+        type: string
+      japanese_name:
+        type: string
+      observed_at:
+        type: string
+      outcome:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome'
+      parser_revision:
+        type: string
+      source:
+        type: string
+      source_id:
+        type: string
+      source_url:
+        type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome:
+    enum:
+    - disabled
+    - unavailable
+    - busy
+    - no_source_reference
+    - unsupported_identity
+    - stale
+    - future
+    - unmatched
+    - ambiguous
+    - evidence_available
+    - provider_failed
+    - cancelled
+    - budget_exceeded
+    type: string
+    x-enum-varnames:
+    - Disabled
+    - Unavailable
+    - Busy
+    - NoSourceReference
+    - UnsupportedIdentity
+    - Stale
+    - Future
+    - Unmatched
+    - Ambiguous
+    - Available
+    - ProviderFailed
+    - Cancelled
+    - BudgetExceeded
+  github_com_javinizer_javinizer-go_internal_scrapeevidence.Report:
+    properties:
+      admitted_at:
+        type: string
+      observations:
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Observation'
+        type: array
+      outcome:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_scrapeevidence.Outcome'
+      recovered:
+        type: boolean
+      snapshot_digest:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_scraperconfig.ActressNameOverride:
     properties:
       first_name:

@@ -183,3 +183,44 @@ describe('rescrape controller translation-warning reconciliation', () => {
 		expect(updated?.translation_warning_code).toBeUndefined();
 	});
 });
+
+describe('offline evidence operation and stale-response ownership', () => {
+	const report={outcome:'evidence_available',admitted_at:'stored',snapshot_digest:'A'};
+	it.each([undefined,false,true])('sends only true operation evidence request (%s)', async (enabled) => {
+		const {deps}=makeDeps({rescrapeResponse:{movie:makeMovie('IPX-951')}});
+		await createRescrapeController(deps).executeRescrape({manualSearchMode:false,manualSearchInput:'',showOfflineEvidence:enabled});
+		const request=deps.api.rescrapeBatchMovie.mock.calls[0][2];
+		if(enabled) expect(request.show_offline_evidence).toBe(true); else expect(request).not.toHaveProperty('show_offline_evidence');
+	});
+	it.each([false,true])('fresh success replaces/clears old report presence=%s', async (present) => {
+		const current=makeResult({offline_evidence:report}); const next=present?{...report,snapshot_digest:'B'}:undefined;
+		const {deps,calls}=makeDeps({currentResult:current,rescrapeResponse:{movie:makeMovie('IPX-951'),offline_evidence:next}});
+		await createRescrapeController(deps).executeRescrape(); expect(calls.setJob.at(-1)?.results[FILE_PATH].offline_evidence).toEqual(next);
+		expect(calls.setJob.at(-1)?.results[FILE_PATH].movie).not.toHaveProperty('offline_evidence');
+	});
+	it('failed rescrape preserves the historical report', async () => {
+		const {deps,calls}=makeDeps({currentResult:makeResult({offline_evidence:report})});
+		await createRescrapeController(deps).executeRescrape(); expect(calls.setJob).toHaveLength(0); expect(deps.getJob()?.results[FILE_PATH].offline_evidence).toEqual(report);
+	});
+	it.each([false,true])('rejects delayed response before any side effect when newer evidence presence=%s', async (present) => {
+		const {deps,calls}=makeDeps({currentResult:makeResult({revision:1})}); let deliver!:(value:BatchRescrapeResponse)=>void;
+		deps.api.rescrapeBatchMovie.mockImplementation(() => new Promise<BatchRescrapeResponse>(resolve => {deliver=resolve;}));
+		const edits=new Map([[FILE_PATH,makeMovie('Unsaved editor')]]); deps.getEditedMovies=()=>edits; deps.setShowRescrapeModal=vi.fn();
+		const pending=createRescrapeController(deps).executeRescrape(); const newer=makeJob(makeResult({revision:3,offline_evidence:present?report:undefined})); deps.setJob(newer);
+		deliver({movie:makeMovie('Stale movie'),revision:2,offline_evidence:present?undefined:report}); await pending;
+		expect(deps.getJob()).toBe(newer); expect(calls.setJob).toHaveLength(1); expect(edits.has(FILE_PATH)).toBe(true); expect(deps.setShowRescrapeModal).not.toHaveBeenCalled(); expect(calls.toastSuccess).toHaveLength(0);
+	});
+	it('rejects changed same-path result identity', async () => {
+		const {deps,calls}=makeDeps({currentResult:makeResult({revision:1})}); let deliver!:(value:BatchRescrapeResponse)=>void;
+		deps.api.rescrapeBatchMovie.mockImplementation(() => new Promise<BatchRescrapeResponse>(resolve => {deliver=resolve;}));
+		const pending=createRescrapeController(deps).executeRescrape(); const newer=makeJob(makeResult({result_id:'replacement',revision:1})); deps.setJob(newer);
+		deliver({movie:makeMovie('Wrong identity'),revision:2}); await pending; expect(deps.getJob()).toBe(newer); expect(calls.toastSuccess).toHaveLength(0);
+	});
+	it('cannot cross a route A→B→A session boundary', async () => {
+		const {deps,calls}=makeDeps(); let generation=1; deps.getRouteGeneration=()=>generation;
+		deps.isCurrentOperation=((id:string,gen:number)=>id==='job-1'&&gen===generation) as typeof deps.isCurrentOperation;
+		let deliver!:(value:BatchRescrapeResponse)=>void; deps.api.rescrapeBatchMovie.mockImplementation(() => new Promise<BatchRescrapeResponse>(resolve => {deliver=resolve;}));
+		const pending=createRescrapeController(deps).executeRescrape(); generation=3; deliver({movie:makeMovie('Old route'),revision:2,offline_evidence:report}); await pending;
+		expect(calls.setJob).toHaveLength(0); expect(calls.toastSuccess).toHaveLength(0);
+	});
+});

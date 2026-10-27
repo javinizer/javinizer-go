@@ -24,6 +24,7 @@ import { overlayFieldOverride } from './overlay-field-override';
 import { reconcilePosterSuccess } from './poster-success-reconciliation';
 import { applyCropEcho, clearCropGeometry, rescrapeClearedMovieKeys } from './poster-crop-sync';
 import { buildMovieToSave, rebaseOverlayOntoMovie } from './save-helpers';
+import { acceptsResultSnapshot, reconcileJobSnapshot } from './reconcile-job-snapshot';
 import * as m from '$lib/paraglide/messages';
 
 interface ReviewMutationsDeps {
@@ -556,6 +557,7 @@ const ops = Array.from(latestByFamily.entries());
 		generation: number;
 		movieIds: string[];
 		selectedScrapers: string[];
+		showOfflineEvidence?: boolean;
 		preset?: string;
 		scalarStrategy?: string;
 		arrayStrategy?: string;
@@ -565,6 +567,7 @@ const ops = Array.from(latestByFamily.entries());
 			generation: mutationGeneration,
 			movieIds,
 			selectedScrapers,
+			showOfflineEvidence,
 			preset,
 			scalarStrategy,
 			arrayStrategy,
@@ -573,12 +576,14 @@ const ops = Array.from(latestByFamily.entries());
 			generation: number;
 			movieIds: string[];
 			selectedScrapers: string[];
+		showOfflineEvidence?: boolean;
 			preset?: string;
 			scalarStrategy?: string;
 			arrayStrategy?: string;
 		}) => {
 			return deps.bulkRescrapeMovies(mutationJobId, {
 				movie_ids: movieIds,
+				...(showOfflineEvidence ? { show_offline_evidence: true } : {}),
 				selected_scrapers: selectedScrapers,
 				preset: preset as 'conservative' | 'gap-fill' | 'aggressive' | undefined,
 				scalar_strategy: scalarStrategy as
@@ -593,9 +598,10 @@ const ops = Array.from(latestByFamily.entries());
 		},
 		onSuccess: (data, { movieIds, jobId: mutationJobId, generation }) => {
 			if (!isCurrentJob(mutationJobId, generation)) return;
+			const previousJob = deps.getJob();
 			if (data.job) {
 				deps.skipJobSync();
-				deps.setJob(data.job, mutationJobId, generation);
+				deps.setJob(reconcileJobSnapshot(previousJob, data.job)!, mutationJobId, generation);
 			}
 
 			// Rescrape clears stored crop geometry server-side; mirror that into
@@ -608,6 +614,7 @@ const ops = Array.from(latestByFamily.entries());
 				const editedMovies = deps.getEditedMovies();
 				for (const [filePath, result] of Object.entries(jobSnapshot.results ?? {})) {
 					const fr = result as FileResult;
+					if (!acceptsResultSnapshot(previousJob?.results[filePath], fr)) continue;
 					// codex cloud P1: fold to match poster-crop-sync keys — an
 					// overlay keyed by the OLD ID spelling must clear too.
 					if (!succeededIds.has((fr.movie_id ?? '').toLowerCase())) continue;

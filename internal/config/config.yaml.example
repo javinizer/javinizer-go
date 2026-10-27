@@ -264,6 +264,13 @@ metadata:
         series: []
         title: []
         trailer_url: []
+    # Read-only R18 source evidence in scrape review; restart required.
+    # Separate from offline_name_sync; each scrape operation must also opt in.
+    offline_scrape_evidence:
+        enabled: false
+        artifact_directory: ""
+        max_age_hours: 168
+
     # Actress image database (SQLite-backed)
     actress_database:
         enabled: true

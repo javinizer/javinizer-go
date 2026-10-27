@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"encoding/json"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 
 	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -11,19 +12,20 @@ import (
 
 // BatchScrapeRequest represents a batch scrape request
 type BatchScrapeRequest struct {
-	Files            []string          `json:"files" binding:"required"`
-	Strict           bool              `json:"strict" example:"false"`
-	Force            bool              `json:"force" example:"false"`
-	Destination      string            `json:"destination,omitempty" example:"/path/to/output"` // Persisted on job for UI retrieval; required for organize mode, optional for in-place modes
-	Update           bool              `json:"update" example:"false"`                          // Update mode: only create/update metadata files without moving video files
-	SelectedScrapers []string          `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
-	Preset           string            `json:"preset,omitempty" example:"conservative"`                            // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
-	ScalarStrategy   string            `json:"scalar_strategy,omitempty" example:"prefer-nfo"`                     // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	ArrayStrategy    string            `json:"array_strategy,omitempty" example:"merge"`                           // For Update mode: merge, replace
-	OperationMode    string            `json:"operation_mode,omitempty" example:"organize"`                        // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
-	ManualInputs     map[string]string `json:"manual_inputs,omitempty" example:"{\"/path/file.mp4\":\"IPX-123\"}"` // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
-	ApplyPlan        *applyplan.Plan   `json:"apply_plan,omitempty"`
-	present          map[string]bool   `json:"-"`
+	ShowOfflineEvidence bool              `json:"show_offline_evidence,omitempty"`
+	Files               []string          `json:"files" binding:"required"`
+	Strict              bool              `json:"strict" example:"false"`
+	Force               bool              `json:"force" example:"false"`
+	Destination         string            `json:"destination,omitempty" example:"/path/to/output"` // Persisted on job for UI retrieval; required for organize mode, optional for in-place modes
+	Update              bool              `json:"update" example:"false"`                          // Update mode: only create/update metadata files without moving video files
+	SelectedScrapers    []string          `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	Preset              string            `json:"preset,omitempty" example:"conservative"`                            // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
+	ScalarStrategy      string            `json:"scalar_strategy,omitempty" example:"prefer-nfo"`                     // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
+	ArrayStrategy       string            `json:"array_strategy,omitempty" example:"merge"`                           // For Update mode: merge, replace
+	OperationMode       string            `json:"operation_mode,omitempty" example:"organize"`                        // Override config.output.operation_mode: organize, in-place, in-place-norenamefolder, metadata-artwork, preview
+	ManualInputs        map[string]string `json:"manual_inputs,omitempty" example:"{\"/path/file.mp4\":\"IPX-123\"}"` // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
+	ApplyPlan           *applyplan.Plan   `json:"apply_plan,omitempty"`
+	present             map[string]bool   `json:"-"`
 }
 
 // UnmarshalJSON .
@@ -93,6 +95,7 @@ type BatchScrapeResponse struct {
 // BatchFileResult represents a per-file result in a batch job response.
 // Flattened from FileMatchInfo to match the frontend FileResult contract.
 type BatchFileResult struct {
+	OfflineEvidence *scrapeevidence.Report        `json:"offline_evidence,omitempty"`
 	VideoCollision  *videocollision.ConflictError `json:"video_collision,omitempty"`
 	RecoveryWarning string                        `json:"recovery_warning,omitempty"`
 	VideoOutcome    string                        `json:"video_outcome,omitempty"`
@@ -123,6 +126,7 @@ type BatchFileResult struct {
 
 // BatchFileResultSlim is a lightweight per-file result without movie data.
 type BatchFileResultSlim struct {
+	OfflineEvidence *scrapeevidence.Report        `json:"offline_evidence,omitempty"`
 	VideoCollision  *videocollision.ConflictError `json:"video_collision,omitempty"`
 	RecoveryWarning string                        `json:"recovery_warning,omitempty"`
 	VideoOutcome    string                        `json:"video_outcome,omitempty"`
@@ -203,25 +207,28 @@ type BatchJobListResponse struct {
 
 // RescrapeRequest represents a request to rescrape with specific scrapers
 type RescrapeRequest struct {
-	SelectedScrapers []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`
-	Force            bool     `json:"force" example:"false"`
+	ShowOfflineEvidence bool     `json:"show_offline_evidence,omitempty"`
+	SelectedScrapers    []string `json:"selected_scrapers" binding:"required" example:"r18dev,dmm"`
+	Force               bool     `json:"force" example:"false"`
 }
 
 // BatchRescrapeRequest represents a batch rescrape request for manual search/rescraping
 type BatchRescrapeRequest struct {
-	Force             bool     `json:"force" example:"false"`
-	SelectedScrapers  []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
-	ManualSearchInput string   `json:"manual_search_input,omitempty" example:"IPX-535"`
-	Preset            string   `json:"preset,omitempty" example:"conservative"`        // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
-	ScalarStrategy    string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"` // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
-	ArrayStrategy     string   `json:"array_strategy,omitempty" example:"merge"`       // For Update mode: merge, replace
+	ShowOfflineEvidence bool     `json:"show_offline_evidence,omitempty"`
+	Force               bool     `json:"force" example:"false"`
+	SelectedScrapers    []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	ManualSearchInput   string   `json:"manual_search_input,omitempty" example:"IPX-535"`
+	Preset              string   `json:"preset,omitempty" example:"conservative"`        // Merge strategy preset: conservative, gap-fill, aggressive (overrides scalar/array strategies)
+	ScalarStrategy      string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"` // For Update mode: prefer-nfo, prefer-scraper, preserve-existing, fill-missing-only
+	ArrayStrategy       string   `json:"array_strategy,omitempty" example:"merge"`       // For Update mode: merge, replace
 }
 
 // BatchRescrapeResponse represents a batch rescrape response with movie
 type BatchRescrapeResponse struct {
-	Movie          *MovieView        `json:"movie"`
-	FieldSources   map[string]string `json:"field_sources,omitempty"`
-	ActressSources map[string]string `json:"actress_sources,omitempty"`
+	OfflineEvidence *scrapeevidence.Report `json:"offline_evidence,omitempty"`
+	Movie           *MovieView             `json:"movie"`
+	FieldSources    map[string]string      `json:"field_sources,omitempty"`
+	ActressSources  map[string]string      `json:"actress_sources,omitempty"`
 	// TranslationWarning is populated when metadata translation partially failed
 	// or degraded during this rescrape (kept-original fields); empty when clean.
 	TranslationWarning string `json:"translation_warning,omitempty"`
@@ -254,12 +261,13 @@ type BatchExcludeResponse struct {
 
 // BulkRescrapeRequest represents a request to rescrape multiple movies in a batch job
 type BulkRescrapeRequest struct {
-	MovieIDs         []string `json:"movie_ids" binding:"required" example:"IPX-535,ABC-123"`
-	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
-	Force            bool     `json:"force" example:"false"`
-	Preset           string   `json:"preset,omitempty" example:"conservative"`
-	ScalarStrategy   string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`
-	ArrayStrategy    string   `json:"array_strategy,omitempty" example:"merge"`
+	ShowOfflineEvidence bool     `json:"show_offline_evidence,omitempty"`
+	MovieIDs            []string `json:"movie_ids" binding:"required" example:"IPX-535,ABC-123"`
+	SelectedScrapers    []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	Force               bool     `json:"force" example:"false"`
+	Preset              string   `json:"preset,omitempty" example:"conservative"`
+	ScalarStrategy      string   `json:"scalar_strategy,omitempty" example:"prefer-nfo"`
+	ArrayStrategy       string   `json:"array_strategy,omitempty" example:"merge"`
 }
 
 // BulkRescrapeMovieResult represents the per-movie result of a bulk rescrape operation

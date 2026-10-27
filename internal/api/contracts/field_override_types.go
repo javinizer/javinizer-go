@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 )
 
 // FieldOverrideRequest is the body for POST
@@ -38,5 +39,6 @@ type FieldOverrideResponse struct {
 // only for legacy envelopes persisted before this feature or when provenance
 // was never set.
 type SourceResultsResponse struct {
-	Results []*models.ScraperResult `json:"results"`
+	OfflineEvidence *scrapeevidence.Report  `json:"offline_evidence,omitempty"`
+	Results         []*models.ScraperResult `json:"results"`
 }

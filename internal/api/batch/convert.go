@@ -85,6 +85,7 @@ func movieResultToResponse(mr *resultstore.MovieResult, prov *resultstore.Proven
 	if prov != nil {
 		result.FieldSources = prov.FieldSources
 		result.ActressSources = prov.ActressSources
+		result.OfflineEvidence = prov.OfflineEvidence.Clone()
 	}
 	return result
 }
@@ -115,6 +116,7 @@ func movieResultToSlimResponse(mr *resultstore.MovieResult, prov *resultstore.Pr
 	if prov != nil {
 		result.FieldSources = prov.FieldSources
 		result.ActressSources = prov.ActressSources
+		result.OfflineEvidence = prov.OfflineEvidence.Clone()
 	}
 	return result
 }

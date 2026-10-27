@@ -153,7 +153,12 @@ func (s *scraper) resolveDumpReleaseDate(d *models.DumpMovie, result *models.Scr
 
 func (s *scraper) resolveDumpActresses(d *models.DumpMovie, result *models.ScraperResult) {
 	result.Actresses = make([]models.ActressInfo, 0, len(d.Actresses))
+	refs := make([]string, 0, min(len(d.Actresses), 65))
 	for _, a := range d.Actresses {
+		// Preserve the opaque derived_actress key before legacy atoi projection.
+		if len(refs) < 65 {
+			refs = append(refs, a.ID)
+		}
 		thumbURL := a.ImageURL
 		if thumbURL != "" && !strings.HasPrefix(thumbURL, "http") {
 			thumbURL = "https://pics.dmm.co.jp/mono/actjpgs/" + thumbURL
@@ -191,6 +196,7 @@ func (s *scraper) resolveDumpActresses(d *models.DumpMovie, result *models.Scrap
 			ThumbURL:     thumbURL,
 		})
 	}
+	result.SetR18DumpActorReferences(refs)
 }
 
 func (s *scraper) resolveDumpGenres(d *models.DumpMovie, result *models.ScraperResult) {

@@ -141,19 +141,20 @@ func ListJobsUseCase(ctx context.Context, deps *core.APIDeps, input ListJobsInpu
 
 // StartScrapeInput holds the parameters for starting a batch scrape job.
 type StartScrapeInput struct {
-	Files            []string
-	Destination      string
-	OperationMode    string
-	Preset           string
-	ScalarStrategy   string
-	ArrayStrategy    string
-	Update           *bool
-	ApplyPlan        *applyplan.Plan
-	MirrorPresence   planMirrors
-	SelectedScrapers []string
-	Strict           bool
-	Force            bool
-	ManualInputs     map[string]string
+	ShowOfflineEvidence bool
+	Files               []string
+	Destination         string
+	OperationMode       string
+	Preset              string
+	ScalarStrategy      string
+	ArrayStrategy       string
+	Update              *bool
+	ApplyPlan           *applyplan.Plan
+	MirrorPresence      planMirrors
+	SelectedScrapers    []string
+	Strict              bool
+	Force               bool
+	ManualInputs        map[string]string
 }
 
 // launchJobScrape starts the scrape phase and logs a launch failure. The
@@ -180,6 +181,22 @@ func StartScrapeUseCase(
 	rt *core.APIRuntime,
 	input StartScrapeInput,
 ) (*StartScrapeOutput, error) {
+	// Admission precedes all dependency/DB work even for direct callers.
+	admitted, err := rt.AdmitOfflineEvidenceOperation(input.ShowOfflineEvidence)
+	if err != nil {
+		return nil, err
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			admitted()
+		}
+	}()
+	ctx, unlink := rt.LinkOfflineEvidenceOperationContext(ctx, input.ShowOfflineEvidence)
+	defer unlink()
+	if input.ShowOfflineEvidence && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	// Take one consistent snapshot so the APIConfig (security/scanner settings),
 	// the batch workflow, and the batch job factory all come from the same reload
 	// epoch. Reading them via separate accessors could mix old/new state if a
@@ -246,6 +263,27 @@ func StartScrapeUseCase(
 	// be dead code (unreachable: BatchWorkflow errors first on a broken factory).
 	factory := snap.BatchJobFactory()
 
+	// Async work must outlive the initiating HTTP request. Pin exactly one
+	// generation on the server context after multipart discovery, before fanout.
+	if input.ShowOfflineEvidence && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	batchCtx, releaseEvidence, err := rt.BeginOfflineScrapeEvidenceForFiles(rt.ServerCtx(), input.ShowOfflineEvidence, len(allFiles))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if !transferred {
+			releaseEvidence()
+		}
+	}()
+	if input.ShowOfflineEvidence && (ctx.Err() != nil || batchCtx.Err() != nil) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, batchCtx.Err()
+	}
+
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
 		ID:                    jobID,
 		Destination:           destination,
@@ -255,6 +293,19 @@ func StartScrapeUseCase(
 		WF:                    wf,
 		FileMatchInfo:         matchInfo,
 	})
+
+	// A shutdown racing admitted persistence must join this path, cancel the
+	// committed row, and never launch a source worker or return HTTP success.
+	if input.ShowOfflineEvidence && (ctx.Err() != nil || batchCtx.Err() != nil) {
+		job.Cancel()
+		if persistErr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); persistErr != nil {
+			return nil, fmt.Errorf("cancel admitted job: %w", persistErr)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, batchCtx.Err()
+	}
 
 	scrapeOpts := factory.NewScrapeConfig(input.SelectedScrapers, input.Strict, input.Force)
 	// Propagate the discovered file match metadata into the scrape phase so it
@@ -275,15 +326,20 @@ func StartScrapeUseCase(
 	// StartScrape itself returns after launching the inner phase goroutine,
 	// so the tracked goroutine must additionally Wait() — which joins the
 	// phase's full return, including its deferred persistence (phaseDone).
-	done := rt.TrackBackgroundTask()
+	done := admitted
+	if !input.ShowOfflineEvidence {
+		done = rt.TrackBackgroundTask()
+	}
 	go func() {
 		defer done()
-		if err := launchJobScrape(job, rt.ServerCtx(), allFiles, scrapeOpts); err == nil {
+		defer releaseEvidence()
+		if err := launchJobScrape(job, batchCtx, allFiles, scrapeOpts); err == nil {
 			if err := job.Wait(); err != nil {
 				logging.Warnf("scrape job %s Wait() returned: %v", job.GetID(), err)
 			}
 		}
 	}()
 
+	transferred = true
 	return &StartScrapeOutput{JobID: job.GetID()}, nil
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/organizer"
 	"github.com/javinizer/javinizer-go/internal/scrape"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 )
 
 // Workflow is the composition root for the 5-phase pipeline.
@@ -22,7 +23,14 @@ type Workflow struct {
 // cache bypass), DisplayTitle, and transactional persistence.
 // Returns the scrape result, orchestration metadata, and any error.
 func (w *Workflow) Scrape(ctx context.Context, cmd scrape.ScrapeCmd) (*scrape.ScrapeResult, *OrchestrationMeta, error) {
-	return w.scrape.Execute(ctx, cmd)
+	result, meta, err := w.scrape.Execute(ctx, cmd)
+	if result != nil {
+		result.OfflineEvidence = nil
+		if err == nil && result.Status == scrape.StatusCompleted && result.Movie != nil {
+			result.OfflineEvidence = scrapeevidence.Resolve(ctx, result.ScraperResults, result.Cached)
+		}
+	}
+	return result, meta, err
 }
 
 // Apply delegates to the internal applyOrchestrator which owns the 6-step Apply

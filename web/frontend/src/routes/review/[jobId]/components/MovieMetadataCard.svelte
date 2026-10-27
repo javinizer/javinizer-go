@@ -81,9 +81,9 @@
 
 <Card class="p-4 lg:p-5" data-testid="movie-metadata-card">
 	<div class="space-y-3">
-		<div class="flex items-center justify-between">
+		<div class="flex flex-wrap items-center justify-between gap-3">
 			<h2 class="text-xl font-semibold">{m.review_movie_metadata()}</h2>
-			<div class="flex items-center gap-3">
+			<div class="flex min-w-0 flex-wrap items-center gap-3">
 				<label class="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
 					<input
 						type="checkbox"
@@ -92,7 +92,7 @@
 					/>
 					{m.review_show_scraper_per_field()}
 				</label>
-				<div class="flex gap-2">
+				<div class="flex flex-wrap gap-2">
 					<Button variant="outline" size="sm" onclick={onOpenSourceViewer}>
 						{#snippet children()}
 							<TableProperties class="h-4 w-4 mr-2" />

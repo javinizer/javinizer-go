@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -195,6 +196,24 @@ func (w *familyKeyedResultMap) CommitResultWithProvenanceAndRevisions(filePath s
 				return nil, err
 			}
 		}
+	}
+	// The family lock fences edits, but only the store lock also fences readers.
+	// Evidence must never be visible beside another result revision.
+	if prov != nil && prov.OfflineEvidence != nil && w.updater == nil {
+		return nil, fmt.Errorf("offline evidence unavailable: result store has no provenance publisher")
+	}
+	if atomic, ok := w.ResultMapAccessor.(resultstore.AtomicResultCommitter); ok {
+		publish := prov
+		if w.updater == nil {
+			publish = nil
+		}
+		if err := atomic.CommitResultAndProvenance(filePath, result, expectedRevision, publish); err != nil {
+			return nil, err
+		}
+		return familyRevisionSnapshotFromResultMap(w.ResultMapAccessor, filePath), nil
+	}
+	if requiresAtomicEvidence(w.ResultMapAccessor, filePath, prov) {
+		return nil, fmt.Errorf("offline evidence unavailable: result store does not support atomic publication")
 	}
 	if err := w.ResultMapAccessor.CommitResult(filePath, result, expectedRevision); err != nil {
 		return nil, err

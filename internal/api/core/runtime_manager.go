@@ -156,6 +156,7 @@ type APIRuntime struct {
 
 	serverLifecycleState
 	offlineNameSyncState
+	offlineScrapeEvidenceState
 
 	// startupSweep is configured during bootstrap and started by the API server
 	// after bootstrap has returned. Once makes the startup repair one-shot even

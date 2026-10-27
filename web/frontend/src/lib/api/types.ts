@@ -52,6 +52,7 @@ export interface PathAutocompleteResponse {
 }
 
 export interface ScrapeRequest {
+	show_offline_evidence?: boolean;
 	id: string;
 	force?: boolean;
 	selected_scrapers?: string[];
@@ -75,6 +76,7 @@ export type TranslationWarningCode =
 
 /** POST /api/v1/scrape response (backend contracts.ScrapeResponse). */
 export interface ScrapeResponse {
+	offline_evidence?: OfflineEvidenceReport;
 	cached?: boolean;
 	movie: Movie;
 	sources_used?: number;
@@ -85,6 +87,7 @@ export interface ScrapeResponse {
 
 /** Return shape of scrapeMovie/rescrapeMovie (warning fields populated on partial/degraded translation). */
 export interface ScrapeMovieResult {
+	offline_evidence?: OfflineEvidenceReport;
 	movie: Movie;
 	translation_warning?: string;
 	translation_warning_code?: TranslationWarningCode;
@@ -173,6 +176,7 @@ export interface EffectiveApplyPlan {
 }
 
 export interface BatchScrapeRequest {
+	show_offline_evidence?: boolean;
 	files: string[];
 	strict: boolean;
 	force: boolean;
@@ -193,6 +197,7 @@ export interface BatchScrapeRequest {
 }
 
 export interface RescrapeRequest {
+	show_offline_evidence?: boolean;
 	selected_scrapers: string[];
 	force?: boolean;
 }
@@ -317,7 +322,29 @@ export interface ScraperResult {
 	translations?: MovieTranslation[];
 }
 
+/** Historical read-only source assertions, never Movie fields or verified DMM identity. */
+export interface OfflineEvidenceObservation {
+	source: string;
+	source_id?: string;
+	outcome: string;
+	japanese_name?: string;
+	aliases?: string[];
+	source_url?: string;
+	observed_at?: string;
+	dataset_sha256?: string;
+	parser_revision?: string;
+}
+
+export interface OfflineEvidenceReport {
+	outcome: string;
+	snapshot_digest?: string;
+	admitted_at: string;
+	recovered?: boolean;
+	observations?: OfflineEvidenceObservation[];
+}
+
 export interface SourceResultsResponse {
+	offline_evidence?: OfflineEvidenceReport;
 	results: ScraperResult[];
 }
 
@@ -337,6 +364,7 @@ export interface FieldOverrideResponse {
 }
 
 export interface BatchRescrapeRequest {
+	show_offline_evidence?: boolean;
 	force?: boolean;
 	selected_scrapers?: string[];
 	manual_search_input?: string;
@@ -351,6 +379,7 @@ export interface BatchRescrapeRequest {
 }
 
 export interface BatchRescrapeResponse {
+	offline_evidence?: OfflineEvidenceReport;
 	movie: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
@@ -367,6 +396,7 @@ export interface BatchRescrapeResponse {
 }
 
 export interface BulkRescrapeRequest {
+	show_offline_evidence?: boolean;
 	movie_ids: string[];
 	selected_scrapers?: string[];
 	force?: boolean;
@@ -461,6 +491,7 @@ export type FileResultErrorCode =
 	| 'credit_status_unavailable';
 
 export interface FileResult {
+	offline_evidence?: OfflineEvidenceReport;
 	recovery_warning?: string;
 	video_collision?: { code: string; collision: VideoCollision };
 	video_outcome?: 'installed' | 'replaced' | 'skipped' | 'same-file';
@@ -1250,6 +1281,11 @@ export interface CompletenessConfig {
 }
 
 export interface MetadataConfig {
+	offline_scrape_evidence?: {
+		enabled: boolean;
+		artifact_directory: string;
+		max_age_hours: number;
+	};
 	priority?: Record<string, string[]>;
 	actress_database?: ActressDatabaseConfig;
 	genre_replacement?: GenreReplacementConfig;
