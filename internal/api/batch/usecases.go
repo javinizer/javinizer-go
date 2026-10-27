@@ -174,6 +174,25 @@ type StartScrapeOutput struct {
 	JobID string
 }
 
+// offlineEvidenceScrapeAdmissionErr checks the authoritative server lifetime,
+// not just its descendants: root cancellation closes Done before propagating to
+// child contexts, and the request link uses an asynchronous AfterFunc callback.
+// Default-off callers retain the legacy lifecycle and cancellation behavior.
+func offlineEvidenceScrapeAdmissionErr(rt *core.APIRuntime, requested bool, contexts ...context.Context) error {
+	if !requested {
+		return nil
+	}
+	if err := rt.ServerCtx().Err(); err != nil {
+		return err
+	}
+	for _, ctx := range contexts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // StartScrapeUseCase discovers sibling files, resolves seam strings, creates a workflow,
 // and starts a batch scrape job. Returns the job ID on success.
 func StartScrapeUseCase(
@@ -194,8 +213,8 @@ func StartScrapeUseCase(
 	}()
 	ctx, unlink := rt.LinkOfflineEvidenceOperationContext(ctx, input.ShowOfflineEvidence)
 	defer unlink()
-	if input.ShowOfflineEvidence && ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := offlineEvidenceScrapeAdmissionErr(rt, input.ShowOfflineEvidence, ctx); err != nil {
+		return nil, err
 	}
 	// Take one consistent snapshot so the APIConfig (security/scanner settings),
 	// the batch workflow, and the batch job factory all come from the same reload
@@ -265,8 +284,8 @@ func StartScrapeUseCase(
 
 	// Async work must outlive the initiating HTTP request. Pin exactly one
 	// generation on the server context after multipart discovery, before fanout.
-	if input.ShowOfflineEvidence && ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := offlineEvidenceScrapeAdmissionErr(rt, input.ShowOfflineEvidence, ctx); err != nil {
+		return nil, err
 	}
 	batchCtx, releaseEvidence, err := rt.BeginOfflineScrapeEvidenceForFiles(rt.ServerCtx(), input.ShowOfflineEvidence, len(allFiles))
 	if err != nil {
@@ -277,11 +296,8 @@ func StartScrapeUseCase(
 			releaseEvidence()
 		}
 	}()
-	if input.ShowOfflineEvidence && (ctx.Err() != nil || batchCtx.Err() != nil) {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, batchCtx.Err()
+	if err := offlineEvidenceScrapeAdmissionErr(rt, input.ShowOfflineEvidence, ctx, batchCtx); err != nil {
+		return nil, err
 	}
 
 	job := factory.CreateJob(allFiles, worker.BatchJobOptions{
@@ -296,15 +312,14 @@ func StartScrapeUseCase(
 
 	// A shutdown racing admitted persistence must join this path, cancel the
 	// committed row, and never launch a source worker or return HTTP success.
-	if input.ShowOfflineEvidence && (ctx.Err() != nil || batchCtx.Err() != nil) {
+	// This root-lifetime check is the acceptance point; work accepted before
+	// cancellation remains owned by the admitted task until its worker joins.
+	if err := offlineEvidenceScrapeAdmissionErr(rt, input.ShowOfflineEvidence, ctx, batchCtx); err != nil {
 		job.Cancel()
 		if persistErr := rt.Deps().GetJobStore().PersistJobByID(job.GetID()); persistErr != nil {
 			return nil, fmt.Errorf("cancel admitted job: %w", persistErr)
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, batchCtx.Err()
+		return nil, err
 	}
 
 	scrapeOpts := factory.NewScrapeConfig(input.SelectedScrapers, input.Strict, input.Force)
