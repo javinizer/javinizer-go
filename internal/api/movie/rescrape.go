@@ -44,7 +44,7 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 		defer releaseEvidence()
 		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
-			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: scrapeCancelledMessage})
 			return
 		}
 
@@ -101,7 +101,7 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
-			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: scrapeCancelledMessage})
 			return
 		}
 

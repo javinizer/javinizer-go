@@ -6,6 +6,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 )
 
+const scrapeCancelledMessage = "scrape cancelled or timed out"
+
 // beginEvidence installs the API deadline before read admission. Default-off
 // callers keep their original workflow/timeout order and strip inherited sessions.
 func (d MovieDeps) beginEvidence(ctx context.Context, requested bool) (context.Context, func(), error) {

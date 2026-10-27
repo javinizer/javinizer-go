@@ -1,5 +1,12 @@
 /** Genuine production dump adapter and artifact reader; no successful API response mocks. */
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import {
+	test,
+	expect,
+	type APIRequestContext,
+	type Page,
+	type Locator,
+	type TestInfo,
+} from '@playwright/test';
 import type {
 	Actress,
 	BatchJobResponse,
@@ -9,6 +16,43 @@ import type {
 } from '../../../src/lib/api/types';
 import { DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR, seedInputFiles } from '../helpers/fixtures';
 import { installOfflineEvidenceBrowserGuard } from '../helpers/offline-evidence-browser.cjs';
+
+// Assert the evidence can actually be reached without sticky chrome covering its heading,
+// retain that viewport, then capture the complete page with fixed bars at the page edge.
+async function captureEvidenceScreenshots(
+	page: Page,
+	panel: Locator,
+	info: TestInfo,
+	mobile: boolean,
+) {
+	const heading = panel.getByRole('heading', { name: 'R18 source evidence', exact: true });
+	await heading.evaluate((element) =>
+		window.scrollTo({
+			top: window.scrollY + element.getBoundingClientRect().top - 160,
+			behavior: 'instant',
+		}),
+	);
+	await expect(heading).toBeInViewport();
+	await expect
+		.poll(() =>
+			heading.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return element.contains(
+					document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2),
+				);
+			}),
+		)
+		.toBe(true);
+	await info.attach(`${mobile ? 'mobile' : 'desktop'}-evidence-viewport.png`, {
+		body: await page.screenshot(),
+		contentType: 'image/png',
+	});
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await info.attach(mobile ? 'mobile-evidence.png' : 'read-only-evidence.png', {
+		body: await page.screenshot({ fullPage: true }),
+		contentType: 'image/png',
+	});
+}
 
 function canonicalActor(actor: Actress) {
 	return {
@@ -133,10 +177,11 @@ test('real R18 dump evidence is explicitly requested, read-only, preserved on fa
 	await expect(
 		panel.getByText(withEvidence.offline_evidence!.snapshot_digest!, { exact: true }),
 	).toBeVisible();
-	await testInfo.attach('read-only-evidence.png', {
-		body: await panel.screenshot(),
-		contentType: 'image/png',
-	});
+	// Keep transient toast and sticky navigation out of the evidence region without hiding UI.
+	await expect(page.getByRole('alert').filter({ hasText: 'Successfully rescraped' })).toHaveCount(
+		0,
+	);
+	await captureEvidenceScreenshots(page, panel, testInfo, false);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await expect(panel.getByText('r18dev:007', { exact: true })).toBeVisible();
 	await expect(panel.getByText('r18dev:7', { exact: true })).toBeVisible();
@@ -146,13 +191,34 @@ test('real R18 dump evidence is explicitly requested, read-only, preserved on fa
 	expect(bounds).not.toBeNull();
 	expect(bounds!.x).toBeGreaterThanOrEqual(0);
 	expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(391);
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-		true,
-	);
-	await testInfo.attach('mobile-evidence.png', {
-		body: await panel.screenshot(),
-		contentType: 'image/png',
+	const mobileLayout = await page.evaluate(() => ({
+		viewport: window.innerWidth,
+		document: document.documentElement.scrollWidth,
+		overflow: Array.from(document.querySelectorAll('body *'))
+			.map((element) => {
+				const rect = element.getBoundingClientRect();
+				return {
+					tag: element.tagName,
+					id: element.id,
+					classes: element.getAttribute('class'),
+					left: rect.left,
+					right: rect.right,
+					width: rect.width,
+				};
+			})
+			.filter(
+				(element) => element.width > 0 && (element.right > window.innerWidth || element.left < 0),
+			)
+			.slice(0, 30),
+	}));
+	await testInfo.attach('mobile-layout.json', {
+		body: JSON.stringify(mobileLayout),
+		contentType: 'application/json',
 	});
+	expect(mobileLayout.document, JSON.stringify(mobileLayout)).toBeLessThanOrEqual(
+		mobileLayout.viewport,
+	);
+	await captureEvidenceScreenshots(page, panel, testInfo, true);
 	await page.setViewportSize({ width: 1280, height: 720 });
 	await page.reload();
 	await expect(panel.getByText('Supplemental evidence name', { exact: true })).toBeVisible();

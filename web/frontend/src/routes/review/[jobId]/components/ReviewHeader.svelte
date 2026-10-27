@@ -125,7 +125,7 @@
 	];
 </script>
 
-<div class="flex items-center justify-between mb-6">
+<div class="flex flex-col items-start gap-4 mb-6 xl:flex-row xl:items-center xl:justify-between">
 	<div>
 		<h1 class="text-3xl font-bold">{m.review_title()}</h1>
 		<p class="text-muted-foreground mt-1">
@@ -136,7 +136,7 @@
 			{/if}
 		</p>
 	</div>
-	<div class="flex items-center gap-3">
+	<div class="flex w-full min-w-0 flex-wrap items-center gap-3 xl:w-auto">
 		<div class="inline-flex rounded-md border border-input p-1">
 			<Button
 				size="sm"
