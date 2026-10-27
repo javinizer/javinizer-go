@@ -37,6 +37,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
+	import OfflineEvidenceOption from '$lib/components/OfflineEvidenceOption.svelte';
 	import { createScrapersQuery } from '$lib/query/queries';
 	import { portalToBody } from '$lib/actions/portal';
 	import { fade, scale } from 'svelte/transition';
@@ -48,6 +49,7 @@
 	// the persisted manual inputs mid-session.
 	let batchKey = '';
 	let submitting = $state(false);
+	let showOfflineEvidence = $state(false);
 	let errorMsg = $state<string | null>(null);
 	let showScraperModal = $state(false);
 	let modalSelectedScrapers = $state<string[]>([]);
@@ -193,10 +195,12 @@
 		try {
 			const req = buildManualScrapeRequest(rows, {
 				apply_plan: snapshot.applyPlan,
+				show_offline_evidence: showOfflineEvidence,
 				selected_scrapers: snapshot.showScraperSelector ? snapshot.selectedScrapers : undefined,
 				force: snapshot.force
 			});
 			const res: BatchScrapeResponse = await apiClient.batchScrape(req);
+			showOfflineEvidence = false;
 			startJob(res.job_id);
 			await queryClient.invalidateQueries({ queryKey: ['batch-jobs'] });
 			clearPendingScrape();
@@ -365,6 +369,8 @@
 					</ul>
 				{/if}
 			</section>
+
+			<OfflineEvidenceOption bind:checked={showOfflineEvidence} disabled={submitting} />
 
 			<!-- Sticky commit bar -->
 			<div class="sticky bottom-0 z-20">

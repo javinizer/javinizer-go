@@ -26,6 +26,7 @@
 	import VideoCollisionPanel from './components/VideoCollisionPanel.svelte';
 	import ReviewMediaSidebar from './components/ReviewMediaSidebar.svelte';
 	import RescrapeModal from './components/RescrapeModal.svelte';
+	import OfflineEvidenceCard from './components/OfflineEvidenceCard.svelte';
 	import BulkRescrapeProgress from './components/BulkRescrapeProgress.svelte';
 	import SourceViewerModal from './components/SourceViewerModal.svelte';
 	import type { ScraperResult } from '$lib/api/types';
@@ -387,6 +388,8 @@
 								onUpdateCurrentMovie={s.updateCurrentMovie}
 							nfoDifferences={s.nfoDifferences}
 							/>
+
+							<OfflineEvidenceCard report={s.currentResult.offline_evidence} />
 
 							{#if s.currentMovie?.code}
 								{#key s.creditGuidanceRequest}

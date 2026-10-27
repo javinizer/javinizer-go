@@ -62,6 +62,7 @@ import { createReviewSelectionModel } from './review-selection.svelte';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import { buildMovieOverride, rebaseOverlayOntoMovie } from './save-helpers';
+import { acceptsResultSnapshot, reconcileJobSnapshot } from './reconcile-job-snapshot';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import { getReviewDetailTimeoutMs } from '../review-config';
 import {
@@ -1247,7 +1248,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 		showRescrapeModal = true;
 	}
 
-	async function executeBulkRescrape() {
+	async function executeBulkRescrape(mode?: { showOfflineEvidence?: boolean }) {
 		if (bulkRescrapeMovieIds.length === 0) return;
 		const selectedScrapers = rescrapeSelectedScrapers;
 		if (selectedScrapers.length === 0) {
@@ -1267,6 +1268,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 					jobId: targetJobId,
 					generation: targetGeneration,
 					movieIds: bulkRescrapeMovieIds,
+					showOfflineEvidence: mode?.showOfflineEvidence === true,
 					selectedScrapers,
 					preset: rescrapePreset,
 					scalarStrategy: rescrapeScalarStrategy || undefined,
@@ -1643,7 +1645,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 		}
 	}
 	function acceptJobSnapshot(nextJob: BatchJobResponse | null) {
-		job = nextJob;
+		job = reconcileJobSnapshot(job, nextJob);
 		// Capture positive evidence at validated state ingress, even if another
 		// same-generation snapshot replaces it before a render/effect flush.
 		rememberCommittedWarnings();
@@ -1908,7 +1910,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 		}
 	});
 
-	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string }) {
+	async function executeRescrape(mode?: { manualSearchMode: boolean; manualSearchInput: string; showOfflineEvidence?: boolean }) {
 		const targetJobId = jobId;
 		await runForJob(targetJobId, () => rescrapeController.executeRescrape(mode));
 	}
@@ -2512,6 +2514,8 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 				// request was pending, so stale credit snapshots cannot hide the
 				// catalog change that this refresh has just confirmed.
 				for (const [filePath, overlay] of editedMovies) {
+					const nextResult = nextJob.results[filePath];
+					if (!nextResult || !acceptsResultSnapshot(job?.results[filePath], nextResult)) continue;
 					const baselineMovie = baselineJob.results[filePath]?.movie;
 					const freshMovie = nextJob.results[filePath]?.movie;
 					if (baselineMovie && freshMovie) {

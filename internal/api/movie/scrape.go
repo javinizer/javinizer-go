@@ -66,6 +66,19 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 
+		// Admit before workflow/dependency access. The configured deadline also
+		// covers artifact loading; an earlier caller deadline is never extended.
+		scrapeCtx, releaseEvidence, admissionErr := deps.beginEvidence(c.Request.Context(), req.ShowOfflineEvidence)
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer releaseEvidence()
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			return
+		}
+
 		req.ID = strings.TrimSpace(req.ID)
 		if req.ID == "" {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "id is required"})
@@ -95,8 +108,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "workflow not available"})
 			return
 		}
-		scrapeCtx := c.Request.Context()
-		if deps.RequestTimeoutFn != nil {
+		if !req.ShowOfflineEvidence && deps.RequestTimeoutFn != nil {
 			if rt := deps.RequestTimeoutFn(); rt > 0 {
 				var cancel context.CancelFunc
 				scrapeCtx, cancel = context.WithTimeout(scrapeCtx, rt)
@@ -106,7 +118,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		result, meta, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
 			if deps.HistoryRepo != nil && !errors.Is(scrapeCtx.Err(), context.Canceled) {
-				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				auditCtx, auditCancel := context.WithTimeout(evidenceAuditContext(scrapeCtx, req.ShowOfflineEvidence), 5*time.Second)
 				defer auditCancel()
 				safeInput := redactURLCredentials(cmd.RawInput)
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
@@ -122,7 +134,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 		if err != nil {
 			if deps.HistoryRepo != nil && !errors.Is(err, context.Canceled) {
-				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				auditCtx, auditCancel := context.WithTimeout(evidenceAuditContext(scrapeCtx, req.ShowOfflineEvidence), 5*time.Second)
 				defer auditCancel()
 				safeInput := redactURLCredentials(cmd.RawInput)
 				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
@@ -143,7 +155,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 				errMsg = redactEmbeddedURLs(result.Message)
 			}
 			if deps.HistoryRepo != nil {
-				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				auditCtx, auditCancel := context.WithTimeout(evidenceAuditContext(scrapeCtx, req.ShowOfflineEvidence), 5*time.Second)
 				defer auditCancel()
 				safeInput := redactURLCredentials(cmd.RawInput)
 				movieID := safeInput
@@ -166,7 +178,7 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		if deps.HistoryRepo != nil && result.Movie != nil {
-			auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			auditCtx, auditCancel := context.WithTimeout(evidenceAuditContext(scrapeCtx, req.ShowOfflineEvidence), 5*time.Second)
 			defer auditCancel()
 			_ = deps.HistoryRepo.Create(auditCtx, &models.History{
 				MovieID:      result.Movie.ID,
@@ -180,7 +192,12 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		// Poster generation was moved out of the scrape orchestrator;
 		// API endpoints that call wf.Scrape() directly must do it explicitly.
 		if deps.PosterGen != nil && result.Movie != nil {
-			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+			_ = deps.PosterGen.GeneratePoster(evidencePosterContext(c.Request.Context(), scrapeCtx, req.ShowOfflineEvidence), models.SentinelJobID().String(), result.Movie)
+		}
+
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			return
 		}
 
 		// Cached if the scrape seam served from the movie DB cache. Read the
@@ -196,9 +213,10 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 
 		resp := contracts.ScrapeResponse{
-			Cached:      cached,
-			Movie:       contracts.MovieViewFromModel(result.Movie),
-			SourcesUsed: sourcesUsed,
+			OfflineEvidence: result.OfflineEvidence.Clone(),
+			Cached:          cached,
+			Movie:           contracts.MovieViewFromModel(result.Movie),
+			SourcesUsed:     sourcesUsed,
 		}
 		if meta.TranslationWarning != nil {
 			resp.TranslationWarning = *meta.TranslationWarning

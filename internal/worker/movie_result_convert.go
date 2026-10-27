@@ -55,12 +55,13 @@ func scrapeResultToMovieResult(fmi models.FileMatchInfo, result *scrape.ScrapeRe
 	}
 
 	var prov *resultstore.ProvenanceData
-	if result.FieldSources != nil || result.ActressSources != nil || result.ScraperResults != nil {
+	if result.FieldSources != nil || result.ActressSources != nil || result.ScraperResults != nil || result.OfflineEvidence != nil {
 		prov = &resultstore.ProvenanceData{
-			FieldSources:   result.FieldSources,
-			ActressSources: result.ActressSources,
-			ScraperResults: result.ScraperResults,
+			FieldSources:    result.FieldSources,
+			ActressSources:  result.ActressSources,
+			ScraperResults:  result.ScraperResults,
+			OfflineEvidence: result.OfflineEvidence.Clone(),
 		}
 	}
-	return mr, prov
+	return mr, prov.Clone()
 }

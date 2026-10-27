@@ -21,7 +21,6 @@ import type {
 	ScrapeRequest,
 	ScrapeResponse,
 	ScrapeMovieResult,
-	TranslationWarningCode,
 	BatchRescrapeRequest,
 	BatchRescrapeResponse,
 	PosterCropRequest,
@@ -302,16 +301,13 @@ export class ScraperClient extends BaseClient {
 	}
 
 	async rescrapeMovie(id: string, req: RescrapeRequest): Promise<ScrapeMovieResult> {
-		const response = await this.request<{
-			movie: Movie;
-			translation_warning?: string;
-			translation_warning_code?: TranslationWarningCode;
-		}>(`/api/v1/movies/${id}/rescrape`, {
+		const response = await this.request<ScrapeMovieResult>(`/api/v1/movies/${id}/rescrape`, {
 			method: 'POST',
 			body: JSON.stringify(req),
 		});
 		return {
 			movie: response.movie,
+			...(response.offline_evidence ? { offline_evidence: response.offline_evidence } : {}),
 			translation_warning: response.translation_warning,
 			translation_warning_code: response.translation_warning_code,
 		};
@@ -319,12 +315,13 @@ export class ScraperClient extends BaseClient {
 
 	async scrapeMovie(
 		input: string,
-		options?: { force?: boolean; selected_scrapers?: string[] },
+		options?: { force?: boolean; selected_scrapers?: string[]; show_offline_evidence?: boolean },
 	): Promise<ScrapeMovieResult> {
 		const request: ScrapeRequest = {
 			id: input,
 			force: options?.force,
 			selected_scrapers: options?.selected_scrapers,
+			...(options?.show_offline_evidence ? { show_offline_evidence: true } : {}),
 		};
 		const response = await this.request<ScrapeResponse>('/api/v1/scrape', {
 			method: 'POST',
@@ -332,6 +329,7 @@ export class ScraperClient extends BaseClient {
 		});
 		return {
 			movie: response.movie,
+			...(response.offline_evidence ? { offline_evidence: response.offline_evidence } : {}),
 			translation_warning: response.translation_warning,
 			translation_warning_code: response.translation_warning_code,
 		};

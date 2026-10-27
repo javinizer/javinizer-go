@@ -64,7 +64,7 @@ const STORAGE_PATH = resolve(CONFIG_DIR, 'tests', 'fullstack', '.auth', 'auth-st
 
 export default defineConfig({
 	testDir: './tests/fullstack',
-	testIgnore: ['**/review-load-timeout.spec.ts'],
+	testIgnore: ['**/review-load-timeout.spec.ts', '**/offline-evidence.spec.ts'],
 	timeout: 60_000,
 	expect: {
 		timeout: 15_000,

@@ -152,6 +152,7 @@ func defaultTranslationConfig() TranslationConfig {
 // defaultMetadataConfig returns the default metadata configuration.
 func defaultMetadataConfig() MetadataConfig {
 	return MetadataConfig{
+		OfflineScrapeEvidence: defaultOfflineScrapeEvidenceConfig(),
 		Priority: PriorityConfig{
 			Priority: nil, // Derived from registered scraper priorities at runtime
 		},

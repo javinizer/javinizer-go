@@ -46,13 +46,14 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 	// Fields on BatchFileResult that come from ProvenanceData (injected via the
 	// prov parameter), not from MovieResult directly.
 	provenanceFields := map[string]string{
-		"FieldSources":   "from resultstore.ProvenanceData, not MovieResult",
-		"ActressSources": "from resultstore.ProvenanceData, not MovieResult",
-		"FilePath":       "flattened from MovieResult.FileMatchInfo.Path",
-		"MovieID":        "flattened from MovieResult.FileMatchInfo.MovieID",
-		"IsMultiPart":    "flattened from MovieResult.FileMatchInfo.IsMultiPart",
-		"PartNumber":     "flattened from MovieResult.FileMatchInfo.PartNumber",
-		"PartSuffix":     "flattened from MovieResult.FileMatchInfo.PartSuffix",
+		"OfflineEvidence": "owned read-only sidecar from resultstore.ProvenanceData, never MovieResult.Movie",
+		"FieldSources":    "from resultstore.ProvenanceData, not MovieResult",
+		"ActressSources":  "from resultstore.ProvenanceData, not MovieResult",
+		"FilePath":        "flattened from MovieResult.FileMatchInfo.Path",
+		"MovieID":         "flattened from MovieResult.FileMatchInfo.MovieID",
+		"IsMultiPart":     "flattened from MovieResult.FileMatchInfo.IsMultiPart",
+		"PartNumber":      "flattened from MovieResult.FileMatchInfo.PartNumber",
+		"PartSuffix":      "flattened from MovieResult.FileMatchInfo.PartSuffix",
 	}
 
 	// Collect all exported fields from MovieResult (including embedded OrchestrationState).

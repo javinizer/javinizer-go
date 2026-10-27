@@ -890,3 +890,17 @@ describe('Jobs completion source handoff', () => {
 	});
 
 });
+
+it.each([false,true])('offline evidence never restores from persisted browse state and request requires explicit choice (%s)', async (enabled) => {
+	localStorage.setItem('javinizer_input_path','/library'); localStorage.setItem('javinizer_output_path','/out');
+	sessionStorage.setItem(STORAGE_KEY_SCRAPE_STATE,JSON.stringify({selectedFiles:['/library/a.mp4'],operationMode:'scrape',selectedScrapers:['javbus'],showScraperSelector:true,showOfflineEvidence:true}));
+	apiClient.getBatchJob.mockResolvedValue({status:'completed',results:{}} as never);
+	const view=renderPage(); await fireEvent.click(view.getByRole('button',{name:/Options/}));
+	const option=await view.findByRole('checkbox',{name:/Show offline R18/}) as HTMLInputElement;
+	expect(option.checked).toBe(false); if(enabled) await fireEvent.click(option);
+	await fireEvent.click(await view.findByRole('button',{name:/Scrape 1 File/}));
+	await waitFor(()=>expect(apiClient.batchScrape).toHaveBeenCalledTimes(1));
+	const request=apiClient.batchScrape.mock.calls[0][0]; if(enabled) expect(request.show_offline_evidence).toBe(true); else expect(request).not.toHaveProperty('show_offline_evidence');
+	await waitFor(()=>expect(option.checked).toBe(false));
+	expect(JSON.parse(sessionStorage.getItem(STORAGE_KEY_SCRAPE_STATE) ?? '{}')).not.toHaveProperty('showOfflineEvidence');
+});

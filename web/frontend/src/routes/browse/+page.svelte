@@ -11,6 +11,7 @@
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
+	import OfflineEvidenceOption from '$lib/components/OfflineEvidenceOption.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import VideoOperationSelector from './VideoOperationSelector.svelte';
@@ -83,6 +84,7 @@
 
 	let config = $derived(configQuery.data ?? null);
 	let availableScrapers = $derived(scrapersQuery.data ?? []);
+	let showOfflineEvidence = $state(false);
 	let selectedScrapers: string[] = $state(browseBootstrap?.selectedScrapers ?? []);
 	let showScraperSelector = $state(browseBootstrap?.showScraperSelector ?? false);
 	let scrapersInitialized = $state((browseBootstrap?.selectedScrapers.length ?? 0) > 0 || browseBootstrap?.showScraperSelector === true);
@@ -640,12 +642,14 @@
 		try {
 			const response = await apiClient.batchScrape({
 				files: selectedFiles,
+				...(showOfflineEvidence ? { show_offline_evidence: true } : {}),
 				strict: false,
 				force: forceRefresh,
 				...legacy,
 				apply_plan: plan,
 				selected_scrapers: showScraperSelector ? selectedScrapers : undefined
 			});
+			showOfflineEvidence = false;
 			startJob(response.job_id);
 			launchedFiles = [...selectedFiles];
 			pendingJobId = response.job_id;
@@ -1059,6 +1063,10 @@
 					</label>
 
 				</div>
+
+				{#if !manualScrapeMode}
+					<div class="mt-4"><OfflineEvidenceOption bind:checked={showOfflineEvidence} disabled={scraping} /></div>
+				{/if}
 
 				<!-- Scraper Selector (if enabled) -->
 				{#if showScraperSelector}

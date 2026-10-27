@@ -19,12 +19,13 @@ type WorkflowFunc func() workflow.WorkflowInterface
 // Replaces the removed MovieService — handlers take this directly,
 // matching the ActressDeps pattern used in the actress package.
 type MovieDeps struct {
-	MovieRepo        database.MovieRepositoryInterface
-	HistoryRepo      database.HistoryRepositoryInterface
-	WorkflowFn       WorkflowFunc
-	PosterGen        poster.PosterGenerator
-	AllowedDirs      []string
-	RequestTimeoutFn func() time.Duration
+	MovieRepo            database.MovieRepositoryInterface
+	HistoryRepo          database.HistoryRepositoryInterface
+	WorkflowFn           WorkflowFunc
+	PosterGen            poster.PosterGenerator
+	AllowedDirs          []string
+	RequestTimeoutFn     func() time.Duration
+	BeginOfflineEvidence func(context.Context, bool) (context.Context, func(), error)
 }
 
 // NewMovieDeps creates a MovieDeps from the given repository and options.
@@ -86,4 +87,9 @@ func (d MovieDeps) FindByID(ctx context.Context, id string) (*models.Movie, erro
 // List returns a paginated list of movies.
 func (d MovieDeps) List(ctx context.Context, limit, offset int) ([]models.Movie, error) {
 	return d.MovieRepo.List(ctx, limit, offset)
+}
+
+// WithOfflineEvidence supplies the independent read-only operation admission seam.
+func WithOfflineEvidence(fn func(context.Context, bool) (context.Context, func(), error)) MovieDepsOption {
+	return func(d *MovieDeps) { d.BeginOfflineEvidence = fn }
 }

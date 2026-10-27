@@ -108,8 +108,22 @@ type provenanceSetter interface {
 // publishes its provenance, returning the family revisions captured at the
 // same commit boundary.
 func commitResultWithProvenanceAndRevisions(rm resultstore.ResultMapAccessor, filePath string, result *resultstore.MovieResult, rev uint64, prov *resultstore.ProvenanceData) (map[string]uint64, error) {
+	// Legacy provenance committers promise only edit-lock ordering, not a
+	// coherent reader snapshot. Only the concrete family wrapper may delegate
+	// the evidence capability check to its underlying result store.
+	if _, family := rm.(*familyKeyedResultMap); !family {
+		if _, atomic := rm.(resultstore.AtomicResultCommitter); !atomic && requiresAtomicEvidence(rm, filePath, prov) {
+			return nil, fmt.Errorf("offline evidence unavailable: result store does not support atomic publication")
+		}
+	}
 	if pc, ok := rm.(provenanceRevisionLockedCommitter); ok {
 		return pc.CommitResultWithProvenanceAndRevisions(filePath, result, rev, prov)
+	}
+	if atomic, ok := rm.(resultstore.AtomicResultCommitter); ok {
+		if err := atomic.CommitResultAndProvenance(filePath, result, rev, prov); err != nil {
+			return nil, err
+		}
+		return familyRevisionSnapshotFromResultMap(rm, filePath), nil
 	}
 	if prov != nil {
 		if pc, ok := rm.(provenanceLockedCommitter); ok {
@@ -468,6 +482,8 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func(scope *rescrapeGenScope) (
 func replaceRescrapeResult(outcome *RescrapeResult, filePath string, movieResult *resultstore.MovieResult, prov *resultstore.ProvenanceData) {
 	if prov != nil {
 		outcome.Movie = movieResult.Movie
+		prov = prov.Clone()
+		outcome.OfflineEvidence = prov.OfflineEvidence
 		outcome.FieldSources = prov.FieldSources
 		outcome.ActressSources = prov.ActressSources
 		outcome.ScraperResults = prov.ScraperResults

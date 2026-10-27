@@ -30,6 +30,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/progress"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 	"github.com/javinizer/javinizer-go/internal/translation"
 	"github.com/spf13/afero"
 )
@@ -82,6 +83,8 @@ type ScrapeCmd struct {
 
 // ScrapeResult holds the output of a scrape operation: the aggregated movie, per-scraper results, field sources, and timing.
 type ScrapeResult struct {
+	// OfflineEvidence is an owned read-only sidecar, never part of Movie persistence.
+	OfflineEvidence *scrapeevidence.Report `json:"offline_evidence,omitempty"`
 	// RequestedMovieID is the parsed input key, never a scraper-returned
 	// identity. The workflow uses it to constrain a forced refresh transaction.
 	RequestedMovieID string `json:"-"`

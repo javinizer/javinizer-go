@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -325,6 +326,12 @@ func interpretScrapeResult(
 		fileResult.PosterGenerated = true
 	}
 
+	// Evidence admission does not turn a cancelled scrape/poster stage into
+	// success. Leave the default-off path's established behavior unchanged.
+	if prov != nil && prov.OfflineEvidence != nil && taskCtx.Err() != nil {
+		return interpretScrapeResult(filePath, fmi, cmd, startTime, taskCtx, inputs, nil, nil, taskCtx.Err(), preserveMovieID)
+	}
+
 	// Establish the scraped poster state as the Reset baseline so the review
 	// UI's Reset returns to what this scrape produced. Done after poster
 	// generation so the generated CroppedPosterURL is captured too. Mirrors the
@@ -342,10 +349,14 @@ func interpretScrapeResult(
 	if cmd.SkipPersist && cmd.ForceRefresh {
 		fileResult.Movie = nil
 	}
-	inputs.Updater.UpdateFileResult(filePath, fileResult)
-	if prov != nil {
-		inputs.Updater.SetProvenance(filePath, prov)
+	// Batch DB writes happen in the bounded persistence pool. Do not expose a
+	// successful evidence report until that authoritative write has succeeded.
+	// The operation-owned report remains in outcome.Result, not the Movie.
+	if cmd.SkipPersist && prov != nil && prov.OfflineEvidence != nil {
+		prov = prov.Clone()
+		prov.OfflineEvidence = nil
 	}
+	publishInitialScrapeResult(inputs.Updater, filePath, fileResult, prov)
 
 	inputs.Broadcaster.Send(JobEvent{
 		JobID:     inputs.JobID,
@@ -427,6 +438,7 @@ func scrapeFile(
 	defer withFileRecovery(rc, &outcome)()
 
 	inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+		ResultID:      uuid.NewString(),
 		FileMatchInfo: fmi,
 		Status:        models.JobStatusRunning,
 		StartedAt:     startTime,
@@ -593,6 +605,10 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	// place (resets association slices to reapply associations). The in-memory
 	// MovieResult.Movie shares the result.Movie pointer, so mutating it here
 	// would race with concurrent API/UI readers under -race.
+	if o.Result.OfflineEvidence != nil && ctx.Err() != nil {
+		markUnpersistedEvidenceCancelled(inputs.Updater, o.FilePath, ctx.Err())
+		return true
+	}
 	cloned := o.Result.Movie.Clone()
 	var genreTrans []models.GenreTranslationData
 	var actressTrans []models.ActressTranslationData
@@ -607,6 +623,10 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 	saved, err := database.UpsertWithDisplayTitle(ctx, inputs.MovieRepo, cloned, genreTrans, actressTrans, render)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
+			if o.Result.OfflineEvidence != nil {
+				markUnpersistedEvidenceCancelled(inputs.Updater, o.FilePath, err)
+				return true
+			}
 			return false
 		}
 		logging.Warnf("[scrape-phase] Failed to persist %s: %v", o.MovieID, err)
@@ -645,16 +665,52 @@ func persistScrapeOutcome(ctx context.Context, o scrapeFileOutcome, inputs scrap
 		})
 		return true
 	}
-	// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
-	// normalized associations) and flip Persisted. AtomicUpdateFileResult clones
-	// under lock, so no shared-pointer mutation leaks to readers.
-	_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
-		current.Persisted = true
-		if saved != nil {
-			current.Movie = saved.Clone()
+	if o.Result.OfflineEvidence != nil {
+		if ctx.Err() != nil {
+			markUnpersistedEvidenceCancelled(inputs.Updater, o.FilePath, ctx.Err())
+			return true
 		}
-		return current, nil
-	})
+		err := inputs.Updater.AtomicUpdateFileResultWithProvenance(o.FilePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			current.Persisted = true
+			if saved != nil {
+				current.Movie = saved.Clone()
+			}
+			if prov == nil {
+				prov = &resultstore.ProvenanceData{}
+			}
+			prov.OfflineEvidence = o.Result.OfflineEvidence.Clone()
+			return current, prov, nil
+		})
+		if ctx.Err() != nil && err != nil {
+			markUnpersistedEvidenceCancelled(inputs.Updater, o.FilePath, ctx.Err())
+			return true
+		}
+		if err != nil {
+			// A legacy/unavailable atomic publisher may expose saved metadata,
+			// but never attach a report with a separate provenance write.
+			_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+				current.Persisted = true
+				if saved != nil {
+					current.Movie = saved.Clone()
+				}
+				return current, nil
+			})
+		}
+	} else {
+		// Refresh the in-memory movie with the DB-saved version (DB-assigned IDs,
+		// normalized associations) and flip Persisted. AtomicUpdateFileResult clones
+		// under lock, so no shared-pointer mutation leaks to readers.
+		_ = inputs.Updater.AtomicUpdateFileResult(o.FilePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+			current.Persisted = true
+			if saved != nil {
+				current.Movie = saved.Clone()
+			}
+			return current, nil
+		})
+	}
 	movieID := o.MovieID
 	if saved != nil {
 		movieID = saved.ID

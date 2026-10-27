@@ -567,3 +567,16 @@ it.each(['organize', 'update'] as const)(
 		expect(apply).toHaveBeenCalledOnce();
 	},
 );
+
+it.each([false,true])('same-route query ingress cannot downgrade newer evidence presence=%s', async (present) => {
+	const initial=job('job-a'); const path='/job-a.mp4'; vi.spyOn(apiClient,'getBatchJob').mockResolvedValue(initial);
+	const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false,gcTime:0}}}); let state!:ReturnType<typeof createReviewState>;
+	render(Harness,{jobId:'job-a',capture:(value)=>{state=value;}},{wrapper:QueryClientWrapper,wrapperProps:{client}});
+	await waitFor(()=>expect(state.job?.id).toBe('job-a'));
+	const report={outcome:'evidence_available',admitted_at:'stored',snapshot_digest:'A'}; const latest=structuredClone(initial);
+	latest.results[path].revision=3; latest.results[path].offline_evidence=present?report:undefined; client.setQueryData(['batch-job','job-a'],latest);
+	await waitFor(()=>expect(state.job?.results[path].revision).toBe(3));
+	const stale=structuredClone(initial); stale.results[path].revision=2; stale.results[path].offline_evidence=present?undefined:report;
+	client.setQueryData(['batch-job','job-a'],stale); await waitFor(()=>expect(client.getQueryData<BatchJobResponse>(['batch-job','job-a'])?.results[path].revision).toBe(2));
+	await new Promise(resolve=>setTimeout(resolve,0)); expect(state.job?.results[path]).toEqual(latest.results[path]); client.clear();
+});

@@ -41,6 +41,13 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		admitted, admissionErr := rt.AdmitOfflineEvidenceOperation(req.ShowOfflineEvidence)
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer admitted()
+
 		if httpStatus, errMsg := validateRescrapeRequest(&req); errMsg != "" {
 			writeErrorResponse(c, httpStatus, false, errMsg)
 			return
@@ -111,6 +118,17 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		scrapeCtx, releaseEvidence, admissionErr := rt.BeginOfflineScrapeEvidenceForFiles(c.Request.Context(), req.ShowOfflineEvidence, 1)
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer releaseEvidence()
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "scrape cancelled"})
+			return
+		}
+
 		// Delegate to orchestrator for resolve→construct→execute pipeline.
 		factory := snap.BatchJobFactory()
 		if factory == nil {
@@ -126,7 +144,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			ServerCtx: rt.ServerCtx(),
 		})
 
-		rescrapeResult, err := orch.Rescrape(c.Request.Context(), job.GetID(), movieID, filePath, &req)
+		rescrapeResult, err := orch.Rescrape(scrapeCtx, job.GetID(), movieID, filePath, &req)
 		if err != nil {
 			writeRescrapeOpError(c, err)
 			return
@@ -156,6 +174,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		rev := rr.Revision
 		c.JSON(http.StatusOK, contracts.BatchRescrapeResponse{
 			Movie:                  contracts.MovieViewFromModel(rr.Movie),
+			OfflineEvidence:        rr.OfflineEvidence.Clone(),
 			FieldSources:           rr.FieldSources,
 			ActressSources:         rr.ActressSources,
 			TranslationWarning:     rr.TranslationWarning,

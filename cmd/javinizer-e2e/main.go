@@ -52,6 +52,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scraper"
 	"github.com/javinizer/javinizer-go/internal/scraper/e2emock"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
@@ -117,12 +118,22 @@ func run() error {
 	// priority resolution, instance store, hot-reload paths) is exercised
 	// identically to production.
 	reg := scraperutil.NewScraperRegistry()
-	e2emock.Register(reg)
+	var dumpLookup models.R18DevDumpLookup
+	if os.Getenv("JAVINIZER_E2E_OFFLINE_EVIDENCE") == "true" {
+		var cleanup func()
+		dumpLookup, cleanup, err = prepareOfflineEvidenceFixture(context.Background(), tmpDir, cfg, reg)
+		if err != nil {
+			return fmt.Errorf("prepare offline source fixture: %w", err)
+		}
+		defer cleanup()
+	} else {
+		e2emock.Register(reg)
+		e2emock.ApplyToConfig(cfg)
+	}
 
 	// Apply e2emock-only priority to the config + finalize scraper settings
 	// (same flow commandutil.NewDependenciesWithOptions would run in
 	// production when given no injected registry).
-	e2emock.ApplyToConfig(cfg)
 	if err := cfg.Scrapers.Finalize(reg); err != nil {
 		return fmt.Errorf("finalize scraper config: %w", err)
 	}
@@ -132,7 +143,7 @@ func run() error {
 	registry, err := scraper.NewDefaultScraperRegistryFrom(reg,
 		scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()),
 		database.NewContentIDMappingRepository(db),
-		nil, // e2e does not use the local r18.dev dump
+		dumpLookup, // only the isolated evidence mode supplies an actual local dump
 	)
 	if err != nil {
 		return fmt.Errorf("init scraper registry: %w", err)

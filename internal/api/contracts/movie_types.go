@@ -4,21 +4,24 @@ import (
 	"encoding/json"
 
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 )
 
 // ScrapeRequest represents the scrape request payload
 type ScrapeRequest struct {
-	ID               string   `json:"id" binding:"required" example:"IPX-535"`
-	Force            bool     `json:"force" example:"false"`
-	SelectedScrapers []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
+	ShowOfflineEvidence bool     `json:"show_offline_evidence,omitempty"`
+	ID                  string   `json:"id" binding:"required" example:"IPX-535"`
+	Force               bool     `json:"force" example:"false"`
+	SelectedScrapers    []string `json:"selected_scrapers,omitempty" example:"r18dev,dmm"`
 }
 
 // ScrapeResponse represents the scrape response
 type ScrapeResponse struct {
-	Cached      bool       `json:"cached" example:"false"`
-	Movie       *MovieView `json:"movie"`
-	SourcesUsed int        `json:"sources_used,omitempty" example:"2"`
-	Errors      []string   `json:"errors,omitempty"`
+	OfflineEvidence *scrapeevidence.Report `json:"offline_evidence,omitempty"`
+	Cached          bool                   `json:"cached" example:"false"`
+	Movie           *MovieView             `json:"movie"`
+	SourcesUsed     int                    `json:"sources_used,omitempty" example:"2"`
+	Errors          []string               `json:"errors,omitempty"`
 	// TranslationWarning is populated when metadata translation partially failed
 	// or degraded (kept-original fields). Empty when translation fully succeeded.
 	TranslationWarning string `json:"translation_warning,omitempty"`
@@ -30,9 +33,10 @@ type ScrapeResponse struct {
 
 // MovieResponse represents a movie response
 type MovieResponse struct {
-	Movie      *MovieView            `json:"movie"`
-	Provenance map[string]DataSource `json:"provenance,omitempty"`  // Field-level data source tracking
-	MergeStats *MergeStatistics      `json:"merge_stats,omitempty"` // Merge statistics when NFO merging occurred
+	OfflineEvidence *scrapeevidence.Report `json:"offline_evidence,omitempty"`
+	Movie           *MovieView             `json:"movie"`
+	Provenance      map[string]DataSource  `json:"provenance,omitempty"`  // Field-level data source tracking
+	MergeStats      *MergeStatistics       `json:"merge_stats,omitempty"` // Merge statistics when NFO merging occurred
 	// TranslationWarning is populated on scrape-like flows (rescrape) when
 	// metadata translation partially failed or degraded.
 	TranslationWarning string `json:"translation_warning,omitempty"`

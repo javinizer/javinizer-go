@@ -9,6 +9,7 @@ export interface ManualRow {
 }
 
 export interface ManualScrapeOptions {
+	show_offline_evidence?: boolean;
 	apply_plan?: BatchApplyPlan;
 	destination?: string;
 	operation_mode?: OperationMode;
@@ -81,6 +82,7 @@ export function buildManualScrapeRequest(
 	};
 	return {
 		files,
+		...(opts.show_offline_evidence ? { show_offline_evidence: true } : {}),
 		strict: false,
 		force: opts.force ?? false,
 		...legacy,

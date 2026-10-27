@@ -9,6 +9,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 	"github.com/javinizer/javinizer-go/internal/worker/resultstore"
 	"github.com/javinizer/javinizer-go/internal/workflow"
 )
@@ -124,12 +125,13 @@ type RescrapeCmd struct {
 // RescrapeResult is everything the caller gets back from the rescrape seam.
 // Contains only data the API layer needs for response translation.
 type RescrapeResult struct {
-	Movie          *models.Movie           // Data struct — acceptable per RESEARCH §Architecture Patterns — Pattern 1 note
-	FieldSources   map[string]string       // Per-field scraper attribution
-	ActressSources map[string]string       // Per-actress scraper attribution
-	ScraperResults []*models.ScraperResult // Raw per-scraper results, retained in-memory for the review source viewer
-	Status         models.RescrapeStatus   // success, failed, gone, conflict
-	Error          string                  // Human-readable error for "failed" status
+	OfflineEvidence *scrapeevidence.Report  // Read-only source evidence, separate from Movie.
+	Movie           *models.Movie           // Data struct — acceptable per RESEARCH §Architecture Patterns — Pattern 1 note
+	FieldSources    map[string]string       // Per-field scraper attribution
+	ActressSources  map[string]string       // Per-actress scraper attribution
+	ScraperResults  []*models.ScraperResult // Raw per-scraper results, retained in-memory for the review source viewer
+	Status          models.RescrapeStatus   // success, failed, gone, conflict
+	Error           string                  // Human-readable error for "failed" status
 	// TranslationWarning is the human-readable description of a partial
 	// translation failure during the rescrape (empty when clean).
 	TranslationWarning string

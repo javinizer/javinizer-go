@@ -35,6 +35,19 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			return
 		}
 
+		// Admit before workflow/dependency access. The configured deadline also
+		// covers artifact loading; an earlier caller deadline is never extended.
+		scrapeCtx, releaseEvidence, admissionErr := deps.beginEvidence(c.Request.Context(), req.ShowOfflineEvidence)
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer releaseEvidence()
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			return
+		}
+
 		if len(req.SelectedScrapers) == 0 {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "selected_scrapers cannot be empty"})
 			return
@@ -54,8 +67,7 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "workflow not available"})
 			return
 		}
-		scrapeCtx := c.Request.Context()
-		if deps.RequestTimeoutFn != nil {
+		if !req.ShowOfflineEvidence && deps.RequestTimeoutFn != nil {
 			if rt := deps.RequestTimeoutFn(); rt > 0 {
 				var cancel context.CancelFunc
 				scrapeCtx, cancel = context.WithTimeout(scrapeCtx, rt)
@@ -85,10 +97,15 @@ func rescrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		// Poster generation was moved out of the scrape orchestrator;
 		// API endpoints that call wf.Scrape() directly must do it explicitly.
 		if deps.PosterGen != nil && result.Movie != nil {
-			_ = deps.PosterGen.GeneratePoster(c.Request.Context(), models.SentinelJobID().String(), result.Movie)
+			_ = deps.PosterGen.GeneratePoster(evidencePosterContext(c.Request.Context(), scrapeCtx, req.ShowOfflineEvidence), models.SentinelJobID().String(), result.Movie)
 		}
 
-		resp := contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie)}
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape cancelled or timed out"})
+			return
+		}
+
+		resp := contracts.MovieResponse{Movie: contracts.MovieViewFromModel(result.Movie), OfflineEvidence: result.OfflineEvidence.Clone()}
 		if meta.TranslationWarning != nil {
 			resp.TranslationWarning = *meta.TranslationWarning
 		}

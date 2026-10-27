@@ -8,6 +8,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/api/core"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"github.com/javinizer/javinizer-go/internal/scrapeevidence"
 	ws "github.com/javinizer/javinizer-go/internal/websocket"
 	"github.com/javinizer/javinizer-go/internal/worker"
 	"github.com/javinizer/javinizer-go/internal/workflow"
@@ -158,6 +159,7 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 		baseCtx = context.Background()
 	}
 	workCtx, cancelWork := context.WithCancel(baseCtx)
+	workCtx = scrapeevidence.Carry(workCtx, ctx)
 	defer cancelWork()
 	if ctx != nil {
 		go func() {

@@ -18,17 +18,18 @@ const translationProviderOpenAI = "openai"
 
 // MetadataConfig holds metadata aggregation settings
 type MetadataConfig struct {
-	Priority         PriorityConfig         `yaml:"priority" json:"priority"`
-	ActressDatabase  ActressDatabaseConfig  `yaml:"actress_database" json:"actress_database"`   // Actress image database (SQLite-backed)
-	GenreReplacement GenreReplacementConfig `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
-	WordReplacement  WordReplacementConfig  `yaml:"word_replacement" json:"word_replacement"`   // Word uncensor/text replacement (SQLite-backed)
-	TagDatabase      tagDatabaseConfig      `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
-	R18DevDump       R18DevDumpConfig       `yaml:"r18dev_dump" json:"r18dev_dump"`             // Local r18.dev dump lookup (SQLite-backed)
-	Translation      TranslationConfig      `yaml:"translation" json:"translation"`             // Metadata translation pipeline
-	IgnoreGenres     []string               `yaml:"ignore_genres" json:"ignore_genres"`
-	RequiredFields   []string               `yaml:"required_fields" json:"required_fields"`
-	NFO              NFOConfig              `yaml:"nfo" json:"nfo"`
-	Completeness     completenessConfig     `yaml:"completeness" json:"completeness"` // Completeness scoring configuration
+	OfflineScrapeEvidence OfflineScrapeEvidenceConfig `yaml:"offline_scrape_evidence" json:"offline_scrape_evidence"`
+	Priority              PriorityConfig              `yaml:"priority" json:"priority"`
+	ActressDatabase       ActressDatabaseConfig       `yaml:"actress_database" json:"actress_database"`   // Actress image database (SQLite-backed)
+	GenreReplacement      GenreReplacementConfig      `yaml:"genre_replacement" json:"genre_replacement"` // Genre replacement/normalization (SQLite-backed)
+	WordReplacement       WordReplacementConfig       `yaml:"word_replacement" json:"word_replacement"`   // Word uncensor/text replacement (SQLite-backed)
+	TagDatabase           tagDatabaseConfig           `yaml:"tag_database" json:"tag_database"`           // Per-movie tag database (SQLite-backed)
+	R18DevDump            R18DevDumpConfig            `yaml:"r18dev_dump" json:"r18dev_dump"`             // Local r18.dev dump lookup (SQLite-backed)
+	Translation           TranslationConfig           `yaml:"translation" json:"translation"`             // Metadata translation pipeline
+	IgnoreGenres          []string                    `yaml:"ignore_genres" json:"ignore_genres"`
+	RequiredFields        []string                    `yaml:"required_fields" json:"required_fields"`
+	NFO                   NFOConfig                   `yaml:"nfo" json:"nfo"`
+	Completeness          completenessConfig          `yaml:"completeness" json:"completeness"` // Completeness scoring configuration
 }
 
 // TranslationConfig holds metadata translation settings.

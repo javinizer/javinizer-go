@@ -151,6 +151,7 @@ func registerAPIV1Routes(router *gin.Engine, rt *core.APIRuntime) {
 	}
 	movieDeps := movie.NewMovieDeps(deps.Repos.MovieRepo,
 		movie.WithWorkflow(rt.GetWorkflow),
+		movie.WithOfflineEvidence(rt.BeginOfflineScrapeEvidence),
 		movie.WithAllowedDirs(secCfg.AllowedDirectories),
 		movie.WithPosterGen(posterGenForMovie),
 		movie.WithRequestTimeoutFn(func() time.Duration { return rt.GetAPIConfig().RequestTimeout }),

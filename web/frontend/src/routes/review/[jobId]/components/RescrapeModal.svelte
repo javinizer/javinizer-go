@@ -7,6 +7,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ScraperSelector from '$lib/components/ScraperSelector.svelte';
+	import OfflineEvidenceOption from '$lib/components/OfflineEvidenceOption.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	type ScalarStrategy = '' | 'prefer-nfo' | 'prefer-scraper' | 'preserve-existing' | 'fill-missing-only' | 'merge-arrays';
@@ -24,7 +25,7 @@
 		rescrapePreset?: string;
 		rescrapeScalarStrategy: ScalarStrategy;
 		onApplyPreset: (preset: 'conservative' | 'gap-fill' | 'aggressive') => void;
-		onExecute: (mode: { manualSearchMode: boolean; manualSearchInput: string }) => void;
+		onExecute: (mode: { manualSearchMode: boolean; manualSearchInput: string; showOfflineEvidence?: boolean }) => void;
 	}
 
 	let {
@@ -42,6 +43,9 @@
 		onApplyPreset,
 		onExecute
 	}: Props = $props();
+
+	let showOfflineEvidence = $state(false);
+	$effect(() => { if (!show) showOfflineEvidence = false; });
 
 	function close() {
 		if (rescraping) return;
@@ -238,12 +242,14 @@
 					</div>
 				</div>
 
+				<div class="px-6 pb-4"><OfflineEvidenceOption bind:checked={showOfflineEvidence} disabled={rescraping} /></div>
+
 				<div class="p-6 border-t flex items-center justify-end gap-3">
 					<Button variant="outline" onclick={close} disabled={rescraping}>
 						{#snippet children()}{m.common_cancel()}{/snippet}
 					</Button>
 					<Button
-						onclick={() => onExecute({ manualSearchMode, manualSearchInput })}
+						onclick={() => onExecute({ manualSearchMode, manualSearchInput, showOfflineEvidence })}
 						disabled={rescraping}
 					>
 						{#snippet children()}

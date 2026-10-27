@@ -106,7 +106,6 @@ func bulkRescrapePool(
 
 func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		deps := rt.Deps()
 		jobID := c.Param("id")
 
 		var req contracts.BulkRescrapeRequest
@@ -114,6 +113,14 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
+
+		admitted, admissionErr := rt.AdmitOfflineEvidenceOperation(req.ShowOfflineEvidence)
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer admitted()
+		deps := rt.Deps()
 
 		if len(req.MovieIDs) == 0 {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "movie_ids is required and must not be empty"})
@@ -126,11 +133,12 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		rescrapeReq := &contracts.BatchRescrapeRequest{
-			Force:            req.Force,
-			SelectedScrapers: req.SelectedScrapers,
-			Preset:           req.Preset,
-			ScalarStrategy:   req.ScalarStrategy,
-			ArrayStrategy:    req.ArrayStrategy,
+			ShowOfflineEvidence: req.ShowOfflineEvidence,
+			Force:               req.Force,
+			SelectedScrapers:    req.SelectedScrapers,
+			Preset:              req.Preset,
+			ScalarStrategy:      req.ScalarStrategy,
+			ArrayStrategy:       req.ArrayStrategy,
 		}
 
 		if httpStatus, errMsg := validateRescrapeRequest(rescrapeReq); errMsg != "" {
@@ -161,6 +169,17 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		defer lease()
 
+		scrapeCtx, releaseEvidence, admissionErr := rt.BeginOfflineScrapeEvidenceForFiles(c.Request.Context(), req.ShowOfflineEvidence, len(req.MovieIDs))
+		if admissionErr != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: admissionErr.Error()})
+			return
+		}
+		defer releaseEvidence()
+		if req.ShowOfflineEvidence && scrapeCtx.Err() != nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.ErrorResponse{Error: "scrape cancelled"})
+			return
+		}
+
 		// Delegate to orchestrator for resolve→construct→execute pipeline.
 		// Snapshot so the workflow factory and batch job factory see the same
 		// reload epoch (issue #44).
@@ -179,7 +198,7 @@ func batchRescrapeMovies(rt *core.APIRuntime) gin.HandlerFunc {
 			ServerCtx: rt.ServerCtx(),
 		})
 
-		result, err := orch.BulkRescrape(c.Request.Context(), jobID, req.MovieIDs, rescrapeReq)
+		result, err := orch.BulkRescrape(scrapeCtx, jobID, req.MovieIDs, rescrapeReq)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
