@@ -3,6 +3,7 @@ package jav321
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -446,14 +447,14 @@ func extractGenres(doc *goquery.Document) []string {
 	return genres
 }
 
-func extractActresses(html string) []models.ActressInfo {
+func extractActresses(htmlText string) []models.ActressInfo {
 	seen := map[string]bool{}
 	out := make([]models.ActressInfo, 0)
 
-	names := extractLabeledAnchorValues(html, []string{"出演者", "女優", "女优", "演員", "演员", "actress", "actor"})
+	names := extractLabeledAnchorValues(htmlText, []string{"出演者", "女優", "女优", "演員", "演员", "actress", "actor"})
 	if len(names) == 0 {
-		if raw := extractLabeledValue(html, []string{"出演者", "女優", "女优", "演員", "演员", "actress", "actor"}); raw != "" {
-			names = splitValues(raw)
+		if raw := extractLabeledValue(htmlText, []string{"出演者", "女優", "女优", "演員", "演员", "actress", "actor"}); raw != "" {
+			names = splitValues(html.UnescapeString(raw))
 		}
 	}
 
@@ -484,14 +485,14 @@ func extractActresses(html string) []models.ActressInfo {
 	return out
 }
 
-func extractLabeledAnchorValues(html string, labels []string) []string {
+func extractLabeledAnchorValues(htmlText string, labels []string) []string {
 	seen := map[string]bool{}
 	values := make([]string, 0)
 
 	for _, label := range labels {
 		// Dynamic pattern: label is a runtime parameter, cannot pre-compile
 		re := regexp.MustCompile(`(?is)<b>\s*` + regexp.QuoteMeta(label) + `\s*</b>\s*:\s*(.*?)<br`)
-		m := re.FindStringSubmatch(html)
+		m := re.FindStringSubmatch(htmlText)
 		if len(m) <= 1 {
 			continue
 		}
@@ -502,7 +503,8 @@ func extractLabeledAnchorValues(html string, labels []string) []string {
 			if len(match) <= 1 {
 				continue
 			}
-			v := scraperutil.CleanString(stripTags(match[1]))
+			// Decode after stripping markup so escaped literal tags remain name text.
+			v := scraperutil.CleanString(html.UnescapeString(stripTags(match[1])))
 			if v == "" || seen[v] {
 				continue
 			}
@@ -511,7 +513,8 @@ func extractLabeledAnchorValues(html string, labels []string) []string {
 		}
 
 		if len(values) == 0 {
-			for _, v := range splitValues(stripTags(section)) {
+			// Split decoded text, not entity spellings such as "&amp;".
+			for _, v := range splitValues(html.UnescapeString(stripTags(section))) {
 				v = scraperutil.CleanString(v)
 				if v == "" || seen[v] {
 					continue
