@@ -1,6 +1,8 @@
 package scraperutil
 
 import (
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,4 +272,60 @@ func TestIsHTTPURL(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestURLMalformedInputContract(t *testing.T) {
+	t.Run("malformed HTTP path is rejected", func(t *testing.T) {
+		const malformed = " \thttps://media.example/images/%zz.jpg\n"
+		const healthy = " https://media.example/images/%25zz.jpg "
+		if _, err := url.Parse(strings.TrimSpace(malformed)); err == nil {
+			t.Fatal("malformed path must fail standard URL parsing")
+		}
+
+		assert.True(t, IsHTTPURL(healthy), "valid escaped path before malformed input")
+		assert.False(t, IsHTTPURL(malformed), "HTTP prefix cannot override a path parse failure")
+		assert.True(t, IsHTTPURL(healthy), "malformed input must not affect later classification")
+	})
+
+	t.Run("malformed base preserves relative reference", func(t *testing.T) {
+		const malformedBase = "https://catalog.example/%zz"
+		const healthyBase = "https://catalog.example/title/page"
+		const raw = "  images/cover.jpg  "
+		const healthyResult = "https://catalog.example/title/images/cover.jpg"
+		if _, err := url.Parse(malformedBase); err == nil {
+			t.Fatal("malformed base must fail standard URL parsing")
+		}
+
+		assert.Equal(t, healthyResult, ResolveURL(healthyBase, raw))
+		// This is ResolveURL's library-boundary fallback, not a claim that
+		// prepared scraper configuration accepts malformed base URLs.
+		got := ResolveURL(malformedBase, raw)
+		assert.Equal(t, "images/cover.jpg", got, "fallback must retain the trimmed reference")
+		assert.False(t, IsHTTPURL(got), "fallback must not pretend to be an absolute HTTP URL")
+
+		got = ResolveURL(healthyBase, raw)
+		assert.Equal(t, healthyResult, got, "repairing only the base must restore resolution")
+		assert.True(t, IsHTTPURL(got))
+	})
+
+	t.Run("malformed media reference preserves original spelling", func(t *testing.T) {
+		const base = "https://catalog.example/title/page"
+		const malformed = "  images/%zz.jpg  "
+		const healthy = "  images/%25zz.jpg  "
+		const healthyResult = "https://catalog.example/title/images/%25zz.jpg"
+		if _, err := url.Parse(strings.TrimSpace(malformed)); err == nil {
+			t.Fatal("malformed relative path must fail standard URL parsing")
+		}
+
+		assert.Equal(t, healthyResult, ResolveURL(base, healthy))
+		// Relative media attributes can be malformed. Resolution preserves the
+		// trimmed reference on failure; it is not URL validation or repair.
+		got := ResolveURL(base, malformed)
+		assert.Equal(t, "images/%zz.jpg", got, "fallback must not discard or escape the bad reference")
+		assert.False(t, IsHTTPURL(got))
+
+		got = ResolveURL(base, healthy)
+		assert.Equal(t, healthyResult, got, "later valid resolution must not double-escape the path")
+		assert.True(t, IsHTTPURL(got))
+	})
 }
