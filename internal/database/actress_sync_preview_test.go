@@ -151,6 +151,25 @@ func TestPreviewOfflineSyncCancellationAfterRead(t *testing.T) {
 	actor := models.Actress{DMMID: 7, FirstName: "Managed"}
 	require.NoError(t, repo.ImportUpsert(t.Context(), &actor))
 	before := previewDatabaseState(t, db)
+	// Leave a second before the package watchdog to report a stuck acquisition,
+	// with a bounded fallback for runs without -timeout. Keep the original
+	// driver identity to verify retirement without calling driver methods.
+	deadline, ok := t.Deadline()
+	if ok {
+		deadline = deadline.Add(-time.Second)
+	} else {
+		deadline = time.Now().Add(time.Minute)
+	}
+	waitCtx, stopWaiting := context.WithDeadline(t.Context(), deadline)
+	defer stopWaiting()
+	originalConn, err := sqlDB.Conn(waitCtx)
+	require.NoError(t, err)
+	var originalDriverConn any
+	require.NoError(t, originalConn.Raw(func(driverConn any) error {
+		originalDriverConn = driverConn
+		return nil
+	}))
+	require.NoError(t, originalConn.Close())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	require.NoError(t, db.Callback().Row().After("gorm:row").Register("cancel_offline_preview", func(tx *gorm.DB) {
@@ -163,8 +182,16 @@ func TestPreviewOfflineSyncCancellationAfterRead(t *testing.T) {
 		rows, ok := tx.Statement.Dest.(*sql.Rows)
 		require.True(t, ok)
 		require.NoError(t, rows.Close())
-		require.Eventually(t, func() bool { return sqlDB.Stats().OpenConnections == 0 }, 5*time.Second, time.Millisecond,
-			"canceled transaction should discard its sole connection before the test continues")
+		// Acquiring the sole connection is a barrier for rollback and release,
+		// without relying on a five-second polling window.
+		conn, err := sqlDB.Conn(waitCtx)
+		require.NoError(t, err)
+		defer conn.Close()
+		require.NoError(t, conn.Raw(func(driverConn any) error {
+			require.NotSame(t, originalDriverConn, driverConn, "canceled transaction must retire its connection")
+			return nil
+		}))
+		require.NoError(t, conn.Close())
 	}))
 	p, err := repo.PreviewOfflineSync(ctx, []uint{actor.ID}, s, o)
 	require.NoError(t, db.Callback().Row().Remove("cancel_offline_preview"))
