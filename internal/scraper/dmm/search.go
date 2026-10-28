@@ -211,6 +211,13 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			logging.Debugf("DMM: Direct URL %s returned nil response", directURL)
 			continue
 		}
+		// Raw-response mode transfers body ownership to us on a successful
+		// request. Only headers matter for these probes: close now, without
+		// downloading the page or retaining bodies until every probe finishes.
+		// On request errors, net/http already closes any redirect response body.
+		if body := resp.RawBody(); body != nil {
+			_ = body.Close()
+		}
 		if resp.StatusCode() == 200 || resp.StatusCode() == 302 {
 			priority := urlPriority(directURL)
 
