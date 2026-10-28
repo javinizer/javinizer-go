@@ -2240,8 +2240,8 @@ func TestDownloader_Do_ErrorPaths(t *testing.T) {
 			tmpDir := t.TempDir()
 			destPath := filepath.Join(tmpDir, "test_download")
 
-			// Create downloader with test client
-			downloader := NewDownloader(http.DefaultClient, afero.NewOsFs(), &Config{DownloadCover: true, UserAgent: "test-agent"}, nil)
+			// Own the transport so parallel sibling server cleanup cannot affect this request.
+			downloader := NewDownloader(server.Client(), afero.NewOsFs(), &Config{DownloadCover: true, UserAgent: "test-agent"}, nil)
 
 			// Perform download - should fail for error status codes
 			err := downloader.DownloadWithRetry(context.Background(), server.URL, destPath, 0)
