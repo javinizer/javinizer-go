@@ -20,13 +20,25 @@ func TestAcquireReplacementBusyW18A_WindowsLiveMarkerIgnoresAge(t *testing.T) {
 		probedPID = gotPID
 		return replacementPIDAlive
 	})
-	writeW14ABusyToken(t, fs, dest, pid, time.Now().Add(-replacementBusyStaleAge-time.Minute))
+	markerTime := time.Now().Add(-replacementBusyStaleAge - time.Minute)
+	ownerStart := markerTime.Add(-time.Second)
+	startProbedPID := 0
+	oldStart := replacementProcessStartTime
+	// This synthetic live owner predates its marker. Do not ask the host for
+	// the unrelated real process, if any, whose PID happens to equal pid.
+	replacementProcessStartTime = func(gotPID int) *time.Time {
+		startProbedPID = gotPID
+		return &ownerStart
+	}
+	t.Cleanup(func() { replacementProcessStartTime = oldStart })
+	writeW14ABusyToken(t, fs, dest, pid, markerTime)
 	before, err := afero.ReadFile(fs, ReplacementBusyPath(dest))
 	require.NoError(t, err)
 
 	_, err = AcquireReplacementBusy(fs, dest)
 	require.ErrorIs(t, err, ErrReplacementBusy, "a live Windows owner stays busy past the old age threshold")
 	require.Equal(t, pid, probedPID)
+	require.Equal(t, pid, startProbedPID)
 	after, err := afero.ReadFile(fs, ReplacementBusyPath(dest))
 	require.NoError(t, err)
 	require.Equal(t, before, after, "a live marker must not be removed")
