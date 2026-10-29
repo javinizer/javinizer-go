@@ -88,20 +88,23 @@ func TestBatchJob_PanicRecovery(t *testing.T) {
 		deps := createTestDeps(t, cfg, "")
 		job := deps.JobStore.CreateJobBatch([]string{"test.mp4"})
 
-		panicked := make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// A buffered result signals both normal completion and a recovered panic,
+		// without blocking the worker if the timeout wins the select.
+		result := make(chan any, 1)
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					close(panicked)
-				}
-			}()
-			_ = job.Controller().StartScrape(context.Background(), []string{"test.mp4"}, worker.ScrapePhaseConfig{})
+			defer func() { result <- recover() }()
+			_ = job.Controller().StartScrape(ctx, []string{"test.mp4"}, worker.ScrapePhaseConfig{})
 		}()
 
 		select {
-		case <-panicked:
-			t.Fatal("StartScrape should have recovered from panic, not propagated it")
+		case panicValue := <-result:
+			if panicValue != nil {
+				t.Fatal("StartScrape should have recovered from panic, not propagated it")
+			}
 		case <-time.After(10 * time.Second):
+			t.Fatal("StartScrape timed out")
 		}
 
 		status := job.GetStatus()
