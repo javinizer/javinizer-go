@@ -377,8 +377,21 @@ jobs:
         if-no-files-found: error
         retention-days: 30
 
+    - name: Verify Windows unit test orchestration contracts
+      run: python -m unittest discover -s scripts -p test_run_windows_unit_tests.py -v
+
+    # Isolate the two database-heavy packages without extending their budget.
     - name: Run unit tests
-      run: go test -short ./...
+      run: python scripts/run_windows_unit_tests.py
+
+    - name: Archive Windows unit test package evidence
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: windows-unit-package-evidence
+        path: windows-unit-evidence/
+        if-no-files-found: error
+        retention-days: 30
 
     - name: Repeat Windows nil dependency panic contracts
       id: nil_dependency_contracts
