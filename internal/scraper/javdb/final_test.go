@@ -28,10 +28,7 @@ func TestParseDetailPageFinal_MinimalHTML(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABC-123")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABC-123")
 	if result.ID != "ABC-123" {
 		t.Errorf("expected ID ABC-123, got %s", result.ID)
 	}
@@ -235,10 +232,7 @@ func TestParseDetailPageFinal_EnglishLabels(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/xyz456", "XYZ-456")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/xyz456", "XYZ-456")
 	if result.ID != "XYZ-456" {
 		t.Errorf("expected ID XYZ-456, got %s", result.ID)
 	}
@@ -267,10 +261,7 @@ func TestParseDetailPageFinal_CoverAndTrailer(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/aaa001", "AAA-001")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/aaa001", "AAA-001")
 	if result.CoverURL != "https://pics.javdb.com/cover.jpg" {
 		t.Errorf("expected cover URL, got %s", result.CoverURL)
 	}
@@ -292,10 +283,7 @@ func TestParseDetailPageFinal_MaleActorRow(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/bbb002", "BBB-002")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/bbb002", "BBB-002")
 	if len(result.Actresses) != 1 {
 		t.Fatalf("expected 1 actress, got %d", len(result.Actresses))
 	}
@@ -316,10 +304,7 @@ func TestParseDetailPageFinal_GenericCastFallback(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/ccc003", "CCC-003")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/ccc003", "CCC-003")
 	if len(result.Actresses) != 1 {
 		t.Fatalf("expected 1 actress, got %d", len(result.Actresses))
 	}
@@ -566,10 +551,7 @@ func TestParseDetailPageFinal_WithDescription(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/ddd004", "DDD-004")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/ddd004", "DDD-004")
 	if result.Description != "This is a description of the movie." {
 		t.Errorf("expected description, got %q", result.Description)
 	}
@@ -582,10 +564,7 @@ func TestParseDetailPageFinal_FallbackID(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/eee005", "EEE-005")
-	if err != nil {
-		t.Fatalf("parseDetailPage returned error: %v", err)
-	}
+	result := s.parseDetailPage(doc, "https://javdb.com/v/eee005", "EEE-005")
 	if result.ID != "EEE-005" {
 		t.Errorf("expected fallback ID EEE-005, got %s", result.ID)
 	}

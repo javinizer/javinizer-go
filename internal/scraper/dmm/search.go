@@ -83,12 +83,9 @@ func (s *scraper) getURLCtxWithResolution(ctx context.Context, id string) (strin
 		logging.Debugf("DMM: HTTP client transport proxy setting: %v", s.client.GetClient().Transport != nil)
 
 		if err := s.rateLimiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				logging.Debugf("DMM: Context cancelled before search query '%s'", searchQuery)
-				return "", fromCache, fmt.Errorf("DMM search cancelled: %w", ctx.Err())
-			}
-			logging.Debugf("DMM: Rate limit wait failed for query '%s': %v", searchQuery, err)
-			continue
+			// The concrete limiter only returns the caller's context error.
+			logging.Debugf("DMM: Context cancelled before search query '%s'", searchQuery)
+			return "", fromCache, fmt.Errorf("DMM search cancelled: %w", err)
 		}
 
 		resp, err := s.client.R().SetContext(ctx).Get(searchURLFormatted)
@@ -187,12 +184,9 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 			return candidates
 		}
 		if err := s.rateLimiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				logging.Debugf("DMM: Context cancelled trying direct URL")
-				return candidates
-			}
-			logging.Debugf("DMM: Rate limit wait failed for direct URL: %v", err)
-			continue
+			// The concrete limiter only returns the caller's context error.
+			logging.Debugf("DMM: Context cancelled trying direct URL")
+			return candidates
 		}
 		// An immediately available rate-limit slot may not check cancellation.
 		if ctx.Err() != nil {

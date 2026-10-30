@@ -273,8 +273,7 @@ func TestParseDetailPage_FallbackTitle(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK-001")
 	assert.Equal(t, "FALLBACK-001", result.ID)
 }
 
@@ -289,8 +288,7 @@ func TestParseDetailPage_ReleaseDateLabel(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "ABC-123")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "ABC-123")
 	require.NotNil(t, result.ReleaseDate)
 	assert.Equal(t, "2024-06-01", result.ReleaseDate.Format("2006-01-02"))
 }
@@ -312,8 +310,7 @@ func TestParseDetailPage_EnglishLabels(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "DEF-456")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "DEF-456")
 	assert.Equal(t, 90, result.Runtime)
 	assert.Equal(t, "Director Name", result.Director)
 	assert.Equal(t, "Maker Name", result.Maker)
@@ -335,8 +332,7 @@ func TestParseDetailPage_IDLabel(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK")
 	// ID is extracted from the value text
 	assert.Equal(t, "GHI-789", result.ID)
 }
@@ -346,8 +342,7 @@ func TestParseDetailPage_NoMetadata(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "FALLBACK-001")
 	assert.Equal(t, "FALLBACK-001", result.ID)
 	assert.Equal(t, "FALLBACK-001", result.Title)
 }
@@ -364,8 +359,7 @@ func TestParseDetailPage_WithDescription(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "JKL-012")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "JKL-012")
 	assert.Equal(t, "This is the movie description.", result.Description)
 }
 
@@ -381,8 +375,7 @@ func TestParseDetailPage_FallbackDescription(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "MNO-345")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "MNO-345")
 	assert.Equal(t, "Fallback description text.", result.Description)
 }
 
@@ -399,8 +392,7 @@ func TestParseDetailPage_Screenshots(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "PQR-678")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "PQR-678")
 	assert.Len(t, result.ScreenshotURL, 2)
 }
 
@@ -414,8 +406,7 @@ func TestParseDetailPage_Trailer(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "STU-901")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "STU-901")
 	assert.Equal(t, "https://video.example.com/trailer.mp4", result.TrailerURL)
 }
 
@@ -583,8 +574,7 @@ func TestExtractActresses_MaleActorExcluded(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "TEST-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "TEST-001")
 	// Male actors should not be included in actresses
 	assert.Len(t, result.Actresses, 0)
 }

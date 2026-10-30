@@ -216,10 +216,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 	}
 
 	// Use existing parseDetailPage method
-	result, err := s.parseDetailPage(doc, urlStr, videoID)
-	if err != nil {
-		return nil, err
-	}
+	result := s.parseDetailPage(doc, urlStr, videoID)
 
 	// Verify we got meaningful metadata
 	if !hasDetailMetadata(result, videoID) {
@@ -239,10 +236,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse retried detail page HTML: %w", err)
 		}
-		result, err = s.parseDetailPage(retryDoc, urlStr, videoID)
-		if err != nil {
-			return nil, err
-		}
+		result = s.parseDetailPage(retryDoc, urlStr, videoID)
 		if !hasDetailMetadata(result, videoID) {
 			return nil, models.NewScraperNotFoundError("JavDB", fmt.Sprintf("non-detail content for %s", urlStr))
 		}
@@ -310,8 +304,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		if err == nil {
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err == nil {
-				result, err := s.parseDetailPage(doc, directURL, cleanID)
-				if err == nil && hasDetailMetadata(result, cleanID) && detailIdentityMatchesQuery(result, cleanID) {
+				result := s.parseDetailPage(doc, directURL, cleanID)
+				if hasDetailMetadata(result, cleanID) && detailIdentityMatchesQuery(result, cleanID) {
 					logging.Debugf("JavDB: Found movie via direct URL: %s", directURL)
 					return result, nil
 				}
@@ -337,10 +331,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	// Missing published IDs inherit the verified selected card identity,
 	// including raw AI queries whose catalog and display numbers differ.
-	result, err := s.parseDetailPage(doc, detailURL, selectedID)
-	if err != nil {
-		return nil, err
-	}
+	result := s.parseDetailPage(doc, detailURL, selectedID)
 
 	// An explicitly conflicting primary identity cannot be repaired by a
 	// sparse retry whose missing ID would inherit the selected card.
@@ -363,10 +354,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse retried detail page HTML: %w", err)
 	}
-	retryResult, err := s.parseDetailPage(retryDoc, detailURL, selectedID)
-	if err != nil {
-		return nil, err
-	}
+	retryResult := s.parseDetailPage(retryDoc, detailURL, selectedID)
 	if !hasDetailMetadata(retryResult, selectedID) {
 		return nil, fmt.Errorf("JavDB returned non-detail content for %s", detailURL)
 	}
@@ -734,7 +722,7 @@ func detailIdentityMatchesQuery(result *models.ScraperResult, query string) bool
 // This is the documented parsing seam for testing; it delegates to the
 // internal parseDetailPage method.
 func (s *scraper) ParseHTML(doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
-	return s.parseDetailPage(doc, sourceURL, "")
+	return s.parseDetailPage(doc, sourceURL, ""), nil
 }
 
 // labelRoute is a single entry in the labelRouter: it matches a normalized DOM label
@@ -833,7 +821,8 @@ func (lr *labelRouter) dispatchCast(label string, valueNode *goquery.Selection) 
 	}
 }
 
-func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) (*models.ScraperResult, error) {
+// parseDetailPage extracts best-effort metadata; callers decide whether it is sufficient.
+func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID string) *models.ScraperResult {
 	result := &models.ScraperResult{
 		Source:    s.Name(),
 		SourceURL: sourceURL,
@@ -899,7 +888,7 @@ func (s *scraper) parseDetailPage(doc *goquery.Document, sourceURL, fallbackID s
 		result.OriginalTitle = result.ID
 	}
 
-	return result, nil
+	return result
 }
 
 func normalizeIDForCompare(id string) string {

@@ -435,8 +435,7 @@ func TestParseDetailPage_Miss2_GenericCastFallback(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "GEN-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "GEN-001")
 	assert.Len(t, result.Actresses, 1)
 }
 
@@ -458,8 +457,7 @@ func TestParseDetailPage_Miss2_GenericCastSkippedWhenFemaleExists(t *testing.T) 
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "MIX-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "MIX-001")
 	// Female row should be used, generic should be skipped
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "Female Actress", result.Actresses[0].JapaneseName)
@@ -480,8 +478,7 @@ func TestParseDetailPage_Miss2_MaleOnlyRowExcluded(t *testing.T) {
 	doc := docFromHTMLMiss(t, html)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/test", "MAL-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/test", "MAL-001")
 	assert.Len(t, result.Actresses, 0)
 }
 

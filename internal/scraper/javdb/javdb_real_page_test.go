@@ -28,8 +28,7 @@ func TestParseDetailPageRealArchivedDetailPage(t *testing.T) {
 	require.NoError(t, err)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/00Akq", "EYAN-172")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/00Akq", "EYAN-172")
 
 	assert.Equal(t, "EYAN-172", result.ID)
 	require.Len(t, result.Actresses, 1, "got %v", actressNames(result.Actresses))

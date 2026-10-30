@@ -329,9 +329,6 @@ func extractGenres(html string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0)
 	for _, m := range genreRegex.FindAllStringSubmatch(html, -1) {
-		if len(m) <= 1 {
-			continue
-		}
 		g := scraperutil.CleanString(stripTags(m[1]))
 		if g == "" || seen[g] {
 			continue
@@ -346,9 +343,6 @@ func extractScreenshots(html, base string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0)
 	for _, m := range screenshotRegex.FindAllStringSubmatch(html, -1) {
-		if len(m) <= 1 {
-			continue
-		}
 		u := scraperutil.ResolveURL(base, m[1])
 		if u == "" || seen[u] {
 			continue
