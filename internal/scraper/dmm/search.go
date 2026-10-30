@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -208,6 +210,8 @@ func (s *scraper) tryDirectURLs(ctx context.Context, contentID string) []urlCand
 		// Raw-response mode transfers body ownership to us on a successful
 		// request. Only headers matter for these probes: close now, without
 		// downloading the page or retaining bodies until every probe finishes.
+		// These are unverified URL candidates, not proof that a movie exists;
+		// Search must still render/parse the selected page and require a title.
 		// On request errors, net/http already closes any redirect response body.
 		if body := resp.RawBody(); body != nil {
 			_ = body.Close()
@@ -259,7 +263,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	var doc *goquery.Document
 
-	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
+	if isVideoDMMURL(url) && s.useBrowser {
 		logging.Debug("DMM: Using browser mode for video.dmm.co.jp page")
 
 		bodyHTML, err := s.fetchBrowserHTML(ctx, url)
@@ -289,7 +293,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 			)
 		}
 
-		doc, err = goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		doc, err = s.documentFromResponse(ctx, resp, url)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
@@ -297,6 +301,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
+	if err == nil && strings.TrimSpace(res.Title) == "" {
+		return nil, models.NewScraperNotFoundError("DMM", "page contains no movie title")
+	}
 	if err == nil && isCID && foldedMarker != "" && rawRemasterCIDPageConflict(doc, url) {
 		// The raw-query counterpart of the page-identity guard below, for
 		// H/HD and AI cids alike: DMM followed a redirect or served a
@@ -441,7 +448,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 
 	var doc *goquery.Document
 
-	if strings.Contains(url, "video.dmm.co.jp") && s.useBrowser {
+	if isVideoDMMURL(url) && s.useBrowser {
 		logging.Debug("DMM ScrapeURL: Using browser mode for video.dmm.co.jp page")
 
 		bodyHTML, err := s.fetchBrowserHTML(ctx, url)
@@ -486,13 +493,16 @@ func (s *scraper) ScrapeURL(ctx context.Context, url string) (*models.ScraperRes
 				fmt.Sprintf("DMM returned status code %d", resp.StatusCode()))
 		}
 
-		doc, err = goquery.NewDocumentFromReader(strings.NewReader(resp.String()))
+		doc, err = s.documentFromResponse(ctx, resp, url)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
 	}
 
 	res, err := s.parseHTML(ctx, doc, url)
+	if err == nil && strings.TrimSpace(res.Title) == "" {
+		return nil, models.NewScraperNotFoundError("DMM", "page contains no movie title")
+	}
 	if err == nil {
 		fillMarkerIDFromURL(res, url)
 	}
@@ -520,4 +530,37 @@ func fillMarkerIDFromURL(res *models.ScraperResult, url string) {
 		}
 		res.ID = canonicalRemasterDisplayID(cid)
 	}
+}
+
+// isVideoDMMURL checks the actual hostname, not a query parameter or lookalike.
+func isVideoDMMURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && strings.EqualFold(u.Hostname(), "video.dmm.co.jp")
+}
+
+// documentFromResponse selects rendering and parsing from the final URL after
+// the HTTP client's existing redirect policy has accepted the response. Keep
+// the caller's original URL for the separate product-identity checks.
+func (s *scraper) documentFromResponse(ctx context.Context, resp *resty.Response, requestedURL string) (*goquery.Document, error) {
+	finalURL := requestedURL
+	if resp.RawResponse != nil && resp.RawResponse.Request != nil && resp.RawResponse.Request.URL != nil {
+		finalURL = resp.RawResponse.Request.URL.String()
+	}
+	if !s.CanHandleURL(finalURL) {
+		return nil, models.NewScraperNotFoundError("DMM", "redirect URL not handled by DMM scraper")
+	}
+	body := resp.String()
+	if isVideoDMMURL(finalURL) && s.useBrowser {
+		var err error
+		body, err = s.fetchBrowserHTML(ctx, finalURL)
+		if err != nil {
+			return nil, fmt.Errorf("browser fetch failed: %w", err)
+		}
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	doc.Url, _ = url.Parse(finalURL)
+	return doc, nil
 }

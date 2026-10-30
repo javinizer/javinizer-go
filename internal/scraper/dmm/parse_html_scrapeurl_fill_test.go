@@ -51,7 +51,7 @@ func TestScrapeURLHDCIDKeepsDerivedID(t *testing.T) {
 func TestScrapeURLHDCIDMismatchedPageRejected(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		return 200, `<html><body><table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
+		return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>RCT-157-HD</td></tr></table></body></html>`
 	}})
 
 	res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
@@ -72,7 +72,7 @@ func TestScrapeURLHDCIDMatchingPageStillOverrides(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newRemasterTestScraper(t)
 			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-				return 200, `<html><body><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+				return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
 			}})
 			res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
 			require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestScrapeURLHDCIDMatchingPageStillOverrides(t *testing.T) {
 func TestScrapeURLAICIDPageStillOutranksCID(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		return 200, `<html><body><table><tr><td>品番：</td><td>DV-818-AI</td></tr></table></body></html>`
+		return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>DV-818-AI</td></tr></table></body></html>`
 	}})
 
 	res, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=dv00899ai/")
@@ -117,7 +117,7 @@ func TestScrapeURLMarkerCIDForeignIdentityPageRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newRemasterTestScraper(t)
 			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-				return 200, `<html><body><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+				return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
 			}})
 
 			res, err := s.ScrapeURL(context.Background(), tc.url)
@@ -151,7 +151,7 @@ func TestScrapeURLMarkerCIDMarkerlessRowRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newRemasterTestScraper(t)
 			s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-				return 200, `<html><body><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
+				return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>` + tc.pinzan + `</td></tr></table></body></html>`
 			}})
 
 			res, err := s.ScrapeURL(context.Background(), tc.url)

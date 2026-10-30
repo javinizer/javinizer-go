@@ -68,7 +68,7 @@ func searchT28Fixture(t *testing.T, query, cid, display string) (*models.Scraper
 			return 200, `<a href="/mono/dvd/-/detail/=/cid=` + cid + `/">candidate</a>`
 		}
 		if strings.Contains(u, "cid="+cid+"/") {
-			return 200, `<html><body><table><tr><td>品番：</td><td>` + display + `</td></tr></table></body></html>`
+			return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>` + display + `</td></tr></table></body></html>`
 		}
 		return 404, ""
 	}})

@@ -26,7 +26,7 @@ func TestSearch_Miss3_NonBrowserURL_Success(t *testing.T) {
 	}))
 
 	searchHTML := `<html><body><a href="/digital/videoa/-/detail/=/cid=sear00003/">SEAR-003</a></body></html>`
-	detailHTML := `<!DOCTYPE html><html><body><h1 id="title">SEAR-003 Test</h1></body></html>`
+	detailHTML := `<!DOCTYPE html><html><body><h1 id="title" class="item">SEAR-003 Test</h1></body></html>`
 
 	transport := &dmmSearchSuccessRoundTripper{
 		responses: map[string]struct {
@@ -63,7 +63,7 @@ func TestSearch_Miss3_VideoDMMWithoutBrowser(t *testing.T) {
 
 	// Return a new-site URL in search results
 	searchHTML := `<html><body><a href="https://video.dmm.co.jp/av/content/?id=vidb00001">VIDB-001</a></body></html>`
-	detailHTML := `<!DOCTYPE html><html><body><h1 id="title">VIDB-001 Video DMM</h1></body></html>`
+	detailHTML := `<!DOCTYPE html><html><body><h1 id="title" class="item">VIDB-001 Video DMM</h1></body></html>`
 
 	transport := &dmmSearchSuccessRoundTripper{
 		responses: map[string]struct {
@@ -220,7 +220,7 @@ func TestScrapeURL_Miss3_DisabledScraper(t *testing.T) {
 	// The enabled flag doesn't gate ScrapeURL itself
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`<html><body>test</body></html>`))
+		_, _ = w.Write([]byte(`<html><body><h1 id='title' class='item'>Test product</h1></body></html>`))
 	}))
 	defer server.Close()
 
@@ -268,7 +268,7 @@ func TestGetURLCtx_Miss3_SearchFailsFallsThroughToDirectURLs(t *testing.T) {
 
 	// Search returns empty results (no candidates), but direct URLs succeed
 	searchHTML := `<html><body><p>No results found</p></body></html>`
-	directDetailHTML := `<!DOCTYPE html><html><body><h1 id="title">DRCT-001 Detail</h1></body></html>`
+	directDetailHTML := `<!DOCTYPE html><html><body><h1 id="title" class="item">DRCT-001 Detail</h1></body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

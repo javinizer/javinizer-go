@@ -16,7 +16,7 @@ import (
 func TestScrapeURLMarkerModeFromURLCid(t *testing.T) {
 	s, _ := newRemasterTestScraper(t)
 	s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-		return 200, "<html><body><table><tr><td>品番：</td><td>DV-818-AI</td></tr></table></body></html>"
+		return 200, "<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>DV-818-AI</td></tr></table></body></html>"
 	}})
 
 	res, err := s.ScrapeURL(context.Background(),

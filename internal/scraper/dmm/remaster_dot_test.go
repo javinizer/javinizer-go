@@ -22,7 +22,7 @@ func TestDottedRemasterDisplayResolution(t *testing.T) {
 					return 200, `<a href="/digital/videoa/-/detail/=/cid=1rct00156h/">Remaster</a>`
 				}
 				if strings.Contains(u, "cid=1rct00156h") {
-					return 200, `<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table>`
+					return 200, `<h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table>`
 				}
 				return 404, ""
 			}}

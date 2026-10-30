@@ -83,7 +83,7 @@ func TestRemasterBrowserOnlyResolution(t *testing.T) {
 	calls := 0
 	s.browserFetch = func(ctx context.Context, u string) (string, error) {
 		calls++
-		return `<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table>`, nil
+		return `<h1>Fixture product</h1><table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table>`, nil
 	}
 	cid, err := s.ResolveContentID("RCT-156H")
 	require.NoError(t, err)

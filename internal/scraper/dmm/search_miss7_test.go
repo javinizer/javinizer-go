@@ -397,7 +397,7 @@ func TestMiss7_SortCandidates_PriorityThenIDLength(t *testing.T) {
 // --- ScrapeURL: successful 200 response with valid HTML ---
 
 func TestMiss7_ScrapeURL_SuccessfulResponse(t *testing.T) {
-	html := `<!DOCTYPE html><html><body>
+	html := `<!DOCTYPE html><html><body><h1 id='title' class='item'>Test product</h1>
 	<table><tr><td>Actress</td><td><a href="?actress=100">Test Actress</a></td></tr></table>
 	</body></html>`
 
@@ -438,7 +438,7 @@ func TestMiss7_ScrapeURL_HTMLParseAfterFetch(t *testing.T) {
 	// Test with valid server response but malformed HTML that goquery can still parse
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`<html><body>valid</body></html>`))
+		_, _ = w.Write([]byte(`<html><body><h1 id='title' class='item'>Test product</h1></body></html>`))
 	}))
 	defer server.Close()
 
@@ -460,7 +460,7 @@ func TestMiss7_ScrapeURL_HTMLParseAfterFetch(t *testing.T) {
 // --- Search: non-browser mode with successful fetch and parse ---
 
 func TestMiss7_Search_NonBrowserSuccessPath(t *testing.T) {
-	html := `<!DOCTYPE html><html><body>
+	html := `<!DOCTYPE html><html><body><h1 id='title' class='item'>Test product</h1>
 	<table><tr><td>Actress</td><td><a href="?actress=100">Test Actress</a></td></tr></table>
 	</body></html>`
 
@@ -492,7 +492,7 @@ func TestMiss7_Search_NonBrowserSuccessPath(t *testing.T) {
 // --- parseHTML: covered via ScrapeURL but let's verify doc parsing ---
 
 func TestMiss7_ParseHTML_BasicDocument(t *testing.T) {
-	html := `<html><body>
+	html := `<html><body><h1 id='title' class='item'>Test product</h1>
 	<table>
 		<tr><td>出演者</td><td><a href="?actress=100">テスト女優</a></td></tr>
 	</table>
