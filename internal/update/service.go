@@ -375,19 +375,13 @@ func (s *Service) StartBackgroundCheck(ctx context.Context, interval time.Durati
 
 // IsUpdateAvailable checks if an update is available without modifying state.
 func (s *Service) IsUpdateAvailable(ctx context.Context) (bool, error) {
-	state, err := s.GetStatus(ctx)
-	if err != nil {
-		return false, err
-	}
+	state, _ := s.GetStatus(ctx)
 	return state.Available, nil
 }
 
 // GetLatestVersion returns the latest version without checking availability.
 func (s *Service) GetLatestVersion(ctx context.Context) (string, error) {
-	state, err := s.GetStatus(ctx)
-	if err != nil {
-		return "", err
-	}
+	state, _ := s.GetStatus(ctx)
 	return state.Version, nil
 }
 
