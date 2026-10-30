@@ -299,8 +299,7 @@ func TestFetchPage(t *testing.T) {
 func TestDecodeBody(t *testing.T) {
 	// Test with empty body (http.NoBody)
 	resp := &resty.Response{RawResponse: &http.Response{Body: http.NoBody}}
-	result, err := decodeBody(resp)
-	assert.NoError(t, err)
+	result := decodeBody(resp)
 	assert.Empty(t, result)
 }
 
