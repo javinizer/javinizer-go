@@ -105,7 +105,8 @@ func resolveAutocompleteBasePath(userPath string, cfg *core.SecurityNarrowConfig
 
 	basePath := absPath
 	fragment := ""
-	if !hasTrailingPathSeparator(expandedPath) && trimmedPath != string(os.PathSeparator) {
+	// A cleaned dot names the current directory, not a partial final segment.
+	if !hasTrailingPathSeparator(expandedPath) && trimmedPath != "." && trimmedPath != string(os.PathSeparator) {
 		basePath = filepath.Dir(absPath)
 		fragment = filepath.Base(trimmedPath)
 		if fragment == "." {
