@@ -87,13 +87,13 @@ func TestExtractFieldFinal(t *testing.T) {
 		divID string
 		want  string
 	}{
-		{`id="video_director"><a>Director Name</a></div>`, "video_director", "Director Name"},
-		{`id="video_maker"><a>Maker X</a></div>`, "video_maker", "Maker X"},
-		{`id="video_label"><a>Label Y</a></div>`, "video_label", "Label Y"},
+		{`<div id="video_director"><a>Director Name</a></div>`, "video_director", "Director Name"},
+		{`<div id="video_maker"><a>Maker X</a></div>`, "video_maker", "Maker X"},
+		{`<div id="video_label"><a>Label Y</a></div>`, "video_label", "Label Y"},
 		{"no matching div", "video_director", ""},
 	}
 	for _, tt := range tests {
-		got := s.extractField(tt.html, tt.divID)
+		got := s.extractField(mustParseDoc(t, tt.html), tt.divID)
 		if got != tt.want {
 			t.Errorf("extractField(%q) = %q, want %q", tt.divID, got, tt.want)
 		}

@@ -93,18 +93,18 @@ func TestExtractRuntimeDeep2_NoRuntime(t *testing.T) {
 func TestExtractFieldDeep2_Director(t *testing.T) {
 	html := `<div id="video_director"><a>Test Director</a></div>`
 	s := &scraper{}
-	assert.Equal(t, "Test Director", s.extractField(html, "video_director"))
+	assert.Equal(t, "Test Director", s.extractField(mustParseDoc(t, html), "video_director"))
 }
 
 func TestExtractFieldDeep2_Maker(t *testing.T) {
 	html := `<div id="video_maker"><a>Test Maker</a></div>`
 	s := &scraper{}
-	assert.Equal(t, "Test Maker", s.extractField(html, "video_maker"))
+	assert.Equal(t, "Test Maker", s.extractField(mustParseDoc(t, html), "video_maker"))
 }
 
 func TestExtractFieldDeep2_NotFound(t *testing.T) {
 	s := &scraper{}
-	assert.Equal(t, "", s.extractField("<html></html>", "video_director"))
+	assert.Equal(t, "", s.extractField(mustParseDoc(t, "<html></html>"), "video_director"))
 }
 
 func TestExtractGenresDeep2(t *testing.T) {
