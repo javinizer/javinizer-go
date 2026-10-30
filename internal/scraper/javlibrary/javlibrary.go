@@ -509,9 +509,9 @@ func (s *scraper) parseDetailPage(html string, id string, sourceURL string, lang
 	// Structured fields from video_info div
 	result.ReleaseDate = s.extractReleaseDate(html)
 	result.Runtime = s.extractRuntime(html)
-	result.Director = s.extractField(html, "video_director")
-	result.Maker = s.extractField(html, "video_maker")
-	result.Label = s.extractField(html, "video_label")
+	result.Director = s.extractField(doc, "video_director")
+	result.Maker = s.extractField(doc, "video_maker")
+	result.Label = s.extractField(doc, "video_label")
 	result.Series = s.extractSeries(html)
 	result.Genres = s.extractGenres(html)
 	result.Actresses, result.CastNameEvidence = s.extractActressesWithEvidence(html)
@@ -663,8 +663,6 @@ func (s *scraper) extractRuntime(html string) int {
 	return 0
 }
 
-// extractField extracts a field value from a video_info div by its ID
-// Works for video_director, video_maker, video_label
 // extractVideoID extracts the canonical product code from a detail page's
 // <div id="video_id">...</div> (e.g. "ONED-120"). Empty if absent. Used as the
 // primary source for result.ID in parseDetailPage and for title prefix stripping.
@@ -683,15 +681,13 @@ func (s *scraper) extractVideoID(html string) string {
 	return ""
 }
 
-func (s *scraper) extractField(html string, divID string) string {
-	// Pattern: <div id="video_director" ...> ... <a ...>Value</a> ...
-	pattern := fmt.Sprintf(`id="%s"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>`, divID)
-	re := regexp.MustCompile(pattern)
-	matches := re.FindStringSubmatch(html)
-	if len(matches) > 1 {
-		return strings.TrimSpace(matches[1])
+// extractField reads only the requested field's own anchor, never a later
+// sibling section. Empty or absent fields must remain empty.
+func (s *scraper) extractField(doc *goquery.Document, divID string) string {
+	if doc == nil {
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(doc.Find("#" + divID).First().Find("a").First().Text())
 }
 
 // extractGenres extracts genres from the video_genres div

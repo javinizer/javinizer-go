@@ -296,7 +296,7 @@ func TestHelpers(t *testing.T) {
 	if got := s.extractRuntime(`Duration: 105 min`); got != 105 {
 		t.Fatalf("extractRuntime fallback = %d", got)
 	}
-	if got := s.extractField(`<div id="video_director"><a>Director</a></div>`, "video_director"); got != "Director" {
+	if got := s.extractField(mustParseDoc(t, `<div id="video_director"><a>Director</a></div>`), "video_director"); got != "Director" {
 		t.Fatalf("extractField = %q", got)
 	}
 	if _, _, ok := s.ResolveDownloadProxyForHost("www.javlibrary.com"); !ok {

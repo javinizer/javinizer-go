@@ -508,14 +508,14 @@ func TestMiss_ExtractField(t *testing.T) {
 		divID    string
 		expected string
 	}{
-		{"video_maker", `id="video_maker"><a href="/maker/1">TestMaker</a>`, "video_maker", "TestMaker"},
-		{"video_director", `id="video_director"><a href="/director/1">TestDirector</a>`, "video_director", "TestDirector"},
+		{"video_maker", `<div id="video_maker"><a href="/maker/1">TestMaker</a></div>`, "video_maker", "TestMaker"},
+		{"video_director", `<div id="video_director"><a href="/director/1">TestDirector</a></div>`, "video_director", "TestDirector"},
 		{"no match", `<html>nothing</html>`, "video_maker", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, s.extractField(tt.html, tt.divID))
+			assert.Equal(t, tt.expected, s.extractField(mustParseDoc(t, tt.html), tt.divID))
 		})
 	}
 }
