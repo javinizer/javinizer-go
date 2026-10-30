@@ -37,7 +37,7 @@ type Context struct {
 	// People
 	Director       string
 	Actresses      []string        // Pre-formatted actress names (LastName FirstName via FullName). Legacy: use ActressDetails for FirstNameOrder-aware formatting.
-	ActressDetails []ActressDetail // Source of truth for name formatting; formatActressName uses this first, falls back to Actresses.
+	ActressDetails []ActressDetail // Source of truth for name formatting; actress tags use this first, falling back to Actresses.
 	FirstName      string          // For single actress context
 	LastName       string          // For single actress context
 	ActressName    string          // Explicit actress name for .actors image filenames
@@ -391,12 +391,6 @@ func (c *Context) formatActressNamesLang(preferJa bool, firstNameOrderHint *bool
 		names[i] = c.formatActressNameLang(detail, preferJa, firstNameOrderHint)
 	}
 	return names
-}
-
-// formatActressName formats a single ActressDetail into a display name,
-// respecting the Context's ActressLanguageJa and FirstNameOrder settings.
-func (c *Context) formatActressName(detail ActressDetail) string {
-	return c.formatActressNameLang(detail, c.ActressLanguageJa, nil)
 }
 
 // groupActressMin returns the configured minimum actress count that triggers

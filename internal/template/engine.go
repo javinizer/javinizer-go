@@ -796,31 +796,8 @@ func newListTagRegistry() map[string]tagResolver {
 	return registry
 }
 
-// newActressTagRegistry returns actress name resolution tags.
-func newActressTagRegistry() map[string]tagResolver {
-	registry := make(map[string]tagResolver)
-
-	actressNameResolver := func(ctx *Context) (string, error) {
-		if ctx.ActressName != "" {
-			return ctx.ActressName, nil
-		}
-		if len(ctx.ActressDetails) > 0 {
-			return ctx.formatActressName(ctx.ActressDetails[0]), nil
-		}
-		if len(ctx.Actresses) > 0 {
-			return ctx.Actresses[0], nil
-		}
-		return "", nil
-	}
-	registry["ACTRESS"] = actressNameResolver
-	registry["ACTORNAME"] = actressNameResolver
-	registry["ACTRESSNAME"] = actressNameResolver
-
-	return registry
-}
-
 // newTagRegistry builds the map of tag names to resolver functions by merging
-// the four sub-registries.
+// the three sub-registries. Actress tags are resolved directly by resolveTag.
 func newTagRegistry() map[string]tagResolver {
 	registry := make(map[string]tagResolver)
 	for k, v := range newSimpleTagRegistry() {
@@ -830,9 +807,6 @@ func newTagRegistry() map[string]tagResolver {
 		registry[k] = v
 	}
 	for k, v := range newListTagRegistry() {
-		registry[k] = v
-	}
-	for k, v := range newActressTagRegistry() {
 		registry[k] = v
 	}
 	return registry
