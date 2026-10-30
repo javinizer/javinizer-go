@@ -115,11 +115,7 @@ func printUpdateStatus(cmd *cobra.Command, cfg *config.Config) error {
 		StableOnly:                cfg.System.VersionCheckStableOnly,
 	})
 	ctx := cmd.Context()
-	state, err := service.GetStatus(ctx)
-	if err != nil {
-		_, werr := fmt.Fprintf(cmd.ErrOrStderr(), "  - Error loading status: %v\n", err)
-		return werr
-	}
+	state, _ := service.GetStatus(ctx)
 
 	if state.Source == update.UpdateSourceDisabled {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), "  - Updates are disabled in config")
