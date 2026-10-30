@@ -28,8 +28,7 @@ func TestParseDetailPageDeep2_FullHTML(t *testing.T) {
 	assert.NoError(t, err)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABC-123")
-	assert.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABC-123")
 	assert.Equal(t, "ABC-123", result.ID)
 	assert.Contains(t, result.Title, "Test Movie Title")
 	assert.Equal(t, 120, result.Runtime)
@@ -50,8 +49,7 @@ func TestParseDetailPageDeep2_EmptyPage(t *testing.T) {
 	assert.NoError(t, err)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "fallback-id")
-	assert.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "fallback-id")
 	assert.Equal(t, "fallback-id", result.ID)
 	assert.Equal(t, "fallback-id", result.Title)
 }

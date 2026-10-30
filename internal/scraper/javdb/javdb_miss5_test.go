@@ -36,8 +36,7 @@ func TestMiss5_ParseDetailPage_MaleActorRow(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-500")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-500")
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "FemaleActress1", result.Actresses[0].JapaneseName)
 }
@@ -63,8 +62,7 @@ func TestMiss5_ParseDetailPage_GenericCastFallback(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-501")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-501")
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "GenericActor1", result.Actresses[0].JapaneseName)
 }
@@ -91,8 +89,7 @@ func TestMiss5_ParseDetailPage_GenericCastSkippedWhenFemaleExists(t *testing.T) 
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-502")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-502")
 	assert.Len(t, result.Actresses, 1)
 	assert.Equal(t, "Female1", result.Actresses[0].JapaneseName)
 }
@@ -164,8 +161,7 @@ func TestMiss5_ParseDetailPage_OGTitleFallback(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-503")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-503")
 	assert.Equal(t, "OG Title Movie", result.Title)
 }
 
@@ -189,8 +185,7 @@ func TestMiss5_ParseDetailPage_DescriptionItemprop(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-504")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-504")
 	assert.Equal(t, "Test description text", result.Description)
 }
 
@@ -215,8 +210,7 @@ func TestMiss5_ParseDetailPage_DescriptionFromClass(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-505")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abc123", "ABP-505")
 	assert.Equal(t, "Class description text", result.Description)
 }
 

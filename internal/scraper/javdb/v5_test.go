@@ -235,8 +235,7 @@ func TestParseDetailPageV5(t *testing.T) {
 		settings: models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/abcde", "IPX-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/abcde", "IPX-001")
 	require.NotNil(t, result)
 	assert.Equal(t, "IPX-001", result.ID)
 	assert.Equal(t, "MakerA", result.Maker)
@@ -268,8 +267,7 @@ func TestParseDetailPageV5_Minimal(t *testing.T) {
 		settings: models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/xyz", "MIN-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/xyz", "MIN-001")
 	assert.Equal(t, "MIN-001", result.ID)
 }
 
@@ -288,8 +286,7 @@ func TestParseDetailPageV5_NoIDInHTML(t *testing.T) {
 		settings: models.ScraperSettings{Enabled: true},
 	}
 
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/xyz", "FALLBACK-001")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/xyz", "FALLBACK-001")
 	assert.Equal(t, "FALLBACK-001", result.ID)
 }
 

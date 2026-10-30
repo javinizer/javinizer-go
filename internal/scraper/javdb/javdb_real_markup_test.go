@@ -106,8 +106,7 @@ func TestParseDetailPageRealCastMarkupExcludesMaleActors(t *testing.T) {
 	require.NoError(t, err)
 
 	s := &scraper{baseURL: "https://javdb.com"}
-	result, err := s.parseDetailPage(doc, "https://javdb.com/v/00Akq", "EYAN-172")
-	require.NoError(t, err)
+	result := s.parseDetailPage(doc, "https://javdb.com/v/00Akq", "EYAN-172")
 
 	require.Len(t, result.Actresses, 1, "got %v", actressNames(result.Actresses))
 	assert.Equal(t, "白石みき", result.Actresses[0].JapaneseName)
