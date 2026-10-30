@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -153,5 +154,65 @@ func TestNativeWindowsShortPathResolutionContracts(t *testing.T) {
 		entries, err := os.ReadDir(root)
 		require.NoError(t, err)
 		require.Len(t, entries, 1, "normalization must not create filesystem entries")
+	})
+	t.Run("extended length owned path", func(t *testing.T) {
+		root := t.TempDir()
+		canonicalRoot, err := filepath.EvalSymlinks(root)
+		require.NoError(t, err)
+		rootInfo, err := os.Stat(root)
+		require.NoError(t, err)
+		canonicalInfo, err := os.Stat(canonicalRoot)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(rootInfo, canonicalInfo))
+		require.True(t, filepath.IsAbs(canonicalRoot))
+		volume := filepath.VolumeName(canonicalRoot)
+		require.Len(t, volume, 2, "fixture requires an owned local-drive TempDir")
+		require.Equal(t, byte(':'), volume[1])
+
+		subtree := `\\?\` + filepath.Join(canonicalRoot, "extended-path-contract")
+		t.Cleanup(func() {
+			require.NoError(t, os.RemoveAll(subtree))
+			_, err := os.Stat(subtree)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+		component := strings.Repeat("owned-segment-", 6)
+		require.Less(t, len(component), 100)
+		directory := filepath.Join(subtree, component, component, component)
+		path := filepath.Join(directory, "owned-marker.txt")
+		encoded, err := windows.UTF16FromString(path)
+		require.NoError(t, err)
+		require.Greater(t, len(encoded)-1, windows.MAX_PATH)
+		require.Less(t, len(encoded), 32767)
+		require.NoError(t, os.MkdirAll(directory, 0700))
+		require.NoError(t, os.WriteFile(path, []byte("long path contents unchanged"), 0600))
+		before, err := os.Stat(path)
+		require.NoError(t, err)
+
+		// Prove the real API needs a larger buffer, without relying on 8.3 aliases.
+		initial := make([]uint16, windows.MAX_PATH)
+		needed, err := windows.GetLongPathName(&encoded[0], &initial[0], uint32(len(initial)))
+		require.NoError(t, err)
+		require.Greater(t, needed, uint32(len(initial)))
+		referenceBuffer := make([]uint16, needed+1)
+		n, err := windows.GetLongPathName(&encoded[0], &referenceBuffer[0], uint32(len(referenceBuffer)))
+		require.NoError(t, err)
+		require.Greater(t, n, uint32(windows.MAX_PATH))
+		require.Less(t, n, uint32(len(referenceBuffer)))
+		reference := windows.UTF16ToString(referenceBuffer[:n])
+		require.True(t, strings.HasSuffix(reference, `\`+filepath.Join(component, component, component, "owned-marker.txt")))
+
+		got := resolveShortPathName(path)
+		require.Equal(t, reference, got, "resizing must return the complete native path")
+		after, err := os.Stat(got)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(before, after))
+		contents, err := os.ReadFile(got)
+		require.NoError(t, err)
+		require.Equal(t, "long path contents unchanged", string(contents))
+		for _, dir := range []string{subtree, filepath.Join(subtree, component), filepath.Join(subtree, component, component), directory} {
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Len(t, entries, 1, "normalization must not create filesystem entries")
+		}
 	})
 }
