@@ -244,8 +244,8 @@ jobs:
     - name: Verify native Windows primary Undo contracts with coverage
       run: >-
         go test -short -count=1 -v -covermode=atomic
-        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history
-        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused)$'
+        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history ./cmd/javinizer/commands/actress ./internal/update ./internal/config ./internal/api/core
+        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing)$'
 
     - name: Archive native Windows primary Undo coverage
       if: ${{ !env.ACT }}
@@ -645,7 +645,7 @@ jobs:
         go test -short -count=1 -v -covermode=atomic
         -coverprofile=coverage-primary-undo-macos.out
         ./internal/history ./internal/fsutil ./internal/models ./internal/database ./internal/workflow
-        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging|TestDarwinExclusiveRename|TestDarwinUnsupportedEINVALDoesNotTriggerCopy|TestDarwinVerifiedSubstitutionAndRestore|TestVacateLinkObject)'
+        -run '^(TestPrimaryUndo|TestReviewPrimaryUndo|TestDurableJournal|TestDurableStaging|TestDarwinExclusiveRename|TestDarwinUnsupportedEINVALDoesNotTriggerCopy|TestDarwinVerifiedSubstitutionAndRestore|TestVacateLinkObject|TestRestoreSourceW22_IdentitySwapRefused$|TestW10RearmReplacementBackup_RegularFileUnchanged$)'
 
     - name: Archive native Darwin primary Undo coverage
       if: ${{ !env.ACT }}
