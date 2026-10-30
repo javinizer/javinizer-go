@@ -173,9 +173,16 @@ var boolMergeSpecs = []scalarMergeSpec[bool]{
 	{"ShouldCropPoster", func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie) bool { return m.Poster.ShouldCropPoster }, func(m *models.Movie, v bool) { m.Poster.ShouldCropPoster = v }, func(v bool) bool { return !v }},
 }
 
-// boolPtrMergeSpecs lists all *bool scalar fields to merge.
-var boolPtrMergeSpecs = []scalarMergeSpec[*bool]{
-	{"OriginalShouldCropPoster", func(m *models.Movie) *bool { return m.Poster.OriginalShouldCropPoster }, func(m *models.Movie) *bool { return m.Poster.OriginalShouldCropPoster }, func(m *models.Movie, v *bool) { m.Poster.OriginalShouldCropPoster = v }, func(v *bool) bool { return v == nil || !*v }},
+// boolPtrEmptySpec describes a pointer field tracked for emptiness, not merging.
+type boolPtrEmptySpec struct {
+	name    string
+	get     func(*models.Movie) *bool
+	isEmpty func(*bool) bool
+}
+
+// boolPtrEmptySpecs supplies single-source provenance and non-empty field counts.
+var boolPtrEmptySpecs = []boolPtrEmptySpec{
+	{"OriginalShouldCropPoster", func(m *models.Movie) *bool { return m.Poster.OriginalShouldCropPoster }, func(v *bool) bool { return v == nil || !*v }},
 }
 
 // sliceIsEmptySpec defines a slice/array field with an isEmpty predicate for provenance tracking.
@@ -595,9 +602,9 @@ func isFieldEmptySpec(fieldName string, movie *models.Movie) bool {
 		}
 	}
 	// Check *bool specs
-	for _, spec := range boolPtrMergeSpecs {
+	for _, spec := range boolPtrEmptySpecs {
 		if spec.name == fieldName {
-			return spec.isEmpty(spec.getS(movie))
+			return spec.isEmpty(spec.get(movie))
 		}
 	}
 	// Check *time.Time specs
