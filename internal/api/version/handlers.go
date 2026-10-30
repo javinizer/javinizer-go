@@ -105,7 +105,9 @@ func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		buildDate := version.BuildDate
 
 		// Load cached state using service
-		state, err := service.GetStatus(c.Request.Context())
+		// The concrete service always returns usable state and a nil Go error;
+		// cache failures are represented by the state's Source/Error fields.
+		state, _ := service.GetStatus(c.Request.Context())
 
 		env := deps.InstallEnvironment()
 		response := &VersionStatusResponse{
@@ -115,12 +117,6 @@ func versionStatus(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 			Source:    string(update.UpdateSourceCached),
 		}
 		applyEnvironment(response, env)
-
-		if err != nil {
-			response.Error = err.Error()
-			c.JSON(http.StatusOK, response)
-			return
-		}
 
 		// Handle disabled state
 		if state.Source == update.UpdateSourceDisabled {
@@ -183,7 +179,9 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
 
-		state, err := service.ForceCheck(ctx)
+		// ForceCheck preserves its error result for API compatibility, but the
+		// concrete service returns nonnil state with failures in Source/Error.
+		state, _ := service.ForceCheck(ctx)
 
 		env := deps.InstallEnvironment()
 		response := &VersionStatusResponse{
@@ -194,24 +192,6 @@ func versionCheck(deps commandutil.CoreDepsReader) gin.HandlerFunc {
 			Prerelease: false,
 		}
 		applyEnvironment(response, env)
-
-		if err != nil {
-			response.Source = string(update.UpdateSourceError)
-			response.Error = err.Error()
-			response.Latest = ""
-			response.UpdateAvailable = false
-			c.JSON(http.StatusOK, response)
-			return
-		}
-
-		if state == nil {
-			response.Source = string(update.UpdateSourceError)
-			response.Error = "update check returned no state"
-			response.Latest = ""
-			response.UpdateAvailable = false
-			c.JSON(http.StatusOK, response)
-			return
-		}
 
 		response.Source = string(state.Source)
 		response.Error = state.Error
