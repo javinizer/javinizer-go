@@ -245,7 +245,7 @@ jobs:
       run: >-
         go test -short -count=1 -v -covermode=atomic
         '-coverprofile=coverage-primary-undo-windows.out' ./internal/history ./cmd/javinizer/commands/actress ./internal/update ./internal/config ./internal/api/core
-        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing)$'
+        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts)$'
 
     - name: Archive native Windows primary Undo coverage
       if: ${{ !env.ACT }}
