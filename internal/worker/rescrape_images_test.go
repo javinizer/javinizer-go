@@ -282,9 +282,11 @@ func TestEstablishScrapedBaseline_EmptyPoster_LeavesCropBaselineNil(t *testing.T
 // A scraper with a poster image anchors the crop baseline, mirroring the
 // scraped ShouldCropPoster so Reset reflects the rescrape's crop intent.
 func TestEstablishScrapedBaseline_WithPoster_AnchorsCropBaseline(t *testing.T) {
-	target := &models.Movie{}
-	source := &models.Movie{Poster: models.PosterState{PosterURL: "https://x.invalid/p.jpg", ShouldCropPoster: true}}
-	establishScrapedBaseline(target, source)
-	require.NotNil(t, target.Poster.OriginalShouldCropPoster)
-	assert.True(t, *target.Poster.OriginalShouldCropPoster)
+	for _, shouldCrop := range []bool{false, true} {
+		target := &models.Movie{}
+		source := &models.Movie{Poster: models.PosterState{PosterURL: "https://x.invalid/p.jpg", ShouldCropPoster: shouldCrop}}
+		establishScrapedBaseline(target, source)
+		require.NotNil(t, target.Poster.OriginalShouldCropPoster)
+		assert.Equal(t, shouldCrop, *target.Poster.OriginalShouldCropPoster)
+	}
 }
