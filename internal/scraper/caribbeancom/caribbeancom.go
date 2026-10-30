@@ -689,17 +689,7 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	decoded, err := decodeBody(resp)
-	if err != nil {
-		html := resp.String()
-		if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(html) {
-			return "", resp.StatusCode(), models.NewScraperChallengeError(
-				"Caribbeancom",
-				"Caribbeancom returned a Cloudflare challenge page (request blocked; adjust proxy/IP)",
-			)
-		}
-		return html, resp.StatusCode(), nil
-	}
+	decoded := decodeBody(resp)
 
 	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(decoded) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
@@ -711,16 +701,17 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	return decoded, resp.StatusCode(), nil
 }
 
-func decodeBody(resp *resty.Response) (string, error) {
+// decodeBody preserves the raw-response fallback if charset decoding fails.
+func decodeBody(resp *resty.Response) string {
 	body := resp.Body()
 	if len(body) == 0 {
-		return "", nil
+		return ""
 	}
 	contentType := resp.Header().Get("Content-Type")
 	enc, _, _ := charset.DetermineEncoding(body, contentType)
 	decoded, err := enc.NewDecoder().Bytes(body)
 	if err != nil {
-		return "", err
+		return resp.String()
 	}
-	return string(decoded), nil
+	return string(decoded)
 }

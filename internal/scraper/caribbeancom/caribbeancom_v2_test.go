@@ -274,8 +274,7 @@ func TestDecodeBodyV2(t *testing.T) {
 	resp, err := client.R().Get("https://www.caribbeancom.com/test")
 	require.NoError(t, err)
 
-	decoded, err := decodeBody(resp)
-	require.NoError(t, err)
+	decoded := decodeBody(resp)
 	assert.Contains(t, decoded, "テスト")
 }
 
