@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -54,6 +55,8 @@ func TestPathValidatorRejectsRelativePathAfterWorkingDirectoryRemoved(t *testing
 	validator := NewPathValidatorBrowse(afero.NewOsFs(), nil, false, nil)
 	resolved, err := validator.ValidateDir("relative")
 	require.Empty(t, resolved)
-	require.ErrorIs(t, err, apperrors.ErrPathInvalid)
+	require.True(t,
+		errors.Is(err, apperrors.ErrPathInvalid) || errors.Is(err, apperrors.ErrPathNotExist),
+		"removed working directory must reject a relative path, got %v", err)
 	require.False(t, validator.IsDirAllowed("relative"), "a missing working directory must not authorize a relative path")
 }

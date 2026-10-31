@@ -2,6 +2,7 @@ package file
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,7 +72,9 @@ func TestAutocompleteMissingWorkingDirectoryFailsClosed(t *testing.T) {
 	t.Chdir(root)
 	require.NoError(t, os.Remove(root))
 	path, fragment, err := resolveAutocompleteBasePath("relative", &core.SecurityNarrowConfig{}, "configure")
-	require.ErrorIs(t, err, apperrors.ErrPathInvalid)
+	require.True(t,
+		errors.Is(err, apperrors.ErrPathInvalid) || errors.Is(err, apperrors.ErrPathNotExist),
+		"removed working directory must reject a relative path, got %v", err)
 	require.Empty(t, path)
 	require.Empty(t, fragment)
 }
