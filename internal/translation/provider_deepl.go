@@ -81,10 +81,8 @@ func (p *DeepLProvider) Translate(ctx context.Context, sourceLang, targetLang st
 		reqBody.SourceLang = strings.ToUpper(normalizedSourceLang)
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, &translationError{Kind: TranslationErrorProvider, Message: "deepl translation: failed to marshal request"}
-	}
+	// This local request contains only strings and []string, with no custom marshalers.
+	jsonBody, _ := json.Marshal(reqBody)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v2/translate", bytes.NewReader(jsonBody))
 	if err != nil {

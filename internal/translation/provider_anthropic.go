@@ -49,10 +49,7 @@ func (p *AnthropicProvider) Translate(ctx context.Context, sourceLang, targetLan
 		return &translationResult{}, nil
 	}
 
-	systemPrompt, userPrompt, err := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
-	if err != nil {
-		return nil, err
-	}
+	systemPrompt, userPrompt := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
 
 	adapter := &anthropicChatAdapter{apiKey: apiKey}
 	return executeLLMChatTranslation(ctx, p.httpClient, adapter, "anthropic", baseURL, model, systemPrompt, userPrompt, len(texts))
