@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.6] - 2026-10-31
+
+### Added
+
+- Show opt-in same-source R18 evidence in scrape review (#474).
+- Add opt-in read-only catalog name output to scrapes (#427).
+- Add confirmed offline actress name sync with preview, batch jobs, API worker and catalog UI (#452, #453, #454, #457, #472).
+- Preserve target scalars with an explicit merge policy and opt in to transactional imported name updates (#396, #397).
+- Add verified catalog filters while preserving UI state (#389).
+- Add guarded per-performer name overrides and guarded source-name corrections with provenance UI (#401, #441).
+- Add an isolated metadata provider resolver boundary (#456).
+- Add unwired bounded target-safe metadata acquisition (#473).
+- Add bounded cache groundwork for image input validation, evidence snapshots, an offline r18.dev dump adapter and POSIX artifact publication (#444, #446, #447, #448).
+
+### Fixed
+
+- Add explicit video collision decisions and guide credit-blocked files to current collision details (#378, #379).
+- Keep recursive metadata and artwork beside each movie (#387).
+- Retain native cast names in JapaneseName and decode cast labels once before routing (#386, #440).
+- Decode Jav321 actress entities before splitting names (#477).
+- Keep JavLibrary metadata fields within their own sections and preserve fallback when the HTML parser rejects a document (#418, #537).
+- Recognize EBML unknown-size VINT values (#405).
+- Create migration metadata only after acquiring the startup lock, bound malformed stored migration hash diagnostics, and retain preview rollback ownership after cancellation (#433, #434, #436).
+- Preserve bulk outcomes and sanitize boundary failures (#420).
+- Join the startup sweep during shutdown (#439).
+- Fence scrape admission on server cancellation and stop preview collision planning after cancellation (#471, #484).
+- Tolerate refused chmod on ACL-managed staging files and use exclusive rename on Darwin (#390, #424).
+- Harden artifact staging seal key loading (#392).
+- Preserve explicit numeric scraper overrides (#398).
+- Restore the last browse location after scrape navigation, restore the Jobs review source after automatic completion, and restore document titles across navigation (#426, #463, #553).
+- Redact paid Google request construction errors (#432).
+- Pin validated endpoints within dial budgets (#445).
+- Honor opt-in Undo backup retention (#464).
+- Update golang.org/x/net for HTML security fixes (#493).
+- Close DMM direct probe response bodies and reject empty DMM results after streaming redirects (#500, #546).
+- Release owned FlareSolverr sessions on graceful teardown (#545).
+- Resolve dot autocomplete in the current directory (#532).
+
+### Changed
+
+- Reduce positive-DMM import scans, index canonical import matching transactionally, and skip unchanged candidate quarantine refreshes (#388, #399, #402).
+- Remove unreachable version handler fallbacks, unreachable scraper fallback branches, redundant actress template handlers and impossible name and encoding branches (#523, #526, #531, #550).
+- Consolidate scraper charset fallback handling and simplify concrete update status callers (#528, #534).
+- Share event filter query predicates, apply progress callback wiring, FileBrowser stale-selection pruning, folder-name budgeting and translation model picker presentation (#375, #376, #377, #381, #382).
+- Limit NFO pointer metadata to emptiness checks (#541).
+- Extend offline and boundary coverage contracts across CLI, API, scraper, database, storage, worker, publication and native filesystem paths (#394, #400, #403, #466, #524, #535).
+- Raise the Windows test job timeout to 40 minutes, isolate database-heavy Windows unit suites and allow frontend browser setup within the overall job budget (#393, #438, #513).
+- Clarify imported alias metadata boundaries and the durable name correction workflow (#395, #451).
+- Accept either fail-closed path error when the working directory is removed, keeping the API suite green on macOS.
+
 ## [v1.6.5] - 2026-10-21
 
 ### Added
