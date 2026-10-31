@@ -2,6 +2,7 @@ package commandutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,7 +67,12 @@ type CoreDeps struct {
 
 	// r18DumpCloser holds the local r18.dev dump sidecar handle (when opened)
 	// so it can be released in Close().
-	r18DumpCloser io.Closer
+	r18DumpCloser      io.Closer
+	retiredRegistries  []*scraperutil.ScraperRegistry
+	retiredDumpClosers []io.Closer
+	closeOnce          sync.Once
+	closeErr           error
+	closed             bool
 
 	// installEnvironment classifies the running build (docker/desktop/cli) for
 	// environment-aware upgrade UX. It is a process-level constant set once at
@@ -148,6 +154,7 @@ func NewQueryOnlyDependencies(cfg *config.Config) (*CoreDeps, error) {
 
 	registry, err := newScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), newMemoryContentIDRepository(), r18DumpLookup)
 	if err != nil {
+		_ = reg.Close()
 		if r18DumpCloser != nil {
 			_ = r18DumpCloser.Close()
 		}
@@ -257,6 +264,10 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 		}
 		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		if err != nil {
+			if r18DumpCloser != nil {
+				_ = r18DumpCloser.Close()
+			}
+			_ = reg.Close()
 			// Only close a DB we created here; never close an injected one
 			// (avoids leaking or double-closing injected handles).
 			if ownsDB {
@@ -389,26 +400,77 @@ func (d *CoreDeps) ReplaceReloadable(cfg *config.Config, registry *scraperutil.S
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.closed {
+		_ = registry.Close()
+		return
+	}
+	// Existing workflows may still hold the old registry. Retain it until all
+	// consumers have joined at shutdown rather than closing active clients.
+	if d.ScraperRegistry != nil && d.ScraperRegistry != registry {
+		d.retiredRegistries = append(d.retiredRegistries, d.ScraperRegistry)
+	}
 	d.ScraperRegistry = registry
 	d.config.Store(cfg)
 }
 
 // Close closes all resources held by the CoreDeps.
-// Should be called when done using the CoreDeps.
+// Call only after all requests and background consumers have stopped.
 func (d *CoreDeps) Close() error {
+	if d == nil {
+		return nil
+	}
+	d.closeOnce.Do(func() {
+		d.mu.Lock()
+		d.closed = true
+		registries := append(d.retiredRegistries, d.ScraperRegistry)
+		closers := append(d.retiredDumpClosers, d.r18DumpCloser)
+		d.retiredRegistries = nil
+		d.retiredDumpClosers = nil
+		d.mu.Unlock()
+		for _, reg := range registries {
+			d.closeErr = errors.Join(d.closeErr, reg.Close())
+		}
+		for _, closer := range closers {
+			if closer != nil {
+				d.closeErr = errors.Join(d.closeErr, closer.Close())
+			}
+		}
+		if d.DB != nil {
+			d.closeErr = errors.Join(d.closeErr, d.DB.Close())
+		}
+		if d.closeErr != nil {
+			d.GetLogger().Warnf("Resource cleanup failed: %v", d.closeErr)
+		}
+	})
+	return d.closeErr
+}
+
+// RetireR18DevDumpCloser keeps the previous handle alive for workflows holding
+// old registry snapshots. It is released by Close after consumers have stopped.
+func (d *CoreDeps) RetireR18DevDumpCloser(newCloser io.Closer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		if newCloser != nil {
+			_ = newCloser.Close()
+		}
+		return
+	}
 	if d.r18DumpCloser != nil {
-		_ = d.r18DumpCloser.Close()
+		d.retiredDumpClosers = append(d.retiredDumpClosers, d.r18DumpCloser)
 	}
-	if d.DB != nil {
-		return d.DB.Close()
-	}
-	return nil
+	d.r18DumpCloser = newCloser
 }
 
 // ReplaceR18DevDumpCloser swaps the local r18.dev dump sidecar handle, returning
-// the previous closer (if any) for the caller to close. Used by API hot-reload
-// to release the old read connection when the config (or dump path) changes.
+// the previous closer (if any) for the caller to close. The caller must ensure
+// no consumer retains the old handle; API reload uses RetireR18DevDumpCloser.
 func (d *CoreDeps) ReplaceR18DevDumpCloser(newCloser io.Closer) io.Closer {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return newCloser
+	}
 	old := d.r18DumpCloser
 	d.r18DumpCloser = newCloser
 	return old

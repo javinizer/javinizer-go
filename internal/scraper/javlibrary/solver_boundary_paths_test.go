@@ -45,6 +45,9 @@ func TestSolverFallbackProtocol(t *testing.T) {
 					return
 				}
 				switch req.Cmd {
+				case "sessions.destroy":
+					assert.Equal(t, "fixture-session", req.Session)
+					_, _ = io.WriteString(w, `{"status":"ok"}`)
 				case "sessions.create":
 					_, _ = io.WriteString(w, `{"status":"ok","session":"fixture-session"}`)
 				case "request.get":
@@ -98,10 +101,15 @@ func TestSolverFallbackProtocol(t *testing.T) {
 			} else {
 				require.Equal(t, 2, calls)
 			}
+			require.NoError(t, s.Close())
 			commandsMu.Lock()
 			observed := append([]string(nil), commands...)
 			commandsMu.Unlock()
-			require.Equal(t, []string{"sessions.create", "request.get"}, observed)
+			expected := []string{"sessions.create", "request.get"}
+			if !tc.failed {
+				expected = append(expected, "sessions.destroy")
+			}
+			require.Equal(t, expected, observed)
 		})
 	}
 }

@@ -1,9 +1,12 @@
 package httpclient
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
@@ -28,6 +31,10 @@ type FlareSolverr struct {
 
 	persistentSessionMu sync.Mutex
 	persistentSessionID string
+	closed              bool
+	closeErr            error
+	// ownedSessions includes sessions whose earlier destruction failed.
+	ownedSessions map[string]struct{}
 }
 
 // flareSolverrSession represents a FlareSolverr session
@@ -106,13 +113,17 @@ func (fs *FlareSolverr) ResolveURL(targetURL string) (string, []http.Cookie, err
 	fs.persistentSessionMu.Lock()
 	defer fs.persistentSessionMu.Unlock()
 
+	if fs.closed {
+		return "", nil, errFlareSolverrClosed
+	}
+
 	sessionID, err := fs.getOrCreatePersistentSessionLocked()
 	if err != nil {
 		logging.Warnf("FlareSolverr: failed to create persistent session, using one-off request: %v", err)
 		return fs.resolveURLRequest(targetURL, "")
 	}
 
-	html, cookies, err := fs.ResolveURLWithSession(targetURL, sessionID)
+	html, cookies, err := fs.resolveURLWithSessionLocked(targetURL, sessionID)
 	if err == nil {
 		return html, cookies, nil
 	}
@@ -128,7 +139,7 @@ func (fs *FlareSolverr) ResolveURL(targetURL string) (string, []http.Cookie, err
 		return fs.resolveURLRequest(targetURL, "")
 	}
 
-	html, cookies, err = fs.ResolveURLWithSession(targetURL, retrySessionID)
+	html, cookies, err = fs.resolveURLWithSessionLocked(targetURL, retrySessionID)
 	if err == nil {
 		return html, cookies, nil
 	}
@@ -144,7 +155,7 @@ func (fs *FlareSolverr) getOrCreatePersistentSessionLocked() (string, error) {
 		return fs.persistentSessionID, nil
 	}
 
-	sessionID, err := fs.CreateSession()
+	sessionID, err := fs.createSessionLocked()
 	if err != nil {
 		return "", err
 	}
@@ -165,8 +176,8 @@ func (fs *FlareSolverr) resetPersistentSessionLocked(sessionID string) {
 		fs.persistentSessionID = ""
 	}
 
-	// Destroy session via HTTP (lock is held by caller, but DestroySession doesn't acquire it)
-	if err := fs.DestroySession(sessionID); err != nil {
+	// Destroy session via HTTP while holding the client lock.
+	if err := fs.destroySessionLocked(context.Background(), sessionID); err != nil {
 		logging.Debugf("FlareSolverr: session destroy during reset failed for %s: %v", sessionID, err)
 	}
 
@@ -225,6 +236,15 @@ func (fs *FlareSolverr) resolveURLRequest(targetURL, sessionID string) (string, 
 
 // CreateSession creates a new FlareSolverr session for cookie persistence
 func (fs *FlareSolverr) CreateSession() (string, error) {
+	fs.persistentSessionMu.Lock()
+	defer fs.persistentSessionMu.Unlock()
+	if fs.closed {
+		return "", errFlareSolverrClosed
+	}
+	return fs.createSessionLocked()
+}
+
+func (fs *FlareSolverr) createSessionLocked() (string, error) {
 	req := flareSolverrRequest{
 		Cmd: "sessions.create",
 	}
@@ -262,12 +282,25 @@ func (fs *FlareSolverr) CreateSession() (string, error) {
 		URLs:    []string{},
 	}
 	fs.sessions.Store(resp.Session, session)
+	if fs.ownedSessions == nil {
+		fs.ownedSessions = make(map[string]struct{})
+	}
+	fs.ownedSessions[resp.Session] = struct{}{}
 
 	return resp.Session, nil
 }
 
 // DestroySession destroys a FlareSolverr session via HTTP and removes it from local cache.
 func (fs *FlareSolverr) DestroySession(sessionID string) error {
+	fs.persistentSessionMu.Lock()
+	defer fs.persistentSessionMu.Unlock()
+	if fs.closed {
+		return errFlareSolverrClosed
+	}
+	return fs.destroySessionLocked(context.Background(), sessionID)
+}
+
+func (fs *FlareSolverr) destroySessionLocked(ctx context.Context, sessionID string) error {
 	req := flareSolverrRequest{
 		Cmd:     "sessions.destroy",
 		Session: sessionID,
@@ -275,12 +308,16 @@ func (fs *FlareSolverr) DestroySession(sessionID string) error {
 
 	var resp flareSolverrResponse
 	result, err := fs.client.R().
+		SetContext(ctx).
 		SetBody(req).
 		SetResult(&resp).
 		Post(fs.baseURL)
 
 	// Remove from local cache regardless of API result
 	fs.sessions.Delete(sessionID)
+	if fs.persistentSessionID == sessionID {
+		fs.persistentSessionID = ""
+	}
 
 	if result != nil && result.StatusCode() != 0 && result.StatusCode() != http.StatusOK {
 		return fmt.Errorf("failed to destroy FlareSolverr session: %w", &flareSolverrHTTPError{StatusCode: result.StatusCode()})
@@ -292,11 +329,21 @@ func (fs *FlareSolverr) DestroySession(sessionID string) error {
 		return fmt.Errorf("failed to destroy FlareSolverr session: response did not confirm success")
 	}
 
+	delete(fs.ownedSessions, sessionID)
 	return nil
 }
 
 // ResolveURLWithSession resolves a URL using a specific session
 func (fs *FlareSolverr) ResolveURLWithSession(targetURL, sessionID string) (string, []http.Cookie, error) {
+	fs.persistentSessionMu.Lock()
+	defer fs.persistentSessionMu.Unlock()
+	if fs.closed {
+		return "", nil, errFlareSolverrClosed
+	}
+	return fs.resolveURLWithSessionLocked(targetURL, sessionID)
+}
+
+func (fs *FlareSolverr) resolveURLWithSessionLocked(targetURL, sessionID string) (string, []http.Cookie, error) {
 	html, cookies, err := fs.resolveURLRequest(targetURL, sessionID)
 	if err != nil {
 		return "", nil, fmt.Errorf("FlareSolverr request with session failed: %w", err)
@@ -321,11 +368,39 @@ func (fs *FlareSolverr) ResolveURLWithSession(targetURL, sessionID string) (stri
 	return html, cookies, nil
 }
 
-// Close cleans up resources held by the FlareSolverr.
-// Currently a no-op since FlareSolverr uses stateless HTTP requests,
-// but provides a cleanup hook for future resource management.
+var errFlareSolverrClosed = errors.New("FlareSolverr client is closed")
+
+const flareSolverrCleanupTimeout = 5 * time.Second
+
+// Close waits for admitted requests, then destroys only sessions created by this
+// client. Cleanup has one shared deadline, independent of the caller's canceled
+// request context. Repeated calls return the same result without remote work.
 func (fs *FlareSolverr) Close() error {
-	return nil
+	fs.persistentSessionMu.Lock()
+	defer fs.persistentSessionMu.Unlock()
+	if fs.closed {
+		return fs.closeErr
+	}
+	fs.closed = true
+	ctx, cancel := context.WithTimeout(context.Background(), flareSolverrCleanupTimeout)
+	defer cancel()
+	ids := make([]string, 0, len(fs.ownedSessions))
+	for id := range fs.ownedSessions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := fs.destroySessionLocked(ctx, id); err != nil {
+			fs.closeErr = errors.Join(fs.closeErr, err)
+		}
+	}
+	fs.persistentSessionID = ""
+	fs.sessions.Clear()
+	fs.ownedSessions = nil
+	if fs.client != nil {
+		fs.client.GetClient().CloseIdleConnections()
+	}
+	return fs.closeErr
 }
 
 // buildFlareSolverrRequestProxy creates a flareSolverrProxy from a ProxyProfile.

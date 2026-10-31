@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1189,33 +1190,61 @@ func TestAPIRuntime_ReloadConfig_RuntimeInvalidatesPoster(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestAPIRuntime_ReloadConfig_OldCloserClosed covers the `if old != nil`
-// branch (line 84-86): when ReloadConfig is called twice with a valid dump,
-// the second call finds the previous dump closer non-nil and closes it.
-func TestAPIRuntime_ReloadConfig_OldCloserClosed(t *testing.T) {
-	// Seed a valid dump file so OpenR18DevDumpLookup returns a non-nil closer.
+// reloadCountingDumpCloser records ownership release without changing the real
+// SQLite handle used by the scraper snapshot.
+type reloadCountingDumpCloser struct {
+	io.Closer
+	closes int
+}
+
+func (c *reloadCountingDumpCloser) Close() error {
+	c.closes++
+	return c.Closer.Close()
+}
+
+func TestAPIRuntime_ReloadConfig_RetainsDumpHandlesUntilSafeClose(t *testing.T) {
 	dumpPath := filepath.Join(t.TempDir(), "r18dev_dump.db")
 	dump := "COPY public.derived_video (content_id, dvd_id) FROM stdin;\n118ipx00535\tIPX-535\n\\.\n"
 	_, err := r18devdump.Import(context.Background(), strings.NewReader(dump), dumpPath, r18devdump.ImportOptions{})
 	require.NoError(t, err)
-
 	cfg := config.DefaultConfig(nil, nil)
 	cfg.Metadata.R18DevDump.Enabled = true
 	cfg.Metadata.R18DevDump.Path = dumpPath
-
 	deps := &APIDeps{}
 	rt := NewAPIRuntime(deps)
 	rt.ReplaceReloadable(cfg, scraperutil.NewScraperRegistry())
+	// Register after TempDir, but before any reload/assertion: cleanup must release
+	// both current and retired SQLite handles before Windows removes the directory.
+	t.Cleanup(func() { require.NoError(t, deps.CoreDeps.Close()) })
 
-	// First reload opens the dump and stores its closer.
-	require.NoError(t, rt.ReloadConfig(cfg))
-	// Second reload finds the old closer non-nil and closes it (line 84-86).
-	require.NoError(t, rt.ReloadConfig(cfg))
-
-	// Release the currently-held dump handle so Windows can delete the .db
-	// file during t.TempDir() cleanup (Windows refuses to delete a file with
-	// an open SQLite handle).
-	if c := deps.CoreDeps.ReplaceR18DevDumpCloser(nil); c != nil {
-		_ = c.Close()
+	captureCurrent := func() (*r18devdump.Store, *reloadCountingDumpCloser) {
+		t.Helper()
+		closer := deps.CoreDeps.ReplaceR18DevDumpCloser(nil)
+		tracked := &reloadCountingDumpCloser{Closer: closer}
+		require.Nil(t, deps.CoreDeps.ReplaceR18DevDumpCloser(tracked))
+		store, ok := closer.(*r18devdump.Store)
+		require.True(t, ok, "reload must install a real SQLite dump handle")
+		return store, tracked
 	}
+	require.NoError(t, rt.ReloadConfig(cfg))
+	oldStore, oldCloser := captureCurrent()
+	require.NoError(t, rt.ReloadConfig(cfg))
+	newStore, newCloser := captureCurrent()
+	require.NotSame(t, oldStore, newStore)
+	for _, store := range []*r18devdump.Store{oldStore, newStore} {
+		contentID, lookupErr := store.LookupByDVDID(context.Background(), "IPX-535")
+		require.NoError(t, lookupErr, "in-flight snapshots must remain readable after reload")
+		require.Equal(t, "118ipx00535", contentID)
+	}
+	require.Zero(t, oldCloser.closes)
+	require.Zero(t, newCloser.closes)
+	require.NoError(t, rt.CloseAfterHTTPDrain(time.Second))
+	require.NoError(t, rt.CloseAfterHTTPDrain(time.Second))
+	require.Equal(t, 1, oldCloser.closes)
+	require.Equal(t, 1, newCloser.closes)
+	for _, store := range []*r18devdump.Store{oldStore, newStore} {
+		_, lookupErr := store.LookupByDVDID(context.Background(), "IPX-535")
+		require.Error(t, lookupErr, "safe shutdown must close both generations")
+	}
+	require.NoError(t, os.Remove(dumpPath), "Windows must be able to delete the closed dump")
 }

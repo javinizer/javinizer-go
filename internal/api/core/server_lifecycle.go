@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -112,4 +113,19 @@ func (r *APIRuntime) TrackServerTask() (done func()) {
 		backgroundDone()
 		r.serverTasksWg.Done()
 	}
+}
+
+// CloseAfterHTTPDrain cancels and joins runtime work before releasing scraper
+// registries and other dependencies. The caller MUST first stop and successfully
+// drain HTTP handlers, so legacy background-task admission has ceased.
+// On timeout dependencies remain open: a task may still hold an old snapshot.
+func (r *APIRuntime) CloseAfterHTTPDrain(timeout time.Duration) error {
+	r.Shutdown()
+	if state := r.GetRuntime(); state != nil && !state.WaitBackgroundTasks(timeout) {
+		return fmt.Errorf("background tasks did not drain; dependencies remain open")
+	}
+	if r.deps != nil && r.deps.CoreDeps != nil {
+		return r.deps.CoreDeps.Close()
+	}
+	return nil
 }

@@ -143,9 +143,7 @@ func (s *scraper) Config() *models.ScraperSettings {
 // Close cleans up resources held by the scraper (HTTP client, FlareSolverr).
 func (s *scraper) Close() error {
 	if s.flaresolverr != nil {
-		if closeErr := s.flaresolverr.Close(); closeErr != nil {
-			logging.Debugf("JavDB: Error closing FlareSolverr: %v", closeErr)
-		}
+		return s.flaresolverr.Close()
 	}
 	return nil
 }

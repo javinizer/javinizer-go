@@ -172,11 +172,17 @@ func (s *ServerInstance) Shutdown() error {
 		s.shutdownErr = s.srv.Shutdown(shutdownCtx)
 		s.srv = nil
 		if s.rt != nil {
-			s.rt.Shutdown()
+			if s.shutdownErr == nil {
+				s.shutdownErr = s.rt.CloseAfterHTTPDrain(10 * time.Second)
+			} else {
+				s.rt.Shutdown()
+			}
 			s.rt = nil
 		}
-		if s.deps != nil {
-			_ = s.deps.CoreDeps.DB.Close()
+		// Retain dependencies on failed HTTP/background drain: active work can
+		// still hold scraper snapshots. Only release after verified quiescence.
+		if s.deps != nil && s.shutdownErr == nil {
+			_ = s.deps.CoreDeps.Close()
 			s.deps = nil
 		}
 	})

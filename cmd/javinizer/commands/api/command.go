@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -118,9 +119,15 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 		// the deferred cleanup below can run.
 		return fmt.Errorf("failed to initialize API dependencies: %w", err)
 	}
+	drained := false
 	defer func() {
-		rt.Shutdown()
-		_ = deps.CoreDeps.DB.Close()
+		if drained {
+			if err := rt.CloseAfterHTTPDrain(10 * time.Second); err != nil {
+				logging.Warnf("API cleanup failed: %v", err)
+			}
+		} else {
+			rt.Shutdown()
+		}
 	}()
 
 	router := apiserver.NewServer(rt)
@@ -148,16 +155,19 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 		}
 	}()
 
+	var serveErr error
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("failed to shut down server: %w", err)
-		}
 	case err := <-errCh:
-		return fmt.Errorf("failed to start server: %w", err)
+		serveErr = fmt.Errorf("failed to start server: %w", err)
 	}
-
-	return nil
+	// Even an Accept error can occur after handlers have started. Both exits
+	// must drain requests before releasing their registry snapshots.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return errors.Join(serveErr, fmt.Errorf("failed to shut down server: %w", err))
+	}
+	drained = true
+	return serveErr
 }

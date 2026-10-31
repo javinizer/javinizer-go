@@ -46,6 +46,9 @@ func TestCurrentScopeJavDBSolverProtocol(t *testing.T) {
 					return
 				}
 				switch req.Cmd {
+				case "sessions.destroy":
+					assert.Equal(t, "fixture-session", req.Session)
+					_, _ = io.WriteString(w, `{"status":"ok"}`)
 				case "sessions.create":
 					_, _ = io.WriteString(w, `{"status":"ok","session":"fixture-session"}`)
 				case "request.get":
@@ -57,7 +60,7 @@ func TestCurrentScopeJavDBSolverProtocol(t *testing.T) {
 					w.WriteHeader(400)
 				}
 			}))
-			defer server.Close()
+			t.Cleanup(server.Close)
 			s := newScraper(&models.ScraperSettings{Enabled: true, UseFlareSolverr: true}, nil, models.FlareSolverrConfig{Enabled: true, URL: server.URL, Timeout: 2})
 			require.NotNil(t, s.flaresolverr)
 			t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -93,10 +96,15 @@ func TestCurrentScopeJavDBSolverProtocol(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, "reused cookie response", html)
 			}
+			require.NoError(t, s.Close())
 			commandsMu.Lock()
 			observed := append([]string(nil), commands...)
 			commandsMu.Unlock()
-			require.Equal(t, []string{"sessions.create", "request.get"}, observed)
+			expected := []string{"sessions.create", "request.get"}
+			if !tc.failed {
+				expected = append(expected, "sessions.destroy")
+			}
+			require.Equal(t, expected, observed)
 		})
 	}
 }
