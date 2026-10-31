@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Close DMM direct probe response bodies and reject empty DMM results after streaming redirects (#500, #546).
 - Release owned FlareSolverr sessions on graceful teardown (#545).
 - Resolve dot autocomplete in the current directory (#532).
+- Preserve source credit identity before enrichment (#556).
 
 ### Changed
 
