@@ -309,12 +309,6 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 
 	actressSources := buildActressSourcesFromScrapeResults(results, resolvedPriorities, cmd.SelectedScrapers, scraped.Actresses)
 
-	if actressRepo != nil {
-		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
-			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
-		}
-	}
-
 	if scraped.Credits == nil && len(scraped.Actresses) > 0 && scrapeResultsContainActresses(results) {
 		BuildCreditsFromScrape(scraped, actressSources, results)
 	}
@@ -326,6 +320,18 @@ func postProcessScraped(ctx context.Context, scraped *models.Movie, results []*m
 	}
 	if scraped.Credits != nil {
 		AttachCreditPolicy(scraped, cfg)
+	}
+
+	// Build and compact credits from the aggregate's source evidence before
+	// adding catalog display fields. A derived romanization can belong to
+	// another actress: it must neither merge distinct credits nor become fresh
+	// identity evidence in credit.Scraped. BuildCreditsFromScrape copies the
+	// actress values, so enriching the display projection below leaves those
+	// resolution inputs (and their authoritative source IDs) unchanged.
+	if actressRepo != nil {
+		if enriched := enrichActressesFromDB(ctx, scraped, actressRepo, cfg); enriched > 0 {
+			logging.Debugf("[scrape] Enriched %d actresses from database", enriched)
+		}
 	}
 
 	var translationWarning string
