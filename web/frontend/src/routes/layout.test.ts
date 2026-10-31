@@ -3,6 +3,9 @@ import { render, fireEvent, waitFor } from '@testing-library/svelte';
 import Layout from './+layout.svelte';
 import { tick } from 'svelte';
 
+const titlePage = vi.hoisted(() => ({ url: { pathname: '/' }, route: { id: '/' }, error: null as null | { message: string } }));
+vi.mock('$app/state', () => ({ page: titlePage }));
+
 vi.mock('$lib/api/client', () => ({
 	apiClient: {
 		getAuthStatus: vi.fn(),
@@ -149,6 +152,10 @@ async function proceedToDirectories(container: HTMLElement) {
 }
 
 beforeEach(() => {
+	titlePage.url.pathname = "/";
+	titlePage.route.id = "/";
+	titlePage.error = null;
+	document.title = "";
 	vi.clearAllMocks();
 	localStorage.clear();
 	apiClient.getAuthStatus.mockReset();
@@ -171,6 +178,59 @@ beforeEach(() => {
 afterEach(() => {
 	vi.restoreAllMocks();
 	localStorage.clear();
+});
+
+describe('document title', () => {
+	it.each(['/', '/browse'])('sets the fallback title on %s', async (path) => {
+		titlePage.url.pathname = path;
+		titlePage.route.id = path;
+		render(Layout, { data: { authStatus: authenticatedStatus() } });
+		await waitFor(() => expect(document.title).toBe('Javinizer'));
+	});
+
+	it('keeps the manual title when the authenticated manual route is rendered', async () => {
+		titlePage.url.pathname = '/manual';
+		titlePage.route.id = '/manual';
+		render(Layout, { data: { authStatus: authenticatedStatus() } });
+		await waitFor(() => expect(document.title).toBe('Manual Scrape'));
+	});
+
+	it('uses the fallback for a route error on /manual', async () => {
+		titlePage.url.pathname = '/manual';
+		titlePage.route.id = '/manual';
+		titlePage.error = { message: 'Not found' };
+		render(Layout, { data: { authStatus: authenticatedStatus() } });
+		await waitFor(() => expect(document.title).toBe('Javinizer'));
+	});
+
+	it('uses the fallback during auth loading and on an auth error at /manual', async () => {
+		titlePage.url.pathname = '/manual';
+		titlePage.route.id = '/manual';
+		let rejectStatus!: (error: Error) => void;
+		apiClient.getAuthStatus.mockReturnValue(new Promise((_, reject) => { rejectStatus = reject; }));
+		render(Layout);
+		await waitFor(() => expect(document.title).toBe('Javinizer'));
+		rejectStatus(new Error('offline'));
+		await waitFor(() => expect(document.body.textContent).toContain('offline'));
+		expect(document.title).toBe('Javinizer');
+	});
+
+	it.each([false, true])('uses the fallback for unauthenticated manual routes (initialized=%s)', async (initialized) => {
+		titlePage.url.pathname = '/manual';
+		titlePage.route.id = '/manual';
+		render(Layout, { data: { authStatus: { initialized, authenticated: false } } });
+		await waitFor(() => expect(document.title).toBe('Javinizer'));
+	});
+
+	it('restores the fallback after logging out from the manual route', async () => {
+		titlePage.url.pathname = '/manual';
+		titlePage.route.id = '/manual';
+		apiClient.getAuthStatus.mockResolvedValue({ initialized: true, authenticated: false });
+		const { getByText } = render(Layout, { data: { authStatus: authenticatedStatus() } });
+		await waitFor(() => expect(document.title).toBe('Manual Scrape'));
+		await fireEvent.click(getByText('admin · Logout'));
+		await waitFor(() => expect(document.title).toBe('Javinizer'));
+	});
 });
 
 describe('authentication bootstrap', () => {

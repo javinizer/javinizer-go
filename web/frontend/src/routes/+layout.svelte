@@ -218,7 +218,10 @@
 	});
 </script>
 
+<!-- Keep one reactive title owner: a persistent layout's static title is not
+     restored when a child page with its own title unmounts. -->
 <svelte:head>
+	<title>{!authLoading && !authUnavailable && authInitialized && authAuthenticated && !page.error && page.route.id === '/manual' ? m.manual_title() : 'Javinizer'}</title>
 </svelte:head>
 
 {#if !authAuthenticated && !(setupSessionActive && !authInitialized)}
