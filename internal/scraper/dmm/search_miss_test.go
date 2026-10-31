@@ -770,7 +770,11 @@ func (rt *dmmTestTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	proxyReq := req.Clone(req.Context())
 	proxyReq.URL.Scheme = "http"
 	proxyReq.URL.Host = rt.server.Listener.Addr().String()
-	return http.DefaultTransport.RoundTrip(proxyReq)
+	resp, err := http.DefaultTransport.RoundTrip(proxyReq)
+	if resp != nil {
+		resp.Request = req
+	}
+	return resp, err
 }
 
 func newDMMServer(t *testing.T, responses map[string]dmmResponse) *httptest.Server {

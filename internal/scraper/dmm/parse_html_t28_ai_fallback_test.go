@@ -55,7 +55,7 @@ func TestScrapeURLT28AICIDRejectsConflictingPageIdentity(t *testing.T) {
 			t.Run(cid.value+"/"+display, func(t *testing.T) {
 				s, _ := newRemasterTestScraper(t)
 				s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-					return 200, `<html><body><table><tr><td>品番：</td><td>` + display + `</td></tr></table></body></html>`
+					return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>` + display + `</td></tr></table></body></html>`
 				}})
 				result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid="+cid.value+"/")
 				require.Error(t, err)
@@ -86,7 +86,7 @@ func TestScrapeURLT28HDCIDKeepsIdentityFallback(t *testing.T) {
 				t.Run(cid.base+marker+"/"+page.name, func(t *testing.T) {
 					s, _ := newRemasterTestScraper(t)
 					s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-						return 200, `<html><body><table>` + page.row + `</table></body></html>`
+						return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table>` + page.row + `</table></body></html>`
 					}})
 					result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid="+cid.base+marker+"/")
 					if page.wantError {

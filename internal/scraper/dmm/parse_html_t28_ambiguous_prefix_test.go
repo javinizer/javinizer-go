@@ -65,7 +65,7 @@ func TestScrapeURLUnprovenT28PrefixRequiresVerifiedPage(t *testing.T) {
 				t.Run(cid+"/"+page.name, func(t *testing.T) {
 					s, _ := newRemasterTestScraper(t)
 					s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-						body := `<html><body><table>`
+						body := `<html><body><h1 id='title' class='item'>Fixture product</h1><table>`
 						if page.display != "" {
 							body += `<tr><td>品番：</td><td>` + page.display + `</td></tr>`
 						}
@@ -95,7 +95,7 @@ func TestScrapeURLProvenT28PrefixRejectsTPage(t *testing.T) {
 			t.Run(cid, func(t *testing.T) {
 				s, _ := newRemasterTestScraper(t)
 				s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-					return 200, `<html><body><table><tr><td>品番：</td><td>T-28123-` + marker + `</td></tr></table></body></html>`
+					return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table><tr><td>品番：</td><td>T-28123-` + marker + `</td></tr></table></body></html>`
 				}})
 				result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid="+cid+"/")
 				require.Error(t, err)

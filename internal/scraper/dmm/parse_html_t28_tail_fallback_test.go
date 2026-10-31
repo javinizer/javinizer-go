@@ -58,7 +58,7 @@ func TestScrapeURLT28LongAICIDStillRequiresPageIdentity(t *testing.T) {
 			t.Run(cid+"/"+page.name, func(t *testing.T) {
 				s, _ := newRemasterTestScraper(t)
 				s.client.SetTransport(&remasterRoundTripper{serve: func(u string) (int, string) {
-					return 200, `<html><body><table>` + page.row + `</table></body></html>`
+					return 200, `<html><body><h1 id='title' class='item'>Fixture product</h1><table>` + page.row + `</table></body></html>`
 				}})
 				result, err := s.ScrapeURL(context.Background(), "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid="+cid+"/")
 				require.NoError(t, err)

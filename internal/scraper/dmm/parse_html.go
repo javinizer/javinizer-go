@@ -57,7 +57,10 @@ func (s *scraper) parseHTMLWithOptions(ctx context.Context, doc *goquery.Documen
 		Language:  "ja",
 	}
 
-	isNewSite := strings.Contains(sourceURL, "video.dmm.co.jp")
+	isNewSite := isVideoDMMURL(sourceURL)
+	if doc.Url != nil {
+		isNewSite = isVideoDMMURL(doc.Url.String())
+	}
 	var jsonldMetadata map[string]any
 	if isNewSite {
 		jsonldMetadata = extractMetadataFromJSONLD(doc)
@@ -206,11 +209,10 @@ func (s *scraper) extractStructuredData(ctx context.Context, result *models.Scra
 	}
 
 	// Actresses
-	isMonthlyPage := strings.Contains(sourceURL, "/monthly/")
-	isStreamingPage := strings.Contains(sourceURL, "video.dmm.co.jp")
+	isMonthlyPage := !isNewSite && strings.Contains(sourceURL, "/monthly/")
 
 	if s.scrapeActress && !isMonthlyPage {
-		if isStreamingPage {
+		if isNewSite {
 			result.Actresses = s.extractActressesFromStreamingPage(ctx, doc)
 			logging.Debugf("DMM: Extracted %d actresses from streaming page", len(result.Actresses))
 		} else {
@@ -266,7 +268,7 @@ func (s *scraper) extractMediaFields(ctx context.Context, result *models.Scraper
 		if trailerURL := getStringFromMetadata(jsonldMetadata, "trailer_url"); trailerURL != "" {
 			result.TrailerURL = trailerURL
 		} else {
-			result.TrailerURL = s.extractTrailerURL(doc, sourceURL)
+			result.TrailerURL = s.extractTrailerURLNewSite(doc)
 		}
 	} else {
 		result.TrailerURL = s.extractTrailerURL(doc, sourceURL)
