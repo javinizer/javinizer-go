@@ -21,9 +21,8 @@ import (
 // CoreDeps (database, scraper registry, seeded word replacements) → API-specific services.
 // The AuthProvider must be constructed by the caller (it depends on api/auth which
 // cannot be imported here due to the import cycle: api/auth → api/core).
-// Callers should defer deps.CoreDeps.DB.Close() to release resources.
-// Returns the APIRuntime so callers can call rt.Shutdown() for graceful
-// termination of background goroutines (e.g. temp cleanup).
+// Returns the APIRuntime so callers can stop and drain their HTTP server,
+// then call rt.CloseAfterHTTPDrain to join background work and release resources.
 func BootstrapAPI(cfg *config.Config, configFile string, auth commandutil.AuthProvider) (*APIDeps, *APIRuntime, error) {
 	if cfg == nil {
 		return nil, nil, fmt.Errorf("config cannot be nil")

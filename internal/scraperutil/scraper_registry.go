@@ -16,8 +16,10 @@
 package scraperutil
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -92,8 +94,10 @@ type ScraperRegistration struct {
 //   - catalog: write-once registration metadata (populated by plugins at init time)
 //   - store: runtime scraper instances (populated at startup)
 type ScraperRegistry struct {
-	catalog *registrationCatalog
-	store   *instanceStore
+	catalog   *registrationCatalog
+	store     *instanceStore
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewScraperRegistry creates a new ScraperRegistry with both sub-structs initialized.
@@ -326,4 +330,20 @@ func (r *ScraperRegistry) CollectDownloadProxyResolvers(priority []string) []mod
 	}
 
 	return resolvers
+}
+
+// Close releases all scraper resources exactly once. Call only after consumers
+// have stopped; snapshots may retain scraper instances outside the registry.
+func (r *ScraperRegistry) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		for _, scraper := range r.GetAllInstances() {
+			if err := scraper.Close(); err != nil {
+				r.closeErr = errors.Join(r.closeErr, fmt.Errorf("close %s scraper: %w", scraper.Name(), err))
+			}
+		}
+	})
+	return r.closeErr
 }
