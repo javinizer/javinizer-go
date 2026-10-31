@@ -66,9 +66,8 @@ func SplitFullName(fullName string) (firstName, lastName string) {
 	}
 
 	parts := strings.Fields(fullName)
-	if len(parts) == 0 {
-		return "", ""
-	} else if len(parts) == 1 {
+	// Nonempty TrimSpace output contains at least one non-space field.
+	if len(parts) == 1 {
 		return parts[0], ""
 	} else if len(parts) == 2 {
 		return parts[0], parts[1]

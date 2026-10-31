@@ -63,13 +63,11 @@ type LLMChatAdapter interface {
 
 // buildLLMTranslationPrompts creates the system and user prompts for LLM-based
 // batch translation.
-func buildLLMTranslationPrompts(sourceLang, targetLang string, texts []string) (string, string, error) {
+func buildLLMTranslationPrompts(sourceLang, targetLang string, texts []string) (string, string) {
 	systemPrompt := fmt.Sprintf("You are a translation engine. Translate each input item to the requested target language. Preserve order and return ONLY the indexed output markers in ascending order. Do not use JSON. Do not add commentary. Do not omit any index. Keep each translation on a single logical line; if needed, replace internal newlines with spaces. Source language: %s. Target language: %s.", sourceLang, targetLang)
 
-	payloadBytes, err := json.Marshal(texts)
-	if err != nil {
-		return "", "", err
-	}
+	// A []string has no unsupported JSON values or custom marshalers.
+	payloadBytes, _ := json.Marshal(texts)
 
 	var userPrompt strings.Builder
 	userPrompt.WriteString("Translate this JSON array of strings: ")
@@ -80,7 +78,7 @@ func buildLLMTranslationPrompts(sourceLang, targetLang string, texts []string) (
 		userPrompt.WriteString("\ntranslated text\n")
 	}
 
-	return systemPrompt, strings.TrimSpace(userPrompt.String()), nil
+	return systemPrompt, strings.TrimSpace(userPrompt.String())
 }
 
 // translationCompactOutputMarker returns the compact output marker for the given index.

@@ -48,10 +48,7 @@ func (p *OpenAIProvider) Translate(ctx context.Context, sourceLang, targetLang s
 		return &translationResult{}, nil
 	}
 
-	systemPrompt, userPrompt, err := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
-	if err != nil {
-		return nil, err
-	}
+	systemPrompt, userPrompt := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
 
 	adapter := &openAIChatAdapter{
 		omitTemperature: openAIUsesDefaultTemperature(model),
@@ -97,10 +94,7 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 		return &translationResult{}, nil
 	}
 
-	systemPrompt, userPrompt, err := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
-	if err != nil {
-		return nil, err
-	}
+	systemPrompt, userPrompt := buildLLMTranslationPrompts(sourceLang, targetLang, texts)
 
 	headers := map[string]string{}
 	if apiKey != "" {
