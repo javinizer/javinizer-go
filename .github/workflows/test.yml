@@ -1038,6 +1038,18 @@ jobs:
     - name: Run frontend-only E2E suite
       run: make test-e2e-frontend
 
+    - name: Upload actress collision presentation evidence
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: actress-collision-presentation-evidence
+        path: |
+          web/frontend/test-results/**/collision-details-*.png
+          web/frontend/test-results/review-collision-details-*/error-context.md
+          web/frontend/test-results/review-collision-details-*/trace.zip
+        if-no-files-found: ignore
+        retention-days: 14
+
     - name: Upload Playwright artifacts
       if: failure()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

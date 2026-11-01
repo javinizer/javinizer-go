@@ -2667,6 +2667,21 @@ definitions:
       source_value: {}
       target_value: {}
     type: object
+  github_com_javinizer_javinizer-go_internal_database.CollisionActressSummary:
+    properties:
+      dmm_id:
+        type: integer
+      first_name:
+        type: string
+      id:
+        type: integer
+      japanese_name:
+        type: string
+      last_name:
+        type: string
+      verified:
+        type: boolean
+    type: object
   github_com_javinizer_javinizer-go_internal_models.Actress:
     properties:
       aliases:
@@ -3495,6 +3510,8 @@ definitions:
         type: string
       credit_id:
         type: integer
+      current_actress:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_database.CollisionActressSummary'
       current_actress_id:
         type: integer
       field:

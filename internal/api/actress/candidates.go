@@ -34,8 +34,9 @@ type CandidatePromotionRequest struct {
 
 type collisionResponse struct {
 	models.CreditCollision
-	AllowedResolutions []string `json:"allowed_resolutions"`
-	CurrentActressID   uint     `json:"current_actress_id"`
+	AllowedResolutions []string                          `json:"allowed_resolutions"`
+	CurrentActressID   uint                              `json:"current_actress_id"`
+	CurrentActress     *database.CollisionActressSummary `json:"current_actress,omitempty"`
 }
 
 type collisionListResponse struct {
@@ -250,6 +251,7 @@ func ListCollisions(deps ActressDeps) gin.HandlerFunc {
 				CreditCollision:    collisions[i],
 				AllowedResolutions: actionContext.AllowedResolutions,
 				CurrentActressID:   actionContext.CurrentActressID,
+				CurrentActress:     actionContext.CurrentActress,
 			})
 		}
 		c.JSON(http.StatusOK, collisionListResponse{Collisions: response})

@@ -77,10 +77,23 @@ func validateCollisionResolution(collision *models.CreditCollision, credit *mode
 	return fmt.Errorf("resolve collision: resolution %q is not allowed for this collision", resolution)
 }
 
+// CollisionActressSummary describes the currently linked identity, not historical
+// scraped evidence or a suggested resolution. Keep the API context limited to
+// fields a reviewer needs to distinguish identically displayed names.
+type CollisionActressSummary struct {
+	ID           uint   `json:"id"`
+	DMMID        int    `json:"dmm_id"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	JapaneseName string `json:"japanese_name"`
+	Verified     bool   `json:"verified"`
+}
+
 // CollisionActionContext is the server-derived action and current-identity state for a collision.
 type CollisionActionContext struct {
 	AllowedResolutions []string
 	CurrentActressID   uint
+	CurrentActress     *CollisionActressSummary
 }
 
 // ActionContexts derives action contracts using linked identity state loaded from the server.
@@ -106,9 +119,14 @@ func (s *CollisionService) ActionContexts(ctx context.Context, collisions []mode
 		if credit == nil {
 			return nil, fmt.Errorf("load collision credit %d: %w", collisions[i].CreditID, ErrNotFound)
 		}
+		var identity *CollisionActressSummary
+		if actress := credit.Actress; actress != nil {
+			identity = &CollisionActressSummary{ID: actress.ID, DMMID: actress.DMMID, FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName, Verified: actress.Verified}
+		}
 		result[collisions[i].ID] = CollisionActionContext{
 			AllowedResolutions: AllowedCollisionResolutions(&collisions[i], credit),
 			CurrentActressID:   credit.ActressID,
+			CurrentActress:     identity,
 		}
 	}
 	return result, nil

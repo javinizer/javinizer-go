@@ -760,6 +760,11 @@ export interface CreditCollision {
 	resolution?: string;
 	occurrences: number;
 	current_actress_id: number;
+	// Current catalog context, not the historical scrape or competing matches.
+	current_actress?: Pick<
+		Actress,
+		'id' | 'dmm_id' | 'first_name' | 'last_name' | 'japanese_name' | 'verified'
+	> | null;
 	sources_seen?: string;
 	user_pinned?: boolean;
 	last_seen_at?: string;
