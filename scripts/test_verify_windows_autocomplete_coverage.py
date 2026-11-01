@@ -269,6 +269,23 @@ class FsutilShortPackageAdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(events=self.events[:-1] + [failed, self.events[-1]])
 
+    def test_real_empty_blocks_preserved_without_statement_credit(self):
+        # Unmodified forms from first real native profile artifact13098422092.
+        empty = [
+            FSUTIL_PACKAGE + "/exclusive_staging.go:230.40,230.40 0 0",
+            FSUTIL_PACKAGE + "/keyed_lock.go:890.18,890.18 0 1",
+            FSUTIL_PACKAGE + "/replacements_windows.go:35.83,35.83 0 3",
+        ]
+        self.assertEqual([13, 14, 15], self.check(profile=self.profile + "\n".join(empty) + "\n")["covered_lines"])
+        # A positive entry counter on an empty block is not an executed statement.
+        with self.assertRaises(ValueError):
+            self.check(profile=self.profile.replace("1 3", "0 3"))
+        for row in [empty[0].replace("0 0", "-1 0"), empty[1].replace("0 1", "0 -1"),
+                    empty[0].replace("230.40,230.40", "230.40,230.39"),
+                    empty[0].replace("230.40,230.40", "0.40,230.40")]:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                self.check(profile=self.profile + row + "\n")
+
     def test_requires_single_native_package_completion_and_real_counters(self):
         for events in [self.events[:-1], self.events + [self.events[-1]],
                        self.events + [self.events[0]], [{**self.events[0], "Package": "wrong"}] + self.events[1:]]:

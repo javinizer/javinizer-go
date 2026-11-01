@@ -133,10 +133,12 @@ def verify(profile, log, metadata, expected_head, event_name, declared_head, dec
             raise ValueError("profile contains a different package")
         start, startcol, end, endcol, statements, count = map(int, numbers)
         key = (filename, start, startcol, end, endcol)
-        if key in seen or min(start, startcol, end, endcol, statements) <= 0 or (end, endcol) < (start, startcol):
+        if key in seen or min(start, startcol, end, endcol) <= 0 or (end, endcol) < (start, startcol):
             raise ValueError("invalid or duplicate coverage block")
         seen.add(key)
-        if filename == source and count > 0:
+        # Go emits zero-statement counters for empty blocks. Preserve them,
+        # but an entry count alone cannot satisfy executable-statement admission.
+        if filename == source and statements > 0 and count > 0:
             covered_lines.update(line for line in target_lines if start <= line <= end)
     if covered_lines != target_lines:
         raise ValueError(f"{source}: required lines not covered: {sorted(target_lines - covered_lines)}")
