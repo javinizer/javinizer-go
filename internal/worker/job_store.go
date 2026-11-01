@@ -807,11 +807,6 @@ func (s *JobStore) DeleteJob(id string) error {
 	var release func()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if rel, ok := job.admission.TryAdmitExclusive(); ok {
-			job.admission.CancelExclusiveWait()
-			release = rel
-			break
-		}
 		if rel, ok := job.admission.PollExclusiveWait(); ok {
 			release = rel
 			break
