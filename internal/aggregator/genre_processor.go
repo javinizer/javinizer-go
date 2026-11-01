@@ -57,7 +57,10 @@ func NewGenreProcessor(cfg *MetadataConfig, repo genreLookup) *genreProcessor {
 		// Constructor context: there is no caller context available yet, so
 		// we use context.Background(). The Reload method accepts a context
 		// for callers that need cancellation support.
-		gp.loadCacheLocked(context.Background())
+		replacementMap, err := gp.repo.GetReplacementMap(context.Background())
+		if err == nil {
+			gp.cache = replacementMap
+		}
 	}
 	gp.compileRegexes()
 	gp.mu.Unlock()
@@ -150,9 +153,7 @@ func (gp *genreProcessor) Reload(ctx context.Context) {
 
 // loadCache loads genre replacements from the repository into memory.
 // Acquires the write lock, so it is safe to call from Reload().
-// Note: when called from the constructor (via loadCacheLocked), there is no
-// caller context available, so context.Background() is used. Callers that
-// need cancellation should use Reload(ctx) instead.
+// The caller context reaches the repository read; errors preserve the cache.
 func (gp *genreProcessor) loadCache(ctx context.Context) {
 	if gp.repo == nil {
 		return
@@ -164,17 +165,6 @@ func (gp *genreProcessor) loadCache(ctx context.Context) {
 		gp.cache = replacementMap
 		gp.compileRegexes()
 		gp.mu.Unlock()
-	}
-}
-
-func (gp *genreProcessor) loadCacheLocked(ctx context.Context) {
-	if gp.repo == nil {
-		return
-	}
-
-	replacementMap, err := gp.repo.GetReplacementMap(ctx)
-	if err == nil {
-		gp.cache = replacementMap
 	}
 }
 

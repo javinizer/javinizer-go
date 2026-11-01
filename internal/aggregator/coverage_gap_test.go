@@ -596,7 +596,7 @@ func TestGenreProcessor_Reload_NilReceiver(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// genre_processor.go – loadCacheLocked with nil repo (line 165-167)
+// genre_processor.go – construction and Reload without a repository
 // ---------------------------------------------------------------------------
 
 func TestGenreProcessor_LoadCacheLocked_NilRepo(t *testing.T) {
@@ -605,7 +605,7 @@ func TestGenreProcessor_LoadCacheLocked_NilRepo(t *testing.T) {
 	}
 	gp := NewGenreProcessor(cfg, nil)
 	require.NotNil(t, gp)
-	// loadCacheLocked is called internally during Reload if repo is nil → early return
+	// Reload tolerates the optional repository remaining unavailable.
 	gp.Reload(context.Background())
 	// Verify cache is still empty
 	assert.Equal(t, "Test", gp.applyReplacement("Test"), "no replacement when no repo")

@@ -94,8 +94,7 @@ func TestPostProcessPreservesExplicitCreditsWithoutDuplicatingAggregateEvidence(
 	movie := &models.Movie{ID: "EXPLICIT-001", Actresses: []models.Actress{{FirstName: "Aggregate"}}, Credits: []models.MovieCredit{explicit}}
 	raw := []*models.ScraperResult{{Source: "test", Actresses: []models.ActressInfo{{FirstName: "Aggregate"}}}}
 
-	result, err := postProcessScraped(t.Context(), movie, raw, nil, &Config{ScrapeActress: false}, nil, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
-	require.NoError(t, err)
+	result := postProcessScraped(t.Context(), movie, raw, nil, &Config{ScrapeActress: false}, nil, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
 	require.Equal(t, []models.MovieCredit{explicit}, result.Movie.Credits)
 }
 
