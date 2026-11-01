@@ -1,11 +1,44 @@
 /** Synthetic UI contract: identity resolution and persistence are tested in Go. */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import type { BatchJobResponse, CreditCollision } from '../../src/lib/api/types';
 import { mockConfig } from './review-helpers';
 import { createRequire } from 'node:module';
 const { installOfflineEvidenceBrowserGuard } = createRequire(import.meta.url)(
 	'../fullstack/helpers/offline-evidence-browser.cjs',
 );
+
+// Full-page screenshots can composite sticky chrome over off-screen content.
+// Verify real viewport usability without hiding chrome or changing page styles.
+async function expectUnobscuredInViewport(locator: Locator) {
+	await expect(locator).toBeVisible();
+	await expect
+		.poll(() =>
+			locator.evaluate((element) => {
+				const bounds = element.getBoundingClientRect();
+				const hit = document.elementFromPoint(
+					bounds.x + bounds.width / 2,
+					bounds.y + bounds.height / 2,
+				);
+				return {
+					inViewport:
+						bounds.width > 0 &&
+						bounds.height > 0 &&
+						bounds.left >= 0 &&
+						bounds.top >= 0 &&
+						bounds.right <= document.documentElement.clientWidth &&
+						bounds.bottom <= window.innerHeight,
+					unobscured: hit !== null && element.contains(hit),
+				};
+			}),
+		)
+		.toEqual({ inViewport: true, unobscured: true });
+}
+
+async function centerInViewport(locator: Locator) {
+	await locator.evaluate((element) =>
+		element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }),
+	);
+}
 
 for (const width of [1280, 390]) {
 	test(`same-name conflicts expose identities and safe relinking at ${width}px`, async ({
@@ -157,16 +190,56 @@ for (const width of [1280, 390]) {
 			path: test.info().outputPath(`collision-details-${width}-unresolved.png`),
 			fullPage: true,
 		});
+		const identityConflict = page.getByRole('listitem').filter({ has: explanation });
+		const currentDMM = identityConflict.getByText('Unknown', { exact: true });
+		await centerInViewport(currentDMM);
+		for (const detail of [
+			identityConflict.getByText('Current linked identity #7', { exact: true }),
+			identityConflict.getByText('Japanese name', { exact: true }),
+			identityConflict.getByText('DMM ID', { exact: true }),
+			currentDMM,
+		])
+			await expectUnobscuredInViewport(detail);
+		await page.screenshot({
+			path: test.info().outputPath(`collision-details-${width}-unresolved-viewport.png`),
+		});
 		await page.getByRole('button', { name: 'Relink', exact: true }).first().click();
 		let dialog = page.getByRole('dialog', { name: 'Choose verified actress to relink' });
 		await expect(dialog.getByRole('button', { name: /#8.*葉月なぎさ.*1109243/ })).toBeVisible();
 		await expect(dialog.getByRole('button', { name: /#9.*葉月渚.*1034095/ })).toBeVisible();
+		for (const target of targets) {
+			const option = dialog.getByRole('button', {
+				name: new RegExp(`^Hazuki Nagisa #${target.id}(?:\\s|$)`),
+			});
+			await centerInViewport(option);
+			for (const detail of [
+				option.getByText(`#${target.id}`, { exact: true }),
+				option.getByText(target.japanese_name, { exact: true }),
+				option.getByText(String(target.dmm_id), { exact: true }),
+			])
+				await expectUnobscuredInViewport(detail);
+			await page.screenshot({
+				path: test.info().outputPath(`collision-details-${width}-choice-${target.id}-viewport.png`),
+			});
+		}
 		await dialog.getByRole('button', { name: /#8.*葉月なぎさ.*1109243/ }).click();
 		await expect(dialog.getByText('Selected target: Hazuki Nagisa #8')).toBeVisible();
 		await expect(dialog.getByText('葉月なぎさ', { exact: true })).toHaveCount(2);
 		await page.screenshot({
 			path: test.info().outputPath(`collision-details-${width}-selected.png`),
 			fullPage: true,
+		});
+		// The first occurrence is the selected summary, before the search results.
+		const selectedDMM = dialog.getByText('1109243', { exact: true }).first();
+		await centerInViewport(selectedDMM);
+		for (const detail of [
+			dialog.getByText('Selected target: Hazuki Nagisa #8', { exact: true }),
+			dialog.getByText('葉月なぎさ', { exact: true }).first(),
+			selectedDMM,
+		])
+			await expectUnobscuredInViewport(detail);
+		await page.screenshot({
+			path: test.info().outputPath(`collision-details-${width}-selected-viewport.png`),
 		});
 		await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 		await expect(dialog).toHaveCount(0);
