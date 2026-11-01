@@ -95,7 +95,7 @@ class AdmissionTests(unittest.TestCase):
         for badprofile in [self.profile, profile + self.profile.splitlines()[1] + "\n", profile.replace("1 1", "1 0"), "mode: atomic\ngarbage\n"]:
             with self.subTest(profile=badprofile), self.assertRaises(ValueError):
                 check(p=badprofile)
-        for bad in [self.events, events + self.events,
+        for bad in [events + [events[-1]], self.events, events + self.events,
                     [{**events[0], "Test": ROOT}, events[1]],
                     [{**events[0], "Package": PACKAGE}, events[1]]]:
             with self.subTest(events=bad), self.assertRaises(ValueError):
@@ -106,6 +106,72 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             check(meta=self.metadata)
 
+    def test_cleanup_and_catalog_contracts(self):
+        cases = [
+            ("cleanup", "github.com/javinizer/javinizer-go/cmd/javinizer", "cleanup_windows.go",
+             ["TestCleanupStaleWindowsOldExe_RemovesStaleOld", "TestCleanupStaleWindowsOldExe_NoOpWhenAbsent"],
+             [16, 17, 20, 21]),
+            ("catalog", "github.com/javinizer/javinizer-go/internal/catalogname", "catalogname.go",
+             ["TestLoadReadOnlyDetachedSnapshot"], [66]),
+        ]
+        for contract, package, filename, roots, lines in cases:
+            source = package + "/" + filename
+            # Synthetic admission fixtures only, never native execution evidence.
+            rows = [f"{source}:{line}.1,{line}.2 1 1" for line in lines]
+            profile = "mode: atomic\n" + "\n".join(rows) + "\n"
+            events = [{"Action": "pass", "Package": package, "Test": root} for root in roots]
+            events.append({"Action": "pass", "Package": package})
+            metadata = {**self.metadata, "contract": contract}
+
+            def check(p=profile, es=events, meta=metadata, selector=contract):
+                return verify(p, "\n".join(map(json.dumps, es)), meta,
+                              self.head, "push", self.head, "", selector)
+
+            with self.subTest(contract=contract):
+                self.assertEqual(lines, check()["covered_lines"])
+                self.assertEqual(sorted(roots), check()["passed_tests"])
+                for index in range(len(events)):
+                    with self.subTest(missing=index), self.assertRaises(ValueError):
+                        check(es=events[:index] + events[index + 1:])
+                    for action in ["skip", "fail"]:
+                        bad = copy.deepcopy(events)
+                        bad[index]["Action"] = action
+                        with self.subTest(index=index, action=action), self.assertRaises(ValueError):
+                            check(es=bad)
+                for index, row in enumerate(rows):
+                    for replacement in [None, row[:-1] + "0"]:
+                        badrows = rows.copy()
+                        badrows[index:index + 1] = [] if replacement is None else [replacement]
+                        with self.subTest(target=lines[index], replacement=replacement), self.assertRaises(ValueError):
+                            check(p="mode: atomic\n" + "\n".join(badrows) + "\n")
+                for bad in [events + [events[-1]], events + [events[0]], events + self.events,
+                            [{**events[0], "Test": roots[0] + "/unexpected"}] + events[1:],
+                            [{**events[0], "Package": package + "wrong"}] + events[1:]]:
+                    with self.assertRaises(ValueError):
+                        check(es=bad)
+                for bad in [self.profile, profile + self.profile.splitlines()[1] + "\n",
+                            profile.replace(source, source + "wrong"),
+                            profile + rows[0] + "\n", profile.replace("mode: atomic", "mode: set")]:
+                    with self.assertRaises(ValueError):
+                        check(p=bad)
+                for key, value in [("contract", "umask"), ("checkout_sha", "b" * 40),
+                                   ("workflow_sha", "b" * 40), ("goos", "linux"), ("exit", 1),
+                                   ("tested_tree", ""), ("declared_head_sha", "b" * 40)]:
+                    with self.subTest(key=key), self.assertRaises(ValueError):
+                        check(meta={**metadata, key: value})
+                with self.assertRaises(ValueError):
+                    check(selector="umask")
+                # A PR receipt binds its checkout to the declared base/head order.
+                head, base = "b" * 40, "d" * 40
+                meta = {**metadata, "event_name": "pull_request", "declared_head_sha": head,
+                        "declared_base_sha": base, "raw_parents": [base, head]}
+                log = "\n".join(map(json.dumps, events))
+                self.assertEqual(lines, verify(profile, log, meta, self.head,
+                                              "pull_request", head, base, contract)["covered_lines"])
+                with self.assertRaises(ValueError):
+                    verify(profile, log, {**meta, "raw_parents": [head, base]}, self.head,
+                           "pull_request", head, base, contract)
+
     def test_invalid_profiles(self):
         for profile in ["", "mode: set\n", "mode: atomic\ngarbage\n",
                         self.profile.replace("1 1", "1 0"),
@@ -115,6 +181,10 @@ class AdmissionTests(unittest.TestCase):
                         self.profile + self.profile.splitlines()[1] + "\n"]:
             with self.subTest(profile=profile), self.assertRaises(ValueError):
                 self.check(profile=profile)
+
+    def test_duplicate_package_pass(self):
+        with self.assertRaisesRegex(ValueError, "duplicate terminal package event"):
+            self.check(events=self.events + [self.events[-1]])
 
     def test_malformed_json_and_duplicate_events(self):
         with self.assertRaises(ValueError):

@@ -528,7 +528,7 @@ jobs:
     - name: Verify bounded Windows coverage admission verifier
       run: python -m unittest discover -s scripts -p test_verify_windows_autocomplete_coverage.py -v
 
-    - name: Collect existing native Windows autocomplete and umask contract coverage
+    - name: Collect existing native Windows contract coverage
       # Match this profile's hosted-only upload; ACT is not native Windows evidence.
       if: ${{ !env.ACT }}
       env:
@@ -551,6 +551,8 @@ jobs:
         contracts = [
             ("autocomplete", "./internal/api/file", "TestAutocompleteDriveRelativePreservesEmptyFragment"),
             ("umask", "./cmd/javinizer", "TestInitConfig_UmaskValid"),
+            ("cleanup", "./cmd/javinizer", "(TestCleanupStaleWindowsOldExe_RemovesStaleOld|TestCleanupStaleWindowsOldExe_NoOpWhenAbsent)"),
+            ("catalog", "./internal/catalogname", "TestLoadReadOnlyDetachedSnapshot"),
         ]
         for contract, package, test in contracts:
             prefix = contract + "-windows"
@@ -600,6 +602,16 @@ jobs:
           umask-windows.stderr.log
           umask-windows-metadata.json
           umask-windows-proof.json
+          coverage-cleanup-windows.out
+          cleanup-windows-tests.jsonl
+          cleanup-windows.stderr.log
+          cleanup-windows-metadata.json
+          cleanup-windows-proof.json
+          coverage-catalog-windows.out
+          catalog-windows-tests.jsonl
+          catalog-windows.stderr.log
+          catalog-windows-metadata.json
+          catalog-windows-proof.json
         if-no-files-found: error
         retention-days: 30
 
@@ -621,7 +633,7 @@ jobs:
       if: ${{ !env.ACT }}
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out${{ steps.console-experiment.outcome == 'success' && steps.console-experiment.outputs.admitted_profile && ',./coverage-owned-console-windows.out' || '' }}
+        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out,./coverage-cleanup-windows.out,./coverage-catalog-windows.out${{ steps.console-experiment.outcome == 'success' && steps.console-experiment.outputs.admitted_profile && ',./coverage-owned-console-windows.out' || '' }}
         disable_search: true
         flags: unittests
         name: codecov-primary-undo-windows
