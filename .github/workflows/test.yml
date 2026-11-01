@@ -528,7 +528,7 @@ jobs:
     - name: Verify bounded Windows coverage admission verifier
       run: python -m unittest discover -s scripts -p test_verify_windows_autocomplete_coverage.py -v
 
-    - name: Collect existing native Windows autocomplete and umask contract coverage
+    - name: Collect existing native Windows contract coverage
       # Match this profile's hosted-only upload; ACT is not native Windows evidence.
       if: ${{ !env.ACT }}
       env:
@@ -551,14 +551,37 @@ jobs:
         contracts = [
             ("autocomplete", "./internal/api/file", "TestAutocompleteDriveRelativePreservesEmptyFragment"),
             ("umask", "./cmd/javinizer", "TestInitConfig_UmaskValid"),
+            ("cleanup", "./cmd/javinizer", "(TestCleanupStaleWindowsOldExe_RemovesStaleOld|TestCleanupStaleWindowsOldExe_NoOpWhenAbsent)"),
+            ("catalog", "./internal/catalogname", "TestLoadReadOnlyDetachedSnapshot"),
+            ("fsutil", "./internal/fsutil", None),
         ]
         for contract, package, test in contracts:
             prefix = contract + "-windows"
             profile = "coverage-" + prefix + ".out"
             command = ["go", "test", "-short", "-count=1", "-timeout=120s", "-json",
                        "-covermode=atomic", "-coverprofile=" + profile,
-                       package, "-run", "^" + test + "$"]
-            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                       package] + (["-run", "^" + test + "$"] if test is not None else [])
+            effective_go_env = None
+            input_go_overrides = None
+            child_env = None
+            if contract == "fsutil":
+                # Complete package invocation in -short mode. Neither saved Go
+                # settings nor ambient flags/workspaces may silently filter it.
+                sys.path.insert(0, str(pathlib.Path.cwd() / "scripts"))
+                from verify_windows_autocomplete_coverage import FSUTIL_COMMAND, fsutil_environment
+                child_env = fsutil_environment(os.environ)
+                input_go_overrides = {key: child_env[key] for key in ("GOFLAGS", "GOENV", "GOWORK")}
+                effective_go_env = json.loads(subprocess.check_output(
+                    ["go", "env", "-json", "GOFLAGS", "GOENV", "GOWORK", "GOOS", "GOHOSTOS", "GOARCH", "GOHOSTARCH", "GOVERSION"],
+                    env=child_env, text=True, encoding="utf-8"))
+                command = FSUTIL_COMMAND.copy()
+                pathlib.Path(prefix + "-command.json").write_text(json.dumps({
+                    "command": command, "effective_go_env": effective_go_env,
+                    "input_go_overrides": input_go_overrides,
+                    "scope": "complete package invocation in -short mode"}), encoding="utf-8")
+                assert effective_go_env["GOOS"] == effective_go_env["GOHOSTOS"] == "windows"
+                assert effective_go_env["GOARCH"] == effective_go_env["GOHOSTARCH"]
+            result = subprocess.run(command, env=child_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
             pathlib.Path(prefix + "-tests.jsonl").write_text(result.stdout, encoding="utf-8")
             pathlib.Path(prefix + ".stderr.log").write_text(result.stderr, encoding="utf-8")
             pathlib.Path(prefix + "-metadata.json").write_text(json.dumps({
@@ -570,6 +593,7 @@ jobs:
                 "declared_base_sha": os.environ["AUTOCOMPLETE_DECLARED_BASE"],
                 "tested_tree": tested_tree, "raw_parents": raw_parents,
                 "goos": goos, "exit": result.returncode, "command": command,
+                "effective_go_env": effective_go_env, "input_go_overrides": input_go_overrides,
             }), encoding="utf-8")
             print(result.stdout)
             print(result.stderr, file=sys.stderr)
@@ -600,6 +624,22 @@ jobs:
           umask-windows.stderr.log
           umask-windows-metadata.json
           umask-windows-proof.json
+          coverage-cleanup-windows.out
+          cleanup-windows-tests.jsonl
+          cleanup-windows.stderr.log
+          cleanup-windows-metadata.json
+          cleanup-windows-proof.json
+          coverage-catalog-windows.out
+          catalog-windows-tests.jsonl
+          catalog-windows.stderr.log
+          catalog-windows-metadata.json
+          catalog-windows-proof.json
+          coverage-fsutil-windows.out
+          fsutil-windows-tests.jsonl
+          fsutil-windows.stderr.log
+          fsutil-windows-metadata.json
+          fsutil-windows-command.json
+          fsutil-windows-proof.json
         if-no-files-found: error
         retention-days: 30
 
@@ -621,7 +661,7 @@ jobs:
       if: ${{ !env.ACT }}
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out${{ steps.console-experiment.outcome == 'success' && steps.console-experiment.outputs.admitted_profile && ',./coverage-owned-console-windows.out' || '' }}
+        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out,./coverage-cleanup-windows.out,./coverage-catalog-windows.out,./coverage-fsutil-windows.out${{ steps.console-experiment.outcome == 'success' && steps.console-experiment.outputs.admitted_profile && ',./coverage-owned-console-windows.out' || '' }}
         disable_search: true
         flags: unittests
         name: codecov-primary-undo-windows
