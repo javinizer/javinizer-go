@@ -130,6 +130,104 @@ jobs:
     - name: Generate offline fixture helper coverage
       run: go test -short -count=1 -timeout=120s -covermode=atomic -coverprofile=coverage-testutil.out ./internal/testutil
 
+    - name: Verify production sync fixture refusal with real entry coverage
+      run: |
+        set -euo pipefail
+        python3 -m unittest discover -s scripts -p verify_sync_entry_coverage_test.py -v
+        python3 -m unittest discover -s scripts -p stage_sync_entry_toolchain_test.py -v
+        python3 -m unittest discover -s scripts -p sync_entry_auth_test.py -v
+        # The offline overlay is source-reviewed for 1.27.2. Provision that
+        # toolchain with Go's supported per-command selector, without changing
+        # setup-go, the job PATH or any existing test/coverage gate.
+        go env -json GOVERSION GOROOT > "$RUNNER_TEMP/sync-entry-toolchain.ambient.json"
+        if GOENV=off GOWORK=off GOFLAGS= GOSUMDB=sum.golang.org GOTOOLCHAIN=go1.27.2 go env GOROOT \
+          > "$RUNNER_TEMP/sync-entry-toolchain.goroot" \
+          2> "$RUNNER_TEMP/sync-entry-toolchain.provision.log"; then
+          provision_exit=0
+        else
+          provision_exit=$?
+        fi
+        printf '%s\n' "$provision_exit" > "$RUNNER_TEMP/sync-entry-toolchain.provision.exit"
+        test "$provision_exit" -eq 0
+        downloaded_goroot="$(cat "$RUNNER_TEMP/sync-entry-toolchain.goroot")"
+        reviewed_goroot="$RUNNER_TEMP/sync-entry-reviewed-go"
+        module_cache="$(GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local go env GOMODCACHE)"
+        if python3 scripts/stage_sync_entry_toolchain.py --source "$downloaded_goroot" \
+          --destination "$reviewed_goroot" --module-cache "$module_cache" \
+          --receipt "$RUNNER_TEMP/sync-entry-toolchain.copy.json" \
+          > "$RUNNER_TEMP/sync-entry-toolchain.copy.stdout" \
+          2> "$RUNNER_TEMP/sync-entry-toolchain.copy.stderr"; then
+          copy_exit=0
+        else
+          copy_exit=$?
+        fi
+        printf '%s\n' "$copy_exit" > "$RUNNER_TEMP/sync-entry-toolchain.copy.exit"
+        test "$copy_exit" -eq 0
+        test -x "$reviewed_goroot/bin/go"
+        # Go1.27 builds covdata lazily. Use a new owned cache, not an ambient
+        # cached executable, and retain its derivation before reading archives.
+        converter_cache="$RUNNER_TEMP/sync-entry-converter-cache"
+        python3 -c 'import shutil,sys; free=shutil.disk_usage(sys.argv[1]).free; print(free); assert free >= 1024**3, "converter preparation needs 1GiB free"' "$RUNNER_TEMP" \
+          > "$RUNNER_TEMP/sync-entry-toolchain.converter.capacity"
+        mkdir -m 700 "$converter_cache"
+        converter_env=(env -i PATH="$reviewed_goroot/bin:/usr/bin:/bin" HOME="$converter_cache" TMPDIR="$converter_cache"
+          GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local GOPROXY=off GONOPROXY=none GOSUMDB=off GOVCS='*:off'
+          GOROOT="$reviewed_goroot" GOCACHE="$converter_cache" GOMODCACHE="$converter_cache/modules" GOMAXPROCS=2 CGO_ENABLED=0)
+        "${converter_env[@]}" /usr/bin/env > "$RUNNER_TEMP/sync-entry-toolchain.converter.environment"
+        printf '%q ' "${converter_env[@]}" "$reviewed_goroot/bin/go" tool -n covdata > "$RUNNER_TEMP/sync-entry-toolchain.converter.command"
+        if (cd "$converter_cache" && "${converter_env[@]}" "$reviewed_goroot/bin/go" tool -n covdata) \
+          > "$RUNNER_TEMP/sync-entry-toolchain.converter.path" \
+          2> "$RUNNER_TEMP/sync-entry-toolchain.converter.stderr"; then
+          converter_exit=0
+        else
+          converter_exit=$?
+        fi
+        printf '%s\n' "$converter_exit" > "$RUNNER_TEMP/sync-entry-toolchain.converter.exit"
+        test "$converter_exit" -eq 0
+        test "$(wc -l < "$RUNNER_TEMP/sync-entry-toolchain.converter.path")" -eq 1
+        trusted_covdata="$(cat "$RUNNER_TEMP/sync-entry-toolchain.converter.path")"
+        case "$trusted_covdata" in "$converter_cache"/*) ;; *) exit 1 ;; esac
+        test -x "$trusted_covdata"
+        trusted_covdata_sha256="$(sha256sum "$trusted_covdata" | cut -d' ' -f1)"
+        printf '%s\n' "$trusted_covdata_sha256" > "$RUNNER_TEMP/sync-entry-toolchain.converter.sha256"
+        "${converter_env[@]}" "$reviewed_goroot/bin/go" version -m "$trusted_covdata" \
+          > "$RUNNER_TEMP/sync-entry-toolchain.converter.buildinfo"
+        PATH="$reviewed_goroot/bin:$PATH" python3 scripts/run_sync_entry_coverage.py --output "$RUNNER_TEMP/sync-entry-coverage" \
+          --trusted-covdata "$trusted_covdata" --trusted-covdata-sha256 "$trusted_covdata_sha256" \
+          2>&1 | tee "$RUNNER_TEMP/sync-entry-coverage.log"
+        python3 scripts/verify_sync_entry_coverage.py "$RUNNER_TEMP/sync-entry-coverage" \
+          --expected-commit "$(git rev-parse HEAD)" \
+          --trusted-go "$reviewed_goroot/bin/go" \
+          --trusted-go-sha256 "$(sha256sum "$reviewed_goroot/bin/go" | cut -d' ' -f1)" \
+          --trusted-covdata "$trusted_covdata" \
+          --trusted-covdata-sha256 "$trusted_covdata_sha256"
+        cp "$RUNNER_TEMP/sync-entry-coverage/coverage-sync-entry.out" coverage-sync-entry.out
+        go env -json GOVERSION GOROOT > "$RUNNER_TEMP/sync-entry-toolchain.after.json"
+        cmp "$RUNNER_TEMP/sync-entry-toolchain.ambient.json" "$RUNNER_TEMP/sync-entry-toolchain.after.json"
+
+    - name: Archive production sync entry evidence, including first failures
+      if: always() && steps.detect.outputs.running_in_act != 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-sync-entry-evidence
+        path: |
+          ${{ runner.temp }}/sync-entry-coverage.log
+          ${{ runner.temp }}/sync-entry-toolchain.*
+          ${{ runner.temp }}/sync-entry-coverage/*.json
+          ${{ runner.temp }}/sync-entry-coverage/*.stdout
+          ${{ runner.temp }}/sync-entry-coverage/*.stderr
+          ${{ runner.temp }}/sync-entry-coverage/*.exit
+          ${{ runner.temp }}/sync-entry-coverage/*.timeout
+          ${{ runner.temp }}/sync-entry-coverage/*.audit
+          ${{ runner.temp }}/sync-entry-coverage/binary
+          ${{ runner.temp }}/sync-entry-coverage/coverage-sync-entry.out
+          ${{ runner.temp }}/sync-entry-coverage/counters/
+          ${{ runner.temp }}/sync-entry-coverage/source/
+          ${{ runner.temp }}/sync-entry-coverage/git-objects/
+          ${{ runner.temp }}/sync-entry-coverage/stdlib-originals/
+          ${{ runner.temp }}/sync-entry-coverage/overlay/
+        retention-days: 30
+
     - name: Check coverage threshold
       run: ./scripts/check_coverage.sh 75 coverage.out
 
@@ -137,7 +235,7 @@ jobs:
       if: steps.detect.outputs.running_in_act != 'true'
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage.out,./coverage-testutil.out,./coverage-dmm-browser.out
+        files: ./coverage.out,./coverage-testutil.out,./coverage-dmm-browser.out,./coverage-sync-entry.out
         flags: unittests
         name: codecov-javinizer
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -152,6 +250,7 @@ jobs:
         path: |
           coverage.out
           coverage-testutil.out
+          coverage-sync-entry.out
           coverage-dmm-browser.out
           coverage-dmm-browser.log
           coverage-dmm-browser-proof.json
