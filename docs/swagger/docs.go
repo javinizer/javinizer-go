@@ -8526,6 +8526,29 @@ const docTemplate = `{
                 "target_value": {}
             }
         },
+        "github_com_javinizer_javinizer-go_internal_database.CollisionActressSummary": {
+            "type": "object",
+            "properties": {
+                "dmm_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "japanese_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "verified": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_models.Actress": {
             "type": "object",
             "properties": {
@@ -9669,6 +9692,9 @@ const docTemplate = `{
                 },
                 "credit_id": {
                     "type": "integer"
+                },
+                "current_actress": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_database.CollisionActressSummary"
                 },
                 "current_actress_id": {
                     "type": "integer"
