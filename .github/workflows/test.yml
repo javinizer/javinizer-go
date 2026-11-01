@@ -333,6 +333,84 @@ jobs:
             for target in targets:
                 assert any(path.endswith("/" + source) and first <= target <= last and count > 0 for path, first, last, count in blocks), "Missing native fallback/predicate counter: " + source + ":" + str(target)
 
+    - name: Verify bounded Windows coverage admission verifier
+      run: python -m unittest discover -s scripts -p test_verify_windows_autocomplete_coverage.py -v
+
+    - name: Collect existing native Windows autocomplete and umask contract coverage
+      # Match this profile's hosted-only upload; ACT is not native Windows evidence.
+      if: ${{ !env.ACT }}
+      env:
+        AUTOCOMPLETE_DECLARED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        AUTOCOMPLETE_DECLARED_BASE: ${{ github.event.pull_request.base.sha || '' }}
+      shell: python {0}
+      run: |
+        import json, os, pathlib, subprocess, sys
+
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+        raw_commit = subprocess.check_output(["git", "cat-file", "-p", "HEAD"], text=True, encoding="utf-8")
+        headers = raw_commit.split("\n\n", 1)[0].splitlines()
+        raw_parents = [line[7:] for line in headers if line.startswith("parent ")]
+        tested_tree = next(line[5:] for line in headers if line.startswith("tree "))
+        checkout_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, encoding="utf-8").strip()
+        assert checkout_sha == os.environ["GITHUB_SHA"], "checkout does not match workflow checkout SHA"
+        goos = subprocess.check_output(["go", "env", "GOOS"], text=True, encoding="utf-8").strip()
+        assert goos == "windows", "native Windows evidence required"
+        contracts = [
+            ("autocomplete", "./internal/api/file", "TestAutocompleteDriveRelativePreservesEmptyFragment"),
+            ("umask", "./cmd/javinizer", "TestInitConfig_UmaskValid"),
+        ]
+        for contract, package, test in contracts:
+            prefix = contract + "-windows"
+            profile = "coverage-" + prefix + ".out"
+            command = ["go", "test", "-short", "-count=1", "-timeout=120s", "-json",
+                       "-covermode=atomic", "-coverprofile=" + profile,
+                       package, "-run", "^" + test + "$"]
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            pathlib.Path(prefix + "-tests.jsonl").write_text(result.stdout, encoding="utf-8")
+            pathlib.Path(prefix + ".stderr.log").write_text(result.stderr, encoding="utf-8")
+            pathlib.Path(prefix + "-metadata.json").write_text(json.dumps({
+                "contract": contract,
+                "checkout_sha": checkout_sha, "workflow_sha": os.environ["GITHUB_SHA"],
+                "evidence_scope": "executed checkout; on pull_request this may be a synthetic merge, not the PR source head",
+                "event_name": os.environ["GITHUB_EVENT_NAME"],
+                "declared_head_sha": os.environ["AUTOCOMPLETE_DECLARED_HEAD"],
+                "declared_base_sha": os.environ["AUTOCOMPLETE_DECLARED_BASE"],
+                "tested_tree": tested_tree, "raw_parents": raw_parents,
+                "goos": goos, "exit": result.returncode, "command": command,
+            }), encoding="utf-8")
+            print(result.stdout)
+            print(result.stderr, file=sys.stderr)
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            proof = subprocess.check_output([
+                sys.executable, "scripts/verify_windows_autocomplete_coverage.py",
+                profile, prefix + "-tests.jsonl", prefix + "-metadata.json", os.environ["GITHUB_SHA"],
+                os.environ["GITHUB_EVENT_NAME"], os.environ["AUTOCOMPLETE_DECLARED_HEAD"],
+                os.environ["AUTOCOMPLETE_DECLARED_BASE"], contract,
+            ], text=True, encoding="utf-8")
+            pathlib.Path(prefix + "-proof.json").write_text(proof, encoding="utf-8")
+            print(proof)
+
+    - name: Archive bounded native Windows coverage evidence
+      if: ${{ always() && !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: autocomplete-native-windows-evidence
+        path: |
+          coverage-autocomplete-windows.out
+          autocomplete-windows-tests.jsonl
+          autocomplete-windows.stderr.log
+          autocomplete-windows-metadata.json
+          autocomplete-windows-proof.json
+          coverage-umask-windows.out
+          umask-windows-tests.jsonl
+          umask-windows.stderr.log
+          umask-windows-metadata.json
+          umask-windows-proof.json
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Archive native Windows primary Undo coverage
       if: ${{ always() && !env.ACT }}
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -351,7 +429,7 @@ jobs:
       if: ${{ !env.ACT }}
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage-primary-undo-windows.out
+        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out
         disable_search: true
         flags: unittests
         name: codecov-primary-undo-windows
