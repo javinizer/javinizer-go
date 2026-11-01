@@ -741,11 +741,7 @@ func (s *scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *m
 		return
 	}
 
-	filtered, count, err := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
-	if err != nil {
-		logging.Warnf("libredmm: placeholder filter error: %v", err)
-		return
-	}
+	filtered, count := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
 	if count > 0 {
 		logging.Debugf("libredmm: Filtered %d placeholder screenshots", count)
 		result.ScreenshotURL = filtered

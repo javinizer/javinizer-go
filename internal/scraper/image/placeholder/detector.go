@@ -123,14 +123,17 @@ func streamAndHash(r io.Reader, h hash.Hash) (int64, error) {
 	return total, nil
 }
 
-// FilterURLs returns the URLs that are not placeholder images, along with the count of placeholders removed.
-func FilterURLs(ctx context.Context, client *resty.Client, urls []string, cfg Config) ([]string, int, error) {
+// FilterURLs returns retained URLs and the number of confirmed placeholders removed.
+// Checks are best-effort: a per-URL error is logged and that URL is retained.
+// Input order and duplicate occurrences are preserved. Empty or disabled input
+// returns the original slice without requests.
+func FilterURLs(ctx context.Context, client *resty.Client, urls []string, cfg Config) ([]string, int) {
 	if len(urls) == 0 {
-		return urls, 0, nil
+		return urls, 0
 	}
 
 	if !cfg.Enabled {
-		return urls, 0, nil
+		return urls, 0
 	}
 
 	filtered := make([]string, 0, len(urls))
@@ -155,5 +158,5 @@ func FilterURLs(ctx context.Context, client *resty.Client, urls []string, cfg Co
 		logging.Debugf("placeholder: Filtered %d placeholder screenshots", filteredCount)
 	}
 
-	return filtered, filteredCount, nil
+	return filtered, filteredCount
 }

@@ -837,10 +837,8 @@ func resolveMediaURLs(ctx context.Context, s *scraper, data *r18Response, result
 	if len(result.ScreenshotURL) > 0 {
 		cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
 		if cfg.Enabled {
-			filtered, count, err := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
-			if err != nil {
-				logging.Warnf("r18dev: placeholder filter error: %v", err)
-			} else if count > 0 {
+			filtered, count := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
+			if count > 0 {
 				logging.Debugf("r18dev: Filtered %d placeholder screenshots", count)
 				result.ScreenshotURL = filtered
 			}
