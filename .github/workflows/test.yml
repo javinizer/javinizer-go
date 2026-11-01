@@ -53,6 +53,34 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify real DMM browser cookies and rendering with an offline fixture proxy
+      env:
+        JAVINIZER_TEST_NATIVE_DMM_BROWSER: '1'
+      run: |
+        set -euo pipefail
+        CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+        export CHROME_BIN
+        test -n "$CHROME_BIN"
+        "$CHROME_BIN" --version
+        go test -count=1 -timeout=120s -v -covermode=atomic \
+          -coverprofile=coverage-dmm-browser.out ./internal/scraper/dmm \
+          -run '^TestNativeBrowserScrapeURLCookieAndRenderingContract$' \
+          2>&1 | tee coverage-dmm-browser.log
+        python3 scripts/verify_dmm_browser_coverage.py coverage-dmm-browser.out coverage-dmm-browser.log \
+          | tee coverage-dmm-browser-proof.json
+
+    - name: Archive native DMM browser diagnostics even on failure
+      if: always() && steps.detect.outputs.running_in_act != 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: coverage-dmm-browser-diagnostics
+        path: |
+          coverage-dmm-browser.log
+          coverage-dmm-browser.out
+          coverage-dmm-browser-proof.json
+        if-no-files-found: warn
+        retention-days: 30
+
     - name: Verify primary Undo native-volume and subprocess coverage evidence
       env:
         PRIMARY_UNDO_SUBPROCESS_COVERPROFILE: ${{ github.workspace }}/coverage-primary-undo-linux-child.out
@@ -109,7 +137,7 @@ jobs:
       if: steps.detect.outputs.running_in_act != 'true'
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage.out,./coverage-testutil.out
+        files: ./coverage.out,./coverage-testutil.out,./coverage-dmm-browser.out
         flags: unittests
         name: codecov-javinizer
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -124,6 +152,9 @@ jobs:
         path: |
           coverage.out
           coverage-testutil.out
+          coverage-dmm-browser.out
+          coverage-dmm-browser.log
+          coverage-dmm-browser-proof.json
         retention-days: 30
 
     - name: Display coverage report (act only)
