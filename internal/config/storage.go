@@ -438,16 +438,8 @@ func (cs *ConfigStorage) atomicReplace(path string, data []byte, perm os.FileMod
 		}
 	}()
 
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("failed to write temp config file: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("failed to sync temp config file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp config file: %w", err)
+	if err := writeSyncClose(tmpFile, data, "temp config file"); err != nil {
+		return err
 	}
 
 	if err := cs.replaceFile(path, tmpPath); err != nil {
