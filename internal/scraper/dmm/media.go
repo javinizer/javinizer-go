@@ -61,11 +61,7 @@ func (s *scraper) filterPlaceholderScreenshots(ctx context.Context, urls []strin
 	}
 
 	cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
-	filtered, count, err := placeholder.FilterURLs(ctx, s.client, urls, cfg)
-	if err != nil {
-		logging.Warnf("DMM: Placeholder filter error: %v", err)
-		return urls
-	}
+	filtered, count := placeholder.FilterURLs(ctx, s.client, urls, cfg)
 	if count > 0 {
 		logging.Debugf("DMM: Filtered %d placeholder screenshots from results", count)
 	}

@@ -61,8 +61,7 @@ func TestPlaceholderDownloadTransportFailurePreservesCandidates(t *testing.T) {
 	require.Equal(t, []string{"HEAD " + urls[0], "GET " + urls[0]}, calls)
 
 	calls = nil
-	kept, count, err := FilterURLs(context.Background(), client, urls, cfg)
-	require.NoError(t, err)
+	kept, count := FilterURLs(context.Background(), client, urls, cfg)
 	require.Equal(t, []string{urls[0], urls[2]}, kept)
 	require.Equal(t, 1, count)
 	require.Equal(t, []string{

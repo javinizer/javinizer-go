@@ -288,7 +288,6 @@ func TestFilterURLs(t *testing.T) {
 		cfg         Config
 		wantLen     int
 		wantRemoved int
-		wantErr     bool
 	}{
 		{
 			name:        "empty urls returns empty",
@@ -347,13 +346,8 @@ func TestFilterURLs(t *testing.T) {
 				urlsToTest = []string{"url1", "url2"}
 			}
 
-			result, removed, err := FilterURLs(ctx, client, urlsToTest, tt.cfg)
+			result, removed := FilterURLs(ctx, client, urlsToTest, tt.cfg)
 
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
 			assert.Equal(t, tt.wantLen, len(result))
 			assert.Equal(t, tt.wantRemoved, removed)
 		})
