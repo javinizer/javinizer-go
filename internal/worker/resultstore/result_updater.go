@@ -51,7 +51,6 @@ func (ru *resultUpdater) UpsertFileResultWithProvenance(filePath string, result 
 
 func (ru *resultUpdater) updateFileResultLocked(filePath string, result *MovieResult) {
 	existing := ru.Results[filePath]
-	stateReindexFilePathLocked(ru.resultTrackerState, filePath, existing, result)
 	if existing != nil {
 		// Only decrement counters if the file was not excluded — excluded files
 		// were never counted, so decrementing them would cause counter drift.
@@ -71,6 +70,8 @@ func (ru *resultUpdater) updateFileResultLocked(filePath string, result *MovieRe
 	} else {
 		result.Revision = 1
 	}
+	// Index the identity actually published after stable-ID normalization.
+	stateReindexFilePathLocked(ru.resultTrackerState, filePath, existing, result)
 	ru.Results[filePath] = result.Clone()
 	if !ru.Excluded[filePath] {
 		switch result.Status {
