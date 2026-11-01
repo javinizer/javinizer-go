@@ -279,17 +279,71 @@ jobs:
       run: go mod download
 
     - name: Verify native Windows primary Undo contracts with coverage
-      run: >-
-        go test -short -count=1 -v -covermode=atomic
-        '-coverprofile=coverage-primary-undo-windows.out' ./internal/history ./cmd/javinizer/commands/actress ./internal/update ./internal/config ./internal/api/core
-        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts|TestNativeWindowsUNCAdmissionContracts)$'
+      shell: python {0}
+      run: |
+        import collections, json, pathlib, re, subprocess, sys
+
+        assert sys.platform == "win32", "Native Windows evidence required"
+        command = [
+            "go", "test", "-short", "-count=1", "-json", "-covermode=atomic",
+            "-coverprofile=coverage-primary-undo-windows.out",
+            "./internal/history", "./cmd/javinizer/commands/actress", "./internal/update",
+            "./internal/config", "./internal/api/core", "./internal/fsutil",
+            "-run", '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts|TestNativeWindowsUNCAdmissionContracts|TestReplacementBusyExplicitReleaseSurvivesNativeReader|TestReplacementBusyReleaseSharingClassification|TestReplacementBusyFixedReleaseStatusVisibility|TestReplacementBusyFixedReleaseRefusesUnownedOrLegacyStatus|TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState)$',
+        ]
+        pathlib.Path("busy-release-windows-command.json").write_text(json.dumps(command), encoding="utf-8")
+        result = subprocess.run(command, capture_output=True, text=True)
+        pathlib.Path("busy-release-windows.jsonl").write_text(result.stdout, encoding="utf-8")
+        pathlib.Path("busy-release-windows.stderr.log").write_text(result.stderr, encoding="utf-8")
+        pathlib.Path("busy-release-windows.exit").write_text(str(result.returncode), encoding="utf-8")
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+        assert result.returncode == 0, "Native Windows primary and busy-release contracts failed"
+        events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        package = "github.com/javinizer/javinizer-go/internal/fsutil"
+        expected = {
+            "TestReplacementBusyExplicitReleaseSurvivesNativeReader": [],
+            "TestReplacementBusyReleaseSharingClassification": ["native", "wrapped", "nil", "access_denied", "lookalike", "foreign_precedence", "vanished_precedence", "restore_failed_precedence"],
+            "TestReplacementBusyFixedReleaseStatusVisibility": ["success", "zero_write", "zero_write_error", "visible_write_error", "visible_sync_error", "visible_close_error", "visible_all_errors"],
+            "TestReplacementBusyFixedReleaseRefusesUnownedOrLegacyStatus": ["copied_token_new_inode", "changed_token", "weak_identity", "legacy_token"],
+        }
+        required = {(package, root) for root in expected}
+        required.update((package, root + "/" + leaf) for root, leaves in expected.items() for leaf in leaves)
+        history = "github.com/javinizer/javinizer-go/internal/history"
+        required.add((history, "TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState"))
+        terminals = [e for e in events if e["Action"] in ("pass", "fail", "skip")]
+        assert all((e.get("Package"), e.get("Test")) in required for e in terminals if e.get("Package") == package and e.get("Test")), "Unexpected native fsutil terminal"
+        observed = collections.Counter((e.get("Package"), e.get("Test")) for e in terminals if (e.get("Package"), e.get("Test")) in required)
+        assert observed == collections.Counter({key: 1 for key in required}), "Missing or duplicate native contract terminal"
+        assert all(e["Action"] == "pass" for e in terminals if (e.get("Package"), e.get("Test")) in required), "Native contracts must PASS, never skip"
+        assert not any(e["Action"] in ("fail", "skip") for e in events if e.get("Package") == package), "Native fsutil contracts must not fail or skip"
+        for pkg in (package, history):
+            assert sum(e["Action"] == "pass" and e.get("Package") == pkg and not e.get("Test") for e in events) == 1, "Missing package PASS"
+        coverage = pathlib.Path("coverage-primary-undo-windows.out").read_text().splitlines()
+        assert coverage[0] == "mode: atomic"
+        blocks = []
+        for line in coverage[1:]:
+            location, statements, count = line.split()
+            source, coordinates = location.rsplit(":", 1)
+            match = re.fullmatch(r"(\d+)\.(\d+),(\d+)\.(\d+)", coordinates)
+            assert match, "Invalid coverage block"
+            blocks.append((source, int(match[1]), int(match[3]), int(count)))
+        # These are actual positive runtime counters, not inferred source mapping.
+        for source, targets in (("internal/fsutil/replacement_busy.go", (574, 575, 578, 579)), ("internal/fsutil/replacement_busy_release_windows.go", (15,))):
+            for target in targets:
+                assert any(path.endswith("/" + source) and first <= target <= last and count > 0 for path, first, last, count in blocks), "Missing native fallback/predicate counter: " + source + ":" + str(target)
 
     - name: Archive native Windows primary Undo coverage
-      if: ${{ !env.ACT }}
+      if: ${{ always() && !env.ACT }}
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: coverage-primary-undo-windows
-        path: coverage-primary-undo-windows.out
+        path: |
+          coverage-primary-undo-windows.out
+          busy-release-windows-command.json
+          busy-release-windows.jsonl
+          busy-release-windows.stderr.log
+          busy-release-windows.exit
         if-no-files-found: error
         retention-days: 30
 
