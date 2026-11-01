@@ -81,10 +81,7 @@ func (s *tokenStore) backgroundCleanup() {
 
 // Create generates a new verification token for the given scope and config hash
 func (s *tokenStore) Create(scope string, configHash string) (string, time.Time, error) {
-	token, err := generateToken()
-	if err != nil {
-		return "", time.Time{}, err
-	}
+	token := generateToken()
 	vt := verificationToken{
 		Token:      token,
 		Scope:      scope,
@@ -143,12 +140,11 @@ func (s *tokenStore) CleanupExpired() {
 	}
 }
 
-func generateToken() (string, error) {
+func generateToken() string {
 	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate token: %w", err)
-	}
-	return hex.EncodeToString(bytes), nil
+	// On Go 1.27+, crypto/rand.Read fills the buffer or irrecoverably terminates.
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
 }
 
 // HashProxyConfig creates a hash of proxy config for comparison using SHA-256
