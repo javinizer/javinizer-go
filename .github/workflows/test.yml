@@ -359,8 +359,11 @@ jobs:
   # Job 4: Windows tests (catches Windows-specific path bugs)
   test-windows:
     name: Unit Tests (Windows)
+    needs: static-e2e
+    # A failed producer must not suppress the existing Windows tests/evidence.
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 70
 
     steps:
     - name: Checkout code
@@ -376,6 +379,96 @@ jobs:
 
     - name: Download dependencies
       run: go mod download
+
+    - name: Verify owned-console controller and admission checks
+      id: console-controller
+      continue-on-error: true
+      run: python -m unittest discover -s scripts/diagnostics -p 'test_owned_windows_console*.py' -v
+
+    - name: Download exact same-run console asset artifact
+      id: console-assets-download
+      if: ${{ !env.ACT && needs.static-e2e.result == 'success' }}
+      continue-on-error: true
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      with:
+        artifact-ids: ${{ needs.static-e2e.outputs.console_asset_id }}
+        merge-multiple: true
+        path: ${{ runner.temp }}/owned-console-assets-download
+
+    - name: Verify real owned-console desktop CLI branches
+      id: console-experiment
+      if: ${{ !env.ACT }}
+      continue-on-error: true
+      timeout-minutes: 28
+      shell: python
+      env:
+        JAVINIZER_OWNED_CONSOLE_PROTOTYPE: '1'
+        CONSOLE_CONTROLLER_RESULT: ${{ steps.console-controller.outcome }}
+        CONSOLE_PRODUCER_RESULT: ${{ needs.static-e2e.result }}
+        CONSOLE_DOWNLOAD_RESULT: ${{ steps.console-assets-download.outcome }}
+        CONSOLE_ARTIFACT_ID: ${{ needs.static-e2e.outputs.console_asset_id }}
+        CONSOLE_ARTIFACT_DIGEST: ${{ needs.static-e2e.outputs.console_asset_digest }}
+        CONSOLE_BUNDLE_SHA: ${{ needs.static-e2e.outputs.console_bundle_sha }}
+        CONSOLE_PRODUCER_CHECKOUT: ${{ needs.static-e2e.outputs.console_checkout }}
+        CONSOLE_PRODUCER_TREE: ${{ needs.static-e2e.outputs.console_tree }}
+        CONSOLE_DECLARED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        CONSOLE_DECLARED_BASE: ${{ github.event.pull_request.base.sha || '' }}
+      run: |
+        import hashlib, json, os, pathlib, re, shutil, subprocess, sys
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+        root = pathlib.Path(os.environ["RUNNER_TEMP"])
+        evidence = root / "owned-console-experiment"
+        diagnosis = root / "owned-console-transport.json"
+        transport = {key: os.environ.get(key, "") for key in (
+            "CONSOLE_CONTROLLER_RESULT", "CONSOLE_PRODUCER_RESULT", "CONSOLE_DOWNLOAD_RESULT", "CONSOLE_ARTIFACT_ID",
+            "CONSOLE_ARTIFACT_DIGEST", "CONSOLE_BUNDLE_SHA", "CONSOLE_PRODUCER_CHECKOUT", "CONSOLE_PRODUCER_TREE",
+            "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA")}
+        diagnosis.write_text(json.dumps(transport, indent=2), encoding="utf-8")
+        assert transport["CONSOLE_CONTROLLER_RESULT"] == "success", "controller checks failed; existing Windows tests still run"
+        assert transport["CONSOLE_PRODUCER_RESULT"] == "success", "static-e2e producer unavailable; existing Windows tests still run"
+        assert transport["CONSOLE_DOWNLOAD_RESULT"] == "success", "exact producer artifact download failed"
+        assert transport["CONSOLE_ARTIFACT_ID"].isdigit(), "missing immutable artifact ID"
+        assert re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", transport["CONSOLE_ARTIFACT_DIGEST"]), "missing upload transport digest"
+        assert transport["CONSOLE_PRODUCER_CHECKOUT"] == os.environ["GITHUB_SHA"], "producer checkout mismatch"
+        assets = root / "owned-console-assets-download"
+        proof = json.loads((assets / "assets.json").read_text(encoding="utf-8"))
+        assert proof["provenance"]["tree"] == transport["CONSOLE_PRODUCER_TREE"], "producer tree mismatch"
+        command = [sys.executable, "scripts/diagnostics/run_owned_windows_console_experiment.py", "supervise",
+            "--repo", os.environ["GITHUB_WORKSPACE"], "--output", str(evidence),
+            "--asset-bundle", str(assets / "assets.tar"), "--asset-proof", str(assets / "assets.json"),
+            "--expected-bundle-sha256", transport["CONSOLE_BUNDLE_SHA"],
+            "--checkout", os.environ["GITHUB_SHA"], "--event", os.environ["GITHUB_EVENT_NAME"],
+            "--head", os.environ["CONSOLE_DECLARED_HEAD"], "--base", os.environ["CONSOLE_DECLARED_BASE"],
+            "--run-id", os.environ["GITHUB_RUN_ID"], "--run-attempt", os.environ["GITHUB_RUN_ATTEMPT"],
+            "--producer-outcome", transport["CONSOLE_PRODUCER_RESULT"]]
+        result = subprocess.run(command, check=False, timeout=27 * 60)
+        assert result.returncode == 0, "owned console experiment failed; first evidence retained"
+        admission = json.loads((evidence / "admission.json").read_text(encoding="utf-8"))
+        profile = evidence / "coverage-owned-console-windows.out"
+        assert hashlib.sha256(profile.read_bytes()).hexdigest() == admission["profile_sha256"]
+        shutil.copyfile(profile, "coverage-owned-console-windows.out")
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("admitted_profile=./coverage-owned-console-windows.out\n")
+
+    - name: Archive first owned-console experiment evidence
+      id: console-evidence
+      continue-on-error: true
+      if: ${{ always() && !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: owned-console-native-evidence
+        path: |
+          ${{ runner.temp }}/owned-console-transport.json
+          ${{ runner.temp }}/owned-console-experiment-supervision/
+          ${{ runner.temp }}/owned-console-experiment/*.json
+          ${{ runner.temp }}/owned-console-experiment/*.stdout
+          ${{ runner.temp }}/owned-console-experiment/*.stderr
+          ${{ runner.temp }}/owned-console-experiment/*.out
+          ${{ runner.temp }}/owned-console-experiment/children/
+          ${{ runner.temp }}/owned-console-experiment/merged-covdata/
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Verify native Windows primary Undo contracts with coverage
       shell: python {0}
@@ -528,7 +621,7 @@ jobs:
       if: ${{ !env.ACT }}
       uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
       with:
-        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out
+        files: ./coverage-primary-undo-windows.out,./coverage-autocomplete-windows.out,./coverage-umask-windows.out${{ steps.console-experiment.outcome == 'success' && steps.console-experiment.outputs.admitted_profile && ',./coverage-owned-console-windows.out' || '' }}
         disable_search: true
         flags: unittests
         name: codecov-primary-undo-windows
@@ -864,6 +957,22 @@ jobs:
         -run '^(TestArtifactStage(NativeCrossDeviceDestination|PlannedMountDestination|InPlacePlannedMount|ReadonlyCrossDeviceDestination|ReadonlyLongFolder|ReadonlyInPlaceStationaryBoundary|ResidentAliasProof|ReadonlyResidentAliases|PlannedDestinationBoundaries)|TestArtifactInPlaceCopy|TestArtifact(InPlaceIgnoresIrrelevantLinkMode|ResidentInPlaceCopyIgnoresIrrelevantLinkMode)|TestNormalizeInPlaceLinkMode|TestPrepareArtifactNormalizesInPlaceLinkMode|TestArtifactSubtitle|TestStaged(Subtitle|Video)|TestCollectStagedSubtitle|TestDeferredSubtitleErrorNeverPublishesFallback|TestDeferredCopyPublishesAdmittedSubtitleDespitePostOpenSwap|TestStagingPathBudgetIsLocalAndSigned|TestCopyFileNoReplaceVerifiedSourceHandleClosedOnReturn|TestOpenVerifiedSourcePinSharesDelete|TestNativeArtifactCrossDeviceError|TestAdversarial(PrimaryModeCrossProduct|SidecarModeCrossProduct|NonOrganizeModeCrossProduct))'
 
   # Focused native Darwin coverage; does not provision a second volume.
+    - name: Require owned-console native admission after existing Windows evidence
+      if: ${{ always() }}
+      shell: python
+      env:
+        CONSOLE_CONTROLLER_RESULT: ${{ steps.console-controller.outcome }}
+        CONSOLE_EVIDENCE_RESULT: ${{ steps.console-evidence.outcome }}
+        CONSOLE_EXPERIMENT_OUTCOME: ${{ steps.console-experiment.outcome }}
+        CONSOLE_ADMITTED_PROFILE: ${{ steps.console-experiment.outputs.admitted_profile }}
+      run: |
+        import os
+        assert os.environ["CONSOLE_CONTROLLER_RESULT"] == "success", "controller/admission checks failed"
+        if not os.getenv("ACT"):
+            assert os.environ["CONSOLE_EVIDENCE_RESULT"] == "success", "first native evidence upload failed"
+            assert os.environ["CONSOLE_EXPERIMENT_OUTCOME"] == "success", "native console admission failed; see preserved first evidence"
+            assert os.environ["CONSOLE_ADMITTED_PROFILE"] == "./coverage-owned-console-windows.out"
+
   primary-undo-macos:
     name: Primary Undo Contracts (macOS)
     runs-on: macos-latest
@@ -1302,6 +1411,12 @@ jobs:
     name: Static-flavor E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      console_asset_id: ${{ steps.console-assets-upload.outputs.artifact-id }}
+      console_asset_digest: ${{ steps.console-assets-upload.outputs.artifact-digest }}
+      console_bundle_sha: ${{ steps.console-assets-proof.outputs.bundle_sha }}
+      console_checkout: ${{ steps.console-assets-proof.outputs.checkout }}
+      console_tree: ${{ steps.console-assets-proof.outputs.tree }}
 
     steps:
     - name: Checkout code
@@ -1333,7 +1448,42 @@ jobs:
       run: npx playwright install --with-deps chromium
 
     - name: Run static-flavor E2E suite
+      id: run-static-e2e
       run: make test-static-e2e
+
+    - name: Bind existing static assets to successful producer source
+      id: console-assets-proof
+      if: ${{ !env.ACT }}
+      shell: python
+      env:
+        CONSOLE_PRODUCER_OUTCOME: ${{ steps.run-static-e2e.outcome }}
+        CONSOLE_DECLARED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        CONSOLE_DECLARED_BASE: ${{ github.event.pull_request.base.sha || '' }}
+      run: |
+        import json, os, pathlib, subprocess, sys
+        output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "owned-console-assets"
+        command = [sys.executable, "scripts/diagnostics/run_owned_windows_console_experiment.py", "assets",
+            "--repo", os.environ["GITHUB_WORKSPACE"], "--assets", str(pathlib.Path(os.environ["GITHUB_WORKSPACE"]) / "web/frontend/build"),
+            "--output", str(output), "--checkout", os.environ["GITHUB_SHA"], "--event", os.environ["GITHUB_EVENT_NAME"],
+            "--head", os.environ["CONSOLE_DECLARED_HEAD"], "--base", os.environ["CONSOLE_DECLARED_BASE"],
+            "--run-id", os.environ["GITHUB_RUN_ID"], "--run-attempt", os.environ["GITHUB_RUN_ATTEMPT"],
+            "--producer-outcome", os.environ["CONSOLE_PRODUCER_OUTCOME"]]
+        subprocess.run(command, check=True)
+        proof = json.loads((output / "assets.json").read_text(encoding="utf-8"))
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as receipt:
+            receipt.write("bundle_sha=" + proof["bundle_sha256"] + "\n")
+            receipt.write("checkout=" + proof["provenance"]["checkout"] + "\n")
+            receipt.write("tree=" + proof["provenance"]["tree"] + "\n")
+
+    - name: Upload exact same-run owned-console assets
+      id: console-assets-upload
+      if: ${{ !env.ACT }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: owned-console-assets-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/owned-console-assets/
+        if-no-files-found: error
+        retention-days: 7
 
     - name: Upload Playwright artifacts
       if: failure()
