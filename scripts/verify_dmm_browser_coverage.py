@@ -19,7 +19,7 @@ def main() -> None:
     if not rows or rows[0] != "mode: atomic":
         raise SystemExit("expected nonempty atomic coverage profile")
     target = "github.com/javinizer/javinizer-go/internal/scraper/dmm/browser.go"
-    expected = {154, 155, 156, 157, 160, 161, 162, 165, 179, 180}
+    expected = {165, 166, 181, 182, 183, 184, 187, 188, 189, 192}
     covered = set()
     for row in rows[1:]:
         match = re.fullmatch(r"(.+):(\d+)\.\d+,(\d+)\.\d+ (\d+) (\d+)", row)

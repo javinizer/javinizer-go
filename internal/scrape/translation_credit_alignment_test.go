@@ -49,8 +49,7 @@ func TestPostProcessTranslationPersistenceKeepsDeduplicatedActressIndicesAligned
 		},
 	}}
 
-	processed, err := postProcessScraped(t.Context(), movie, results, nil, &Config{TranslationEnabled: true}, indexedActressTranslator{}, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
-	require.NoError(t, err)
+	processed := postProcessScraped(t.Context(), movie, results, nil, &Config{TranslationEnabled: true}, indexedActressTranslator{}, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
 	require.Len(t, processed.Movie.Actresses, 2)
 	require.Len(t, processed.Movie.Credits, 2)
 	require.Equal(t, "provider-a", processed.Movie.Credits[0].Source)
@@ -89,8 +88,7 @@ func TestPostProcessExplicitCreditsPreserveCallerActressOrdering(t *testing.T) {
 	actresses := []models.Actress{{DMMID: 1, FirstName: "First"}, {DMMID: 1, FirstName: "Duplicate"}}
 	credits := []models.MovieCredit{{CreditedName: "Caller", Origin: string(models.CreditOriginUser)}}
 	movie := &models.Movie{ID: "EXPLICIT-ORDER", Actresses: actresses, Credits: credits}
-	processed, err := postProcessScraped(t.Context(), movie, []*models.ScraperResult{{Source: "raw", Actresses: []models.ActressInfo{{DMMID: 1}}}}, nil, &Config{}, nil, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
-	require.NoError(t, err)
+	processed := postProcessScraped(t.Context(), movie, []*models.ScraperResult{{Source: "raw", Actresses: []models.ActressInfo{{DMMID: 1}}}}, nil, &Config{}, nil, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
 	require.Equal(t, actresses, processed.Movie.Actresses)
 	require.Equal(t, credits, processed.Movie.Credits)
 }

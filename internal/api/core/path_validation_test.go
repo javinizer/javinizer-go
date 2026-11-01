@@ -1444,7 +1444,8 @@ func TestCanonicalizePath_SymlinkAncestor(t *testing.T) {
 	})
 
 	t.Run("symlink chain with missing leaf", func(t *testing.T) {
-		tempDir := t.TempDir()
+		tempDir := filepath.Join(t.TempDir(), "final-parent-mid")
+		require.NoError(t, os.Mkdir(tempDir, 0755))
 
 		// Create chain: final -> mid -> real
 		realDir := filepath.Join(tempDir, "real")
@@ -1462,10 +1463,11 @@ func TestCanonicalizePath_SymlinkAncestor(t *testing.T) {
 		got, err := canonicalizePath(missingPath)
 		require.NoError(t, err)
 		assert.True(t, filepath.IsAbs(got))
-		// All symlinks should be resolved to the real path
-		assert.Contains(t, got, "real")
-		assert.NotContains(t, got, "mid")
-		assert.NotContains(t, got, "final")
+		// Ancestor names may legitimately contain the symlink basenames.
+		// Compare the complete canonical target, not substrings of its parents.
+		resolvedRealDir, err := filepath.EvalSymlinks(realDir)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(resolvedRealDir, "nonexistent"), got)
 	})
 }
 

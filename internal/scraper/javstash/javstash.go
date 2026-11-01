@@ -339,9 +339,6 @@ func (s *scraper) parseScene(scene *scene, searchID string) (*models.ScraperResu
 				}
 			}
 		}
-		if result.SourceURL == "" && len(scene.URLs) > 0 {
-			result.SourceURL = scene.URLs[0].URL
-		}
 	}
 
 	return result, nil

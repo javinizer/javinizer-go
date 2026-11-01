@@ -305,8 +305,7 @@ func TestPostProcessEnrichmentKeepsConflictingDMMComponentsSeparate(t *testing.T
 	actors := seedEnrichmentIdentities(t, f, sharedRomanizationActors()...)
 	movie := &models.Movie{ID: "TEST-555", ContentID: "test555", Title: "Fixture", Actresses: []models.Actress{{DMMID: actors[0].DMMID, JapaneseName: "同名"}, {DMMID: actors[1].DMMID, JapaneseName: "同名"}}}
 	sources := []*models.ScraperResult{{Source: "dmm", Actresses: []models.ActressInfo{{DMMID: actors[0].DMMID, JapaneseName: "同名"}, {DMMID: actors[1].DMMID, JapaneseName: "同名"}}}}
-	result, err := postProcessScraped(t.Context(), movie, sources, nil, &Config{ActressDBEnabled: true, CollisionPolicy: "auto_keep"}, nil, database.NewActressRepository(f.db), ScrapeCmd{MovieID: "TEST-555"}, time.Now())
-	require.NoError(t, err)
+	result := postProcessScraped(t.Context(), movie, sources, nil, &Config{ActressDBEnabled: true, CollisionPolicy: "auto_keep"}, nil, database.NewActressRepository(f.db), ScrapeCmd{MovieID: "TEST-555"}, time.Now())
 	require.Len(t, result.Movie.Credits, 2)
 	for i, c := range result.Movie.Credits {
 		require.Equal(t, actors[i].DMMID, c.Scraped.DMMID)

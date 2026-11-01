@@ -149,21 +149,7 @@ func fetchWithBrowser(parentCtx context.Context, url string, timeout int, proxyP
 
 	// Prepare actions list
 	actions := []chromedp.Action{
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Set cookies for age verification
-			logging.Debug("DMM Browser: Setting age verification cookies")
-			expr := network.SetCookie("age_check_done", "1").
-				WithDomain(".dmm.co.jp")
-			if err := expr.Do(ctx); err != nil {
-				return fmt.Errorf("failed to set age_check_done cookie: %w", err)
-			}
-			expr = network.SetCookie("cklg", "ja").
-				WithDomain(".dmm.co.jp")
-			if err := expr.Do(ctx); err != nil {
-				return fmt.Errorf("failed to set cklg cookie: %w", err)
-			}
-			return nil
-		}),
+		chromedp.ActionFunc(setAgeVerificationCookies),
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body"),
 		chromedp.Sleep(3 * time.Second), // Wait for JavaScript rendering
@@ -186,4 +172,22 @@ func (s *scraper) fetchBrowserHTML(ctx context.Context, url string) (string, err
 		return s.browserFetch(ctx, url)
 	}
 	return fetchWithBrowser(ctx, url, s.browserConfig.Timeout, s.proxyProfile, s.getEnvLookup(), s.getFs())
+}
+
+// setAgeVerificationCookies configures the two browser session cookies before
+// navigation. Stop on the first protocol failure so its provenance is preserved.
+func setAgeVerificationCookies(ctx context.Context) error {
+	// Set cookies for age verification
+	logging.Debug("DMM Browser: Setting age verification cookies")
+	expr := network.SetCookie("age_check_done", "1").
+		WithDomain(".dmm.co.jp")
+	if err := expr.Do(ctx); err != nil {
+		return fmt.Errorf("failed to set age_check_done cookie: %w", err)
+	}
+	expr = network.SetCookie("cklg", "ja").
+		WithDomain(".dmm.co.jp")
+	if err := expr.Do(ctx); err != nil {
+		return fmt.Errorf("failed to set cklg cookie: %w", err)
+	}
+	return nil
 }
