@@ -156,6 +156,12 @@ jobs:
     - name: Run race detector tests
       run: make test-race
 
+    - name: Verify repeated genre identity under the race detector
+      run: >-
+        go test -race -short -p=1 -count=5 -timeout=240s
+        -run '^TestMovieRepeatedNewGenreResolvesOneDurableIdentity$'
+        ./internal/database
+
   # Job 3: Linting and code quality
   lint:
     name: Linting & Code Quality
@@ -245,7 +251,7 @@ jobs:
       run: >-
         go test -short -count=1 -v -covermode=atomic
         '-coverprofile=coverage-primary-undo-windows.out' ./internal/history ./cmd/javinizer/commands/actress ./internal/update ./internal/config ./internal/api/core
-        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts)$'
+        -run '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts|TestNativeWindowsUNCAdmissionContracts)$'
 
     - name: Archive native Windows primary Undo coverage
       if: ${{ !env.ACT }}
