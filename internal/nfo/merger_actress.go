@@ -58,10 +58,16 @@ type actressMatch struct {
 	partner     *models.Actress // non-nil if matched with an actress from the other source
 }
 
+// romanizedActressName keeps name components distinct even when a literal
+// separator occurs inside either component.
+type romanizedActressName struct {
+	first, last string
+}
+
 // actressLookupIndices holds pre-built lookup maps for cross-source matching.
 type actressLookupIndices struct {
 	byJpName        map[string][]int
-	byRomanizedName map[string][]int
+	byRomanizedName map[romanizedActressName][]int
 }
 
 // actressEntry is the internal representation used by deduplicateActresses.
@@ -83,7 +89,7 @@ type matchPair struct {
 func buildActressLookupIndices(entries []actressEntry, fromScraper bool) actressLookupIndices {
 	idx := actressLookupIndices{
 		byJpName:        make(map[string][]int),
-		byRomanizedName: make(map[string][]int),
+		byRomanizedName: make(map[romanizedActressName][]int),
 	}
 	for i, e := range entries {
 		if e.fromScraper != fromScraper {
@@ -96,7 +102,8 @@ func buildActressLookupIndices(entries []actressEntry, fromScraper bool) actress
 		fn := strings.ToLower(strings.TrimSpace(a.FirstName))
 		ln := strings.ToLower(strings.TrimSpace(a.LastName))
 		if fn != "" || ln != "" {
-			idx.byRomanizedName["name:"+fn+"|"+ln] = append(idx.byRomanizedName["name:"+fn+"|"+ln], i)
+			key := romanizedActressName{first: fn, last: ln}
+			idx.byRomanizedName[key] = append(idx.byRomanizedName[key], i)
 		}
 	}
 	return idx
@@ -122,7 +129,7 @@ func matchEntriesByDirection(entries []actressEntry, lookup actressLookupIndices
 		fn := strings.ToLower(strings.TrimSpace(actress.FirstName))
 		ln := strings.ToLower(strings.TrimSpace(actress.LastName))
 		if fn != "" || ln != "" {
-			for _, key := range []string{"name:" + fn + "|" + ln, "name:" + ln + "|" + fn} {
+			for _, key := range []romanizedActressName{{first: fn, last: ln}, {first: ln, last: fn}} {
 				for _, idx := range lookup.byRomanizedName[key] {
 					if !entries[idx].matched {
 						return idx
