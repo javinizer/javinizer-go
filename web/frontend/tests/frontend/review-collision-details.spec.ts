@@ -89,7 +89,7 @@ for (const width of [1280, 390]) {
 					part_suffix: '',
 					movie: {
 						id: 'IDENTITY-1',
-						content_id: 'identities',
+						code: 'identities',
 						title: 'Identity review fixture',
 						actresses: [identity],
 						credits: [],
@@ -97,11 +97,15 @@ for (const width of [1280, 390]) {
 				},
 			},
 		};
+		const collisionMovieIDs: string[] = [];
 		const mutations: unknown[] = [];
 		const unexpected: string[] = [];
 		await context.route('**/api/v1/**', async (route) => {
 			const request = route.request(),
 				path = new URL(request.url()).pathname;
+			if (request.method() === 'GET' && path === '/api/v1/actresses/collisions') {
+				collisionMovieIDs.push(new URL(request.url()).searchParams.get('movie_id') ?? '');
+			}
 			if (request.method() === 'POST' && path === '/api/v1/actresses/collisions/1/resolve') {
 				mutations.push(request.postDataJSON());
 				collisions = collisions.filter((row) => row.id !== 1);
@@ -139,6 +143,9 @@ for (const width of [1280, 390]) {
 			return route.fulfill({ status: 501, json: { error: 'Unexpected mocked API request' } });
 		});
 		await page.goto('/review/collision-details?view=detail');
+		// The public MovieView uses code, not the persistence-layer content_id.
+		// Prove this fixture reaches the real panel before checking its content.
+		await expect.poll(() => collisionMovieIDs).toContain('identities');
 		const explanation = page.getByText(/Matching names do not confirm/);
 		await expect(explanation).toBeVisible();
 		await expect(page.getByText('Unverified candidate', { exact: true })).toHaveCount(2);
