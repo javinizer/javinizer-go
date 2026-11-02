@@ -17,8 +17,8 @@ import (
 // every exit path. Only an empty directory created by this fixture is removed;
 // all database and anchor I/O stays on absolute paths while cwd is unavailable.
 func TestRevertRelativeLegacyPathsWithDeletedWorkingDirectoryCanRetry(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows does not permit removing the active working directory")
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux removed-working-directory contract: other platforms either refuse the removal or still resolve the removed directory")
 	}
 	ctx := t.Context()
 	root := t.TempDir()
