@@ -131,8 +131,8 @@ func (b *admissionBarrier) AdmitExclusive() (release func(), err error) {
 	return b.releaseExclusive, nil
 }
 
-// TryAdmitExclusive attempts the exclusive lease without blocking. Used by
-// DeleteJob's fail-fast discrimination (Running-holder ⇒ busy immediately).
+// TryAdmitExclusive attempts an unqueued exclusive lease without blocking.
+// Cleanup callers yield to registered delete and phase-start intent.
 func (b *admissionBarrier) TryAdmitExclusive() (release func(), ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

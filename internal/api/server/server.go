@@ -84,9 +84,6 @@ func acceptsHTML(c *gin.Context) bool {
 	for _, part := range parts {
 		part = strings.TrimSpace(strings.ToLower(part))
 		segments := strings.Split(part, ";")
-		if len(segments) == 0 {
-			continue
-		}
 
 		mediaType := strings.TrimSpace(segments[0])
 		if mediaType != "text/html" {

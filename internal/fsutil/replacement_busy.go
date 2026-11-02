@@ -242,7 +242,7 @@ func AcquireReplacementBusyEx(fs afero.Fs, dest string) (func(), string, error) 
 }
 
 func replacementBusyToken() string {
-	return fmt.Sprintf("pid=%d,time=%d", os.Getpid(), time.Now().UnixNano())
+	return fmt.Sprintf("pid=%d,time=%d%s", os.Getpid(), time.Now().UnixNano(), replacementBusyLiveSuffix)
 }
 
 func replacementBusyTakeoverPath(path string) (string, error) {
@@ -505,8 +505,9 @@ var replacementBusyReleaseBackoff = []time.Duration{10 * time.Millisecond, 25 * 
 // still parses as well-formed). Wave-38 (codex P2, PR#215 finding F4) moved
 // the release path to the take-aside unlink (a wedged release frees the
 // marker name BEFORE any unlink can wedge, so release no longer rewrites
-// anything); the decode arm stays for markers left on disk by pre-wave-38
-// wedged releases, which remain reclaimable through the takeover rules.
+// anything in its normal path). The decode arm also admits new creation-bound
+// one-byte releases when a native Windows reader prevents the take-aside;
+// both generations remain reclaimable through the same takeover rules.
 
 // releaseReplacementBusy removes the marker only when its bytes AND its
 // identity still carry our token — and never by the marker PATHNAME
@@ -532,6 +533,11 @@ var replacementBusyReleaseBackoff = []time.Duration{10 * time.Millisecond, 25 * 
 //     inert scratch sibling (the marker name is already free, so the release
 //     is achieved and no later claimant is ever busy-blocked) and is
 //     surfaced through a warn for manual cleanup.
+//
+// A typed Windows sharing refusal from TakeAside, without a foreign/vanished/
+// restore-failed classification, may instead publish the fixed release status
+// through a fresh creation-bound descriptor. The marker name remains until a
+// later claimant reclaims that explicitly released object; no path write occurs.
 func releaseReplacementBusy(fs afero.Fs, path, token string, claimed *BoundInstallIdentity) bool {
 	content, observed, ok := replacementBusyReleaseObserve(fs, path, claimed)
 	if !ok {
@@ -564,6 +570,15 @@ func releaseReplacementBusy(fs afero.Fs, path, token string, claimed *BoundInsta
 		},
 	})
 	if terr != nil {
+		if replacementBusyCanMarkReleased(terr) {
+			visible, releaseErr := markReplacementBusyReleased(fs, path, token, claimed)
+			if releaseErr != nil {
+				logging.Warnf("replacement busy marker %s release status (visible=%t): %v", path, visible, releaseErr)
+			}
+			if visible {
+				return true
+			}
+		}
 		logging.Warnf("replacement busy marker %s could not be taken aside for release (%v); nothing was removed by name — later claims arbitrate the marker normally", path, terr)
 		return false
 	}

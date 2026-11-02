@@ -256,9 +256,6 @@ func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ct
 	if err != nil {
 		return "", err
 	}
-	if err := e.ensureOutputWithinLimit(result); err != nil {
-		return "", err
-	}
 
 	// Step 2: Process regular tags
 	// Build replacement map to avoid quadratic string operations
@@ -622,15 +619,11 @@ func newModifierPipeline(e *Engine) []modifierStep {
 			return value, false
 		},
 
-		// Step 4: Translatable tags — truncation from parsed modifier or numeric fallback.
-		func(value, modifier, tagName string, parsed parsedModifier) (string, bool) {
+		// Step 4: Translatable tags — truncation from the parsed modifier.
+		func(value, _, tagName string, parsed parsedModifier) (string, bool) {
 			if e.translationResolver.isTranslatableTag(tagName) {
 				if parsed.truncationModifier != "" {
 					return e.truncate(value, parsed.truncationModifier), true
-				}
-				// For TITLE with a plain numeric modifier (not a language spec), truncate
-				if tagName == "TITLE" && e.translationResolver.isNumericModifier(modifier) {
-					return e.truncate(value, modifier), true
 				}
 			}
 			return value, false

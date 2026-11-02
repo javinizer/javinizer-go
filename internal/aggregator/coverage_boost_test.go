@@ -160,7 +160,7 @@ func TestGenreProcessor_ApplyReplacement_AutoAddDuplicateKeyError(t *testing.T) 
 	assert.Equal(t, "NewGenre", result, "identity mapping should be returned, duplicate key error ignored")
 }
 
-// --- genre_processor: loadCacheLocked with nil repo (line 165-167) ---
+// --- genre_processor: construction without an optional repository ---
 
 func TestGenreProcessor_LoadCacheLocked_NilRepoInNew(t *testing.T) {
 	cfg := &MetadataConfig{
@@ -168,7 +168,7 @@ func TestGenreProcessor_LoadCacheLocked_NilRepoInNew(t *testing.T) {
 	}
 	gp := NewGenreProcessor(cfg, nil)
 	require.NotNil(t, gp)
-	// loadCacheLocked is called internally when repo is nil → early return
+	// Construction skips the cache read when no repository is supplied.
 	// Verify the processor works correctly without a repo
 	assert.Equal(t, "Test", gp.applyReplacement("Test"))
 }

@@ -79,19 +79,15 @@ func New(lifetime context.Context, repo Repository, opts Options) (*Service, err
 	if opts.Enabled && (!filepath.IsAbs(opts.ArtifactDirectory) || filepath.Clean(opts.ArtifactDirectory) != opts.ArtifactDirectory) {
 		return nil, ErrInvalid
 	}
-	id, err := randomID()
-	if err != nil {
-		return nil, err
-	}
+	id := randomID()
 	return &Service{ctx: lifetime, repo: repo, opts: opts, ready: make(chan struct{}), wake: make(chan struct{}, 1), confirm: make(chan struct{}, 1), reload: make(chan struct{}, 1), readSlots: make(chan struct{}, 8), reviewSlots: make(chan struct{}, 4), tickets: make(map[string]ticket), workerID: "offline-" + id, now: time.Now, info: SourceInfo{Enabled: opts.Enabled, Code: "starting", MaxAgeSeconds: int64(opts.MaxAge / time.Second), RestartRequiredForConfigChanges: true}}, nil
 }
 
-func randomID() (string, error) {
+func randomID() string {
 	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b[:]), nil
+	// On Go 1.27+, crypto/rand.Read fills the buffer or irrecoverably terminates.
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 func validHex(s string) bool {
 	if len(s) != 64 {

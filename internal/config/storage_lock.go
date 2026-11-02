@@ -170,19 +170,9 @@ func acquireConfigFileLock(path string) (func(), error) {
 	for {
 		lockFile, err := osOpenFileFunc(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if err == nil {
-			if _, writeErr := lockFile.WriteString(token); writeErr != nil {
-				_ = lockFile.Close()
+			if err := writeSyncClose(lockFile, []byte(token), "config lock"); err != nil {
 				_ = os.Remove(lockPath)
-				return nil, fmt.Errorf("failed to write config lock: %w", writeErr)
-			}
-			if syncErr := lockFile.Sync(); syncErr != nil {
-				_ = lockFile.Close()
-				_ = os.Remove(lockPath)
-				return nil, fmt.Errorf("failed to sync config lock: %w", syncErr)
-			}
-			if closeErr := lockFile.Close(); closeErr != nil {
-				_ = os.Remove(lockPath)
-				return nil, fmt.Errorf("failed to close config lock: %w", closeErr)
+				return nil, err
 			}
 
 			var once sync.Once

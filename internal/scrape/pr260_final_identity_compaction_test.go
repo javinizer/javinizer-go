@@ -66,8 +66,7 @@ func TestCompactedEnrichedActressTranslationPersistsToResolvedIdentity(t *testin
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
 	movie := &models.Movie{ID: "COMPACT-PERSIST", ContentID: "compact-persist", Actresses: []models.Actress{{FirstName: "Alpha"}, {DMMID: 983031, FirstName: "Alpha", ThumbURL: "rich.jpg"}}}
-	processed, err := postProcessScraped(context.Background(), movie, []*models.ScraperResult{{Source: "rich", Actresses: []models.ActressInfo{{DMMID: 983031, FirstName: "Alpha", ThumbURL: "rich.jpg"}}}}, nil, &Config{TranslationEnabled: true}, indexedActressTranslator{}, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
-	require.NoError(t, err)
+	processed := postProcessScraped(context.Background(), movie, []*models.ScraperResult{{Source: "rich", Actresses: []models.ActressInfo{{DMMID: 983031, FirstName: "Alpha", ThumbURL: "rich.jpg"}}}}, nil, &Config{TranslationEnabled: true}, indexedActressTranslator{}, nil, ScrapeCmd{MovieID: movie.ID}, time.Now())
 	require.Len(t, processed.Movie.Actresses, 1)
 	require.Len(t, processed.Movie.Credits, 1)
 	saved, err := database.NewMovieRepository(db).UpsertWithTranslations(t.Context(), processed.Movie, nil, processed.TranslationOutput.ActressTranslations)

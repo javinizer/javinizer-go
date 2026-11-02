@@ -9,13 +9,24 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Windows process seams stay injectable so reuse-discrimination tests can feed
-// start-time evidence without owning a recycled PID on a live host.
-var replacementWindowsOpenProcess = func(pid int) (windows.Handle, error) {
-	return windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+// Keep each process operation's acquisition, query, and release functions
+// together. Local test adapters cannot mix synthetic handles with real APIs or
+// affect unrelated callers through process-global overrides.
+type replacementWindowsProcessOps struct {
+	openProcess     func(int) (windows.Handle, error)
+	getProcessTimes func(windows.Handle, *windows.Filetime, *windows.Filetime, *windows.Filetime, *windows.Filetime) error
+	closeHandle     func(windows.Handle) error
 }
-var replacementWindowsGetProcessTimes = windows.GetProcessTimes
-var replacementWindowsCloseHandle = windows.CloseHandle
+
+func realReplacementWindowsProcessOps() replacementWindowsProcessOps {
+	return replacementWindowsProcessOps{
+		openProcess: func(pid int) (windows.Handle, error) {
+			return windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+		},
+		getProcessTimes: windows.GetProcessTimes,
+		closeHandle:     windows.CloseHandle,
+	}
+}
 
 // Windows now answers the same owner-start-time question as the Linux /proc
 // seam (K4): K32 GetProcessTimes exposes the process creation stamp, and the
@@ -28,31 +39,40 @@ var replacementWindowsCloseHandle = windows.CloseHandle
 // FILETIME), the seam returns nil and classification retains the documented
 // liveness-only fallback: a positive liveness proof keeps the marker busy.
 func replacementProcessStartTimePlatform(pid int) *time.Time {
+	return replacementProcessStartTimeWithOps(pid, realReplacementWindowsProcessOps())
+}
+
+// Callers supply a complete bundle; no missing operation falls back to an OS API.
+func replacementProcessStartTimeWithOps(pid int, ops replacementWindowsProcessOps) *time.Time {
 	if pid <= 0 {
 		return nil
 	}
-	handle, err := replacementWindowsOpenProcess(pid)
+	handle, err := ops.openProcess(pid)
 	if err != nil {
 		return nil // liveness-only fallback: no handle, no start-time proof
 	}
-	defer func() { _ = replacementWindowsCloseHandle(handle) }()
+	defer func() { _ = ops.closeHandle(handle) }()
 	var creation, exit, kernel, user windows.Filetime
-	if err := replacementWindowsGetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+	if err := ops.getProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
 		return nil // liveness-only fallback: start time unobtainable
 	}
 	return replacementStartTimeFromUnixNano(creation.Nanoseconds())
 }
 
 func replacementProbePIDAliveAwarePlatform(pid int) replacementPIDLiveness {
+	return replacementProbePIDAliveAwareWithOps(pid, realReplacementWindowsProcessOps())
+}
+
+func replacementProbePIDAliveAwareWithOps(pid int, ops replacementWindowsProcessOps) replacementPIDLiveness {
 	if pid <= 0 {
 		return replacementPIDDead
 	}
 
-	handle, err := replacementWindowsOpenProcess(pid)
+	handle, err := ops.openProcess(pid)
 	if err == nil {
 		// A successfully opened process is the owner-liveness proof. A close
 		// failure does not change that proof and must not turn it into stale.
-		_ = replacementWindowsCloseHandle(handle)
+		_ = ops.closeHandle(handle)
 		return replacementPIDAlive
 	}
 	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {

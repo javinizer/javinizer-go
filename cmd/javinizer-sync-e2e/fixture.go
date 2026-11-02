@@ -192,9 +192,10 @@ func inspect(root string) error {
 			_ = rows.Close()
 			return err
 		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
+		// These fixed SELECTs use single-result SQLite rows. Exhausting Next
+		// closes them, and Err above reports any iteration/close failure.
+		// Retain the idempotent close without a second, unreachable error path.
+		_ = rows.Close()
 	}
 	if err := tx.Commit(); err != nil {
 		return err

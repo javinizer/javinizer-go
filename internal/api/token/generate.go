@@ -9,12 +9,12 @@ import (
 // TokenPrefix is the prefix prepended to every generated API token.
 const TokenPrefix = "jv_"
 
-// GenerateToken creates a new random API token, returning the full token, its 8-char display prefix, and any error.
+// GenerateToken creates a new random API token, returning the full token and its
+// 8-char display prefix. The error result is retained for API compatibility.
 func GenerateToken() (fullToken string, tokenPrefix string, err error) {
 	bytes := make([]byte, 16)
-	if _, err = rand.Read(bytes); err != nil {
-		return "", "", err
-	}
+	// On Go 1.27+, crypto/rand.Read fills the buffer or irrecoverably terminates.
+	rand.Read(bytes)
 	hexStr := hex.EncodeToString(bytes)
 	fullToken = TokenPrefix + hexStr
 	tokenPrefix = hexStr[:8]

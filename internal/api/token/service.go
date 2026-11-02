@@ -30,10 +30,7 @@ func (s *TokenService) Create(ctx context.Context, name string) (*models.ApiToke
 
 	hash := HashToken(fullToken)
 
-	id, err := generateUUID()
-	if err != nil {
-		return nil, "", err
-	}
+	id := generateUUID()
 
 	token := &models.ApiToken{
 		ID:          id,
@@ -77,12 +74,11 @@ func (s *TokenService) Regenerate(ctx context.Context, id string) (*models.ApiTo
 	return token, fullToken, nil
 }
 
-func generateUUID() (string, error) {
+func generateUUID() string {
 	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
+	// On Go 1.27+, crypto/rand.Read fills the buffer or irrecoverably terminates.
+	rand.Read(bytes)
 	bytes[6] = (bytes[6] & 0x0f) | 0x40
 	bytes[8] = (bytes[8] & 0x3f) | 0x80
-	return hex.EncodeToString(bytes[0:4]) + "-" + hex.EncodeToString(bytes[4:6]) + "-" + hex.EncodeToString(bytes[6:8]) + "-" + hex.EncodeToString(bytes[8:10]) + "-" + hex.EncodeToString(bytes[10:]), nil
+	return hex.EncodeToString(bytes[0:4]) + "-" + hex.EncodeToString(bytes[4:6]) + "-" + hex.EncodeToString(bytes[6:8]) + "-" + hex.EncodeToString(bytes[8:10]) + "-" + hex.EncodeToString(bytes[10:])
 }

@@ -114,9 +114,11 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 	// Normalize filter for case-insensitive matching
 	filterLower := strings.ToLower(filter)
 
-	// Walk the directory tree
+	// Walk errors are accumulated in result.Errors by this callback. Its only
+	// other returns are SkipDir and SkipAll, which WalkDir normalizes to nil.
+	// Admission errors above remain fatal; traversal returns a partial result.
 	fileCount := 0
-	err = filepath.WalkDir(absPath, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(absPath, func(path string, d os.DirEntry, err error) error {
 		// Check context for timeout/cancellation (check every 100 files for performance)
 		fileCount++
 		if fileCount%100 == 0 {
@@ -192,10 +194,6 @@ func (s *Scanner) ScanWithFilter(ctx context.Context, rootPath string, maxFiles 
 
 		return nil
 	})
-
-	if err != nil {
-		return nil, err
-	}
 
 	return result, nil
 }

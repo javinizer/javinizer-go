@@ -1086,9 +1086,7 @@ func TestRuntimeState_Shutdown_WithActiveHub(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// token_store — generateToken error path (untestable directly without
-// monkey-patching crypto/rand, but we can test Create with the happy path
-// to ensure coverage of the normal flow)
+// token_store — multiple generated tokens remain nonempty and distinct
 // ---------------------------------------------------------------------------
 
 func TestTokenStore_CreateMultipleTokens(t *testing.T) {

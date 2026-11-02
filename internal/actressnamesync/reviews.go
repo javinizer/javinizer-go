@@ -86,10 +86,7 @@ func (s *Service) ReviewAt(ctx context.Context, principal string, choices []data
 		}
 		response.Proposals = append(response.Proposals, ReviewProposal{ActressID: p.ActressID, Source: sourceChoice(e), BeforeName: p.BeforeName, AfterName: p.AfterName})
 	}
-	nonce, err := randomID()
-	if err != nil {
-		return nil, err
-	}
+	nonce := randomID()
 	response.ReviewID = nonce
 	s.mu.Lock()
 	defer s.mu.Unlock()

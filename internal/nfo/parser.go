@@ -276,11 +276,9 @@ func parseDate(dateStr string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("empty date string")
 	}
 
-	// Try RFC3339 formats first (most strict, timezone-aware)
+	// RFC3339 parsing also accepts fractional seconds (including subnanosecond
+	// input, truncated by time.Parse), so a separate RFC3339Nano attempt is redundant.
 	if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
-		return t, nil
-	}
-	if t, err := time.Parse(time.RFC3339Nano, dateStr); err == nil {
 		return t, nil
 	}
 

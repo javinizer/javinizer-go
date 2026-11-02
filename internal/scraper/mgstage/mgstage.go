@@ -272,10 +272,7 @@ func (s *scraper) findProductInSearchResults(html string, id string) string {
 			return
 		}
 
-		href, exists := sel.Attr("href")
-		if !exists {
-			return
-		}
+		href, _ := sel.Attr("href") // The selector guarantees attribute presence.
 
 		hrefID := extractIDFromURL(href)
 		if hrefID != "" && normalizeIDForSearch(hrefID) == normalizedID {

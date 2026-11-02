@@ -8,8 +8,7 @@ import (
 
 func TestGenerateUUID_Uncovered(t *testing.T) {
 	t.Run("generates valid UUID format", func(t *testing.T) {
-		id, err := generateUUID()
-		assert.NoError(t, err)
+		id := generateUUID()
 		assert.Len(t, id, 36, "UUID should be 36 chars with dashes")
 		// UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
 		assert.Equal(t, byte('-'), id[8])
@@ -25,8 +24,7 @@ func TestGenerateUUID_Uncovered(t *testing.T) {
 	t.Run("generates unique IDs", func(t *testing.T) {
 		ids := make(map[string]bool)
 		for i := 0; i < 100; i++ {
-			id, err := generateUUID()
-			assert.NoError(t, err)
+			id := generateUUID()
 			assert.False(t, ids[id], "UUID should be unique")
 			ids[id] = true
 		}

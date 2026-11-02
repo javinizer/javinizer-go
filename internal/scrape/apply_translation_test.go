@@ -324,8 +324,7 @@ func TestPostProcessScraped_TranslationEnabledStampsWarning(t *testing.T) {
 	cfg := &Config{TranslationEnabled: true}
 	movie := &models.Movie{ID: "PP-1", Title: "t"}
 
-	result, err := postProcessScraped(context.Background(), movie, nil, nil, cfg, stub, nil, ScrapeCmd{MovieID: "PP-1"}, time.Now())
-	require.NoError(t, err)
+	result := postProcessScraped(context.Background(), movie, nil, nil, cfg, stub, nil, ScrapeCmd{MovieID: "PP-1"}, time.Now())
 	require.NotNil(t, result)
 	assert.Equal(t, "Translation (openai): rate limited", result.TranslationWarning)
 	assert.Equal(t, "rate_limited", result.TranslationWarningCode)

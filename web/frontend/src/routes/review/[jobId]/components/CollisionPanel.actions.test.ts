@@ -52,7 +52,7 @@ beforeEach(() => vi.resetAllMocks());
 describe('CollisionPanel server-derived actions', () => {
 	it('does not render backend-invalid actions for an unverified identity link', async () => {
 		const view = renderPanel([collision({})]);
-		await waitFor(() => expect(view.getByRole('button', { name: /Adopt as truth/ })).toBeTruthy());
+		await waitFor(() => expect(view.getByRole('button', { name: /Verify this identity/ })).toBeTruthy());
 		expect(view.getByRole('button', { name: 'Relink' })).toBeTruthy();
 		expect(view.queryByRole('button', { name: /Keep catalog/ })).toBeNull();
 		expect(view.queryByRole('button', { name: 'Alias' })).toBeNull();
@@ -144,7 +144,7 @@ describe('CollisionPanel server-derived actions', () => {
 				},
 			},
 		);
-		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await fireEvent.click(await view.findByRole('button', { name: /Verify this identity/ }));
 		await view.rerender({ movieContentId: 'movie-2', onResolved });
 		const { ApiError } = await import('$lib/api/clients/common');
 		rejectResolution(new ApiError('collision is not open', undefined, null, 409));
@@ -182,7 +182,7 @@ it.each(['success', 'stale', 'failure'])(
 		const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart, onResolved }, {
 			wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
 		});
-		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await fireEvent.click(await view.findByRole('button', { name: /Verify this identity/ }));
 		await waitFor(() => expect(finish).toHaveBeenCalledOnce());
 		expect(onMutationStart).toHaveBeenCalledWith('collision:1', 'movie-1');
 		expect(finish).toHaveBeenCalledWith(outcome === 'failure' ? error : outcome === 'stale' ? undefined : null);
@@ -200,7 +200,7 @@ it.each(['success', 'failure'])(
 		const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart, onResolved }, {
 			wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
 		});
-		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await fireEvent.click(await view.findByRole('button', { name: /Verify this identity/ }));
 		await waitFor(() => expect(resolveCollision).toHaveBeenCalledOnce());
 		view.unmount();
 		complete(outcome === 'success' ? { resolved: true, remaining_open: 0 } : new Error('Old failure'));
@@ -216,7 +216,7 @@ it('honors a denied mutation start for direct and relink actions', async () => {
 	const view = render(CollisionPanel, { movieContentId: 'movie-1', onMutationStart }, {
 		wrapper: QueryClientWrapper, wrapperProps: { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
 	});
-	await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+	await fireEvent.click(await view.findByRole('button', { name: /Verify this identity/ }));
 	await fireEvent.click(view.getByRole('button', { name: 'Relink' }));
 	await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
 	await fireEvent.click(view.getByRole('button', { name: 'Confirm relink' }));
@@ -237,7 +237,7 @@ it('guards queued direct and relink clicks even before disabled DOM state catche
 	await fireEvent.click(await view.findByRole('button', { name: 'Relink' }));
 	await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
 	await view.rerender({ disabled: true });
-	for (const name of [/Adopt as truth/, 'Confirm relink']) {
+	for (const name of [/Verify this identity/, 'Confirm relink']) {
 		const button = view.getByRole('button', { name }) as HTMLButtonElement;
 		// Model a queued event against stale DOM: the handler must enforce the
 		// current parent gate independently of the button's disabled attribute.
@@ -246,4 +246,84 @@ it('guards queued direct and relink clicks even before disabled DOM state catche
 	}
 	expect(onMutationStart).not.toHaveBeenCalled();
 	expect(resolveCollision).not.toHaveBeenCalled();
+});
+
+describe('CollisionPanel identity explanation', () => {
+	it('explains equal names without hiding the conflict or mutating identities', async () => {
+		const view = renderPanel([collision({})]);
+		await view.findByText(/Matching names do not confirm/);
+		expect(view.getByText(/Current linked identity #7/)).toBeTruthy();
+		expect(view.queryByText('Catalog says')).toBeNull();
+		expect(view.getByRole('button', { name: /Verify this identity/ })).toBeTruthy();
+		expect(resolveCollision).not.toHaveBeenCalled();
+	});
+
+	it('keeps long thumbnail evidence readable instead of truncating the difference', async () => {
+		const reported = 'https://images.invalid/' + 'same-prefix/'.repeat(30) + 'reported.jpg';
+		const canonical = 'https://images.invalid/' + 'same-prefix/'.repeat(30) + 'catalog.jpg';
+		const view = renderPanel([
+			collision({
+				field: 'reported_thumb_url',
+				reported_value: reported,
+				canonical_value: canonical,
+			}),
+		]);
+		const value = await view.findByText(reported);
+		expect(value.classList.contains('truncate')).toBe(false);
+		expect(view.getByText(canonical).classList.contains('truncate')).toBe(false);
+		expect(view.queryByText(/Matching names do not confirm/)).toBeNull();
+	});
+});
+
+it('distinguishes same-name identities and keeps the selected Japanese name and DMM ID visible', async () => {
+	const targets = [
+		{
+			id: 8,
+			dmm_id: 1109243,
+			first_name: 'Nagisa',
+			last_name: 'Hazuki',
+			japanese_name: '葉月なぎさ',
+			verified: true,
+		},
+		{
+			id: 9,
+			dmm_id: 1034095,
+			first_name: 'Nagisa',
+			last_name: 'Hazuki',
+			japanese_name: '葉月渚',
+			verified: true,
+		},
+	];
+	searchActresses.mockResolvedValue(targets);
+	resolveCollision.mockResolvedValue({ resolved: true, remaining_open: 0 });
+	const view = renderPanel([
+		collision({
+			reported_value: 'Hazuki Nagisa',
+			canonical_value: 'Hazuki Nagisa',
+			current_actress: {
+				id: 7,
+				dmm_id: 0,
+				first_name: 'Nagisa',
+				last_name: 'Hazuki',
+				japanese_name: '',
+				verified: false,
+			},
+		}),
+	]);
+	await view.findByText('Unverified candidate');
+	expect(view.getByText('Unknown')).toBeTruthy();
+	await fireEvent.click(view.getByRole('button', { name: 'Relink' }));
+	const first = await view.findByRole('button', { name: /Hazuki Nagisa #8.*葉月なぎさ.*1109243/ });
+	expect(view.getByRole('button', { name: /Hazuki Nagisa #9.*葉月渚.*1034095/ })).toBeTruthy();
+	await fireEvent.click(first);
+	expect(view.getByText('Selected target: Hazuki Nagisa #8')).toBeTruthy();
+	expect(view.getAllByText('葉月なぎさ')).toHaveLength(2);
+	expect(view.getAllByText('1109243')).toHaveLength(2);
+	await fireEvent.click(view.getByRole('button', { name: 'Confirm relink' }));
+	await waitFor(() =>
+		expect(resolveCollision).toHaveBeenCalledWith(1, {
+			resolution: 'reassign',
+			target_actress_id: 8,
+		}),
+	);
 });

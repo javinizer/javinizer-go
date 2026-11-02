@@ -190,9 +190,12 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 	await searchInput.fill(`PR260${runTag}`);
 	await chooser.getByRole('button', { name: 'Search', exact: true }).click();
 	const targetOption = chooser.getByRole('button', {
-		name: new RegExp(`#${relinkTarget.id}$`),
+		// Identity details follow the ID; keep the name and exact ID boundary.
+		name: new RegExp(`^Relinked PR260${runTag} #${relinkTarget.id}(?:\\s|$)`),
 	});
 	await expect(targetOption).toContainText(`Relinked PR260${runTag}`);
+	await expect(targetOption.getByText(`PR260${runTag} Relinked`, { exact: true })).toBeVisible();
+	await expect(targetOption.getByText(String(relinkTarget.dmm_id), { exact: true })).toBeVisible();
 	await targetOption.click();
 	const resolveResponsePromise = page.waitForResponse(
 		(response) =>

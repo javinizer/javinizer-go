@@ -218,6 +218,15 @@
 	};
 </script>
 
+{#snippet identityDetails(actress: Actress)}
+	<span class="grid grid-cols-1 gap-x-3 gap-y-1 text-xs sm:grid-cols-2">
+		<span><span class="block text-muted-foreground">First name</span><span class="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{actress.first_name || '—'}</span></span>
+		<span><span class="block text-muted-foreground">Last name</span><span class="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{actress.last_name || '—'}</span></span>
+		<span><span class="block text-muted-foreground">Japanese name</span><span class="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{actress.japanese_name || '—'}</span></span>
+		<span><span class="block text-muted-foreground">DMM ID</span><span class="block">{actress.dmm_id && actress.dmm_id > 0 ? actress.dmm_id : 'Unknown'}</span></span>
+	</span>
+{/snippet}
+
 {#if showEmpty || openCollisions.length > 0 || resolveError || queryError || collisionsQuery.isFetching}
 	<Card class="border-destructive/40 p-5 space-y-3">
 		<div class="flex items-center gap-2 font-medium">
@@ -263,16 +272,31 @@
 								{collision.sources_seen || 'unknown source'}
 							</span>
 						</div>
-						<div class="grid grid-cols-2 gap-2 text-xs">
+						{#if collision.field === 'identity_link'}
+							<p class="text-xs text-muted-foreground">This conflict is about which actress this credit belongs to. Matching names do not confirm the same identity. Review the current linked identity, or relink to a verified actress.</p>
+						{/if}
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
 							<div class="rounded bg-muted/50 p-2">
 								<p class="text-muted-foreground">Scrape reported</p>
-								<p class="truncate font-medium">{collision.reported_value || '—'}</p>
+								<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-medium">{collision.reported_value || '—'}</p>
 							</div>
 							<div class="rounded bg-muted/30 p-2">
-								<p class="text-muted-foreground">Catalog says</p>
-								<p class="truncate font-medium">{collision.canonical_value || '—'}</p>
+								<p class="text-muted-foreground">{collision.field === 'identity_link' ? 'Linked identity name' : 'Catalog says'}</p>
+								<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-medium">{collision.canonical_value || '—'}</p>
 							</div>
 						</div>
+						<div class="space-y-2 rounded border border-border/70 p-2">
+							<p class="text-xs font-medium">Current linked identity #{collision.current_actress_id}</p>
+							{#if collision.current_actress}
+							 <p class="text-xs text-muted-foreground">{collision.current_actress.verified ? 'Verified identity' : 'Unverified candidate'}</p>
+							 {@render identityDetails(collision.current_actress)}
+							{:else}
+							 <p class="text-xs text-muted-foreground">Identity details unavailable.</p>
+							{/if}
+						</div>
+						{#if collision.field === 'identity_link' && collision.allowed_resolutions.includes('adopt_canonical')}
+							<p class="text-xs text-muted-foreground">Verify this identity marks the linked identity as verified and applies this credit’s reported name and thumbnail when present. Relink instead if it belongs to an existing verified actress.</p>
+						{/if}
 						<div class="flex flex-wrap gap-2 pt-1" aria-label="Available collision resolutions">
 							{#if collision.allowed_resolutions.includes('keep_identity')}
 								<Button
@@ -293,7 +317,7 @@
 									onclick={() => resolve(collision, 'adopt_canonical')}
 								>
 									{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
-									<Tag class="size-3.5" /> Adopt as truth
+									<Tag class="size-3.5" /> {collision.field === 'identity_link' ? 'Verify this identity' : 'Adopt as truth'}
 								</Button>
 							{/if}
 							{#if collision.allowed_resolutions.includes('adopt_alias')}
@@ -358,6 +382,7 @@
 									<p class="rounded border border-primary/40 bg-primary/5 px-3 py-2 text-sm" aria-live="polite">
 										Selected target: {formatActressName(selectedTarget)} #{selectedTarget.id}
 									</p>
+									{@render identityDetails(selectedTarget)}
 								{/if}
 								{#if !searchLoading && !searchError && searchResults.length === 0}
 									<p class="text-sm text-muted-foreground">No eligible verified actresses found.</p>
@@ -372,6 +397,7 @@
 													onclick={() => (selectedTarget = actress)}
 												>
 													{formatActressName(actress)} <span class="text-muted-foreground">#{actress.id}</span>
+													{@render identityDetails(actress)}
 												</button>
 											</li>
 										{/each}
