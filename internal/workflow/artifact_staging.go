@@ -419,6 +419,15 @@ func (s *artifactStage) cleanup() {
 	}
 	s.root = quarantine
 	if !artifactStageDirMatches(s.fs, s.root, stagedIdentity) || artifactStageDirStillNamed(s.fs, originalRoot) {
+		if restored, ok := artifactStageRestoreOriginalAfterIdentityDrift(s.fs, s.root, originalRoot); ok {
+			s.root = originalRoot
+			if readArtifactStageProof(s.fs, s.root) {
+				if err := removeArtifactTreeWithRetry(s.fs, s.root, restored); err == nil {
+					removeArtifactStageProofAfterTree(s.fs, proofSrc)
+					return
+				}
+			}
+		}
 		_ = s.fs.Remove(proofSrc)
 		logging.Warnf("artifact staging cleanup retained %s: quarantined root identity changed during the rename", s.root)
 		return
