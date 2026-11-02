@@ -259,7 +259,7 @@
 				class={activeTab === 'movies' ? 'space-y-6' : ''}
 			>
 				{#if activeTab === 'movies' && s.currentMovie && s.currentResult}
-					{#if !s.isUpdateMode && s.canOrganize && s.getEffectiveOperationMode() !== 'metadata-artwork'}
+					{#if !s.organizing && !s.isUpdateMode && s.canOrganize && s.getEffectiveOperationMode() !== 'metadata-artwork'}
 						<VideoCollisionPanel report={s.videoCollisionReport} pending={s.videoCollisionPending} error={s.videoCollisionError} blocked={s.videoCollisionBlocked} decisions={s.videoCollisionDecisions} onReview={s.reviewVideoCollisions} onDecide={s.decideVideoCollision} />
 					{/if}
 					<ReviewHeader

@@ -404,3 +404,68 @@ for (const reply of ['rejected', 'missing'] as const) {
 		expect(state.unexpected).toEqual([]);
 	});
 }
+
+
+test('destination review is hidden during Apply and returns after failure', async ({ page, context }) => {
+	const state = await mockAPI(context);
+	let release!: () => void;
+	const pending = new Promise<void>((resolve) => { release = resolve; });
+	await page.route(`**/api/v1/batch/${JOB_ID}/organize`, async (route) => {
+		await pending;
+		await route.fallback();
+	});
+	await page.goto(`/review/${JOB_ID}?view=detail`);
+	await configure(page, 'move');
+	const panel = page.getByTestId('video-collision-review');
+	await expect(panel).toBeVisible();
+	await expect(apply(page)).toBeEnabled();
+	const reviewsBeforeApply = state.videoReviews.length;
+	try {
+		await apply(page).click();
+		await expect(page.getByRole('button', { name: /^Organizing/ }).first()).toBeDisabled();
+		await expect(panel).toHaveCount(0);
+		expect(state.videoReviews).toHaveLength(reviewsBeforeApply);
+	} finally {
+		release();
+	}
+	await expect(retry(page)).toBeEnabled();
+	await expect(panel).toBeVisible();
+	await expect(panel.getByRole('button', { name: 'Review / refresh destinations', exact: true })).toBeEnabled();
+	expect(state.posts).toHaveLength(1);
+	expect(state.unexpected).toEqual([]);
+});
+
+
+test('destination review stays hidden when resuming an active Apply with a valid receipt', async ({ page, context }) => {
+	const state = await mockAPI(context);
+	const active = job(1);
+	active.status = 'running';
+	delete active.completed_at;
+	active.completed = 1;
+	active.failed = 0;
+	active.results[SOURCE].status = 'completed';
+	delete active.results[SOURCE].error;
+	delete active.results[SOURCE].error_code;
+	const isJobDetail = (url: URL) => url.pathname === `/api/v1/batch/${JOB_ID}`;
+	await page.route(isJobDetail, (route) => route.fulfill({ json: active }));
+	await page.addInitScript(({ key, jobId, source, destination }) => {
+		sessionStorage.setItem(key, JSON.stringify({
+			jobId, operation: 'organize', preApplyGeneration: 0, acceptedApplyGeneration: 1,
+			destination, operationMode: 'organize', organizeOperation: 'move',
+			skipNfo: false, skipDownload: false, failed: {}, succeeded: [], eligibleFilePaths: [source],
+		}));
+	}, { key: KEY, jobId: JOB_ID, source: SOURCE, destination: DESTINATION });
+	// Detail requests include ?include_data=true. Verify this fixture was served,
+	// rather than silently falling through to the default completed generation 0.
+	const loaded = page.waitForResponse((response) =>
+		response.request().method() === 'GET' && isJobDetail(new URL(response.url())),
+	);
+	await page.goto(`/review/${JOB_ID}?view=detail`);
+	expect(await (await loaded).json()).toMatchObject({ status: 'running', apply_generation: 1 });
+	await expect(page.getByRole('heading', { name: 'Organizing Files...', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^Organizing/ }).first()).toBeDisabled();
+	await expect(page.getByTestId('video-collision-review')).toHaveCount(0);
+	expect(state.posts).toEqual([]);
+	expect(JSON.parse((await recovery(page))!)).toMatchObject({ acceptedApplyGeneration: 1 });
+	expect(state.unexpected).toEqual([]);
+});
