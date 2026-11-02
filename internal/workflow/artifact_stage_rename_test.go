@@ -74,7 +74,7 @@ func (f *renameUnstableFS) Rename(oldname, newname string) error {
 	return nil
 }
 
-func TestArtifactStageCleanupRetainsProofWhenRenameChangesIdentity(t *testing.T) {
+func TestArtifactStageCleanupRetainsTreeAndProofWhenRenameChangesIdentity(t *testing.T) {
 	parent := t.TempDir()
 	fs := newRenameUnstableFS(afero.NewOsFs())
 	root := seedStagingRoot(t, fs, parent, nil)
@@ -84,19 +84,20 @@ func TestArtifactStageCleanupRetainsProofWhenRenameChangesIdentity(t *testing.T)
 
 	entries, err := afero.ReadDir(fs, parent)
 	require.NoError(t, err)
-	quarantined := ""
+	retained := ""
 	for _, entry := range entries {
 		if entry.IsDir() && strings.Contains(entry.Name(), artifactStageQuarantineMark) {
-			quarantined = filepath.Join(parent, entry.Name())
+			retained = filepath.Join(parent, entry.Name())
 		}
 	}
-	require.NotEmpty(t, quarantined, "a drifted tree must stay under a quarantine name, not be deleted")
+	require.NotEmpty(t, retained, "a drifted tree must stay under a quarantine name, never be deleted")
 
-	exists, err := afero.DirExists(fs, quarantined)
+	exists, err := afero.DirExists(fs, retained)
 	require.NoError(t, err)
-	assert.True(t, exists, "a tree whose identity cannot be re-proven must be retained, never deleted")
+	assert.True(t, exists, "a tree whose identity cannot be re-proven must be retained")
 
-	_, proofErr := fs.Stat(quarantined + ".proof")
-	assert.NoError(t, proofErr,
-		"the completed proof must survive retention so a later cleanup can still reclaim the tree")
+	proof, err := afero.Exists(fs, root+artifactStageProofSuffix)
+	require.NoError(t, err)
+	assert.True(t, proof,
+		"the completed proof written before the rename must survive so the evidence is not destroyed")
 }

@@ -428,15 +428,6 @@ func (s *artifactStage) cleanup() {
 		// its completed proof and name the remedy instead of destroying the only
 		// evidence a later cleanup could use. Carry the completed proof beside
 		// the quarantined name so the retained tree keeps its ownership evidence.
-		if _, authenticated := readArtifactStageAuthenticatedManifest(s.fs, s.root); authenticated {
-			if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
-				if err := s.fs.Rename(proofSrc, artifactStageProofPath(s.root)); err != nil {
-					writeArtifactStageProof(s.fs, s.root)
-				}
-			} else {
-				writeArtifactStageProof(s.fs, s.root)
-			}
-		}
 		logging.Warnf("artifact staging cleanup retained %s: directory identity changed during the rename (path-derived inode; remount the filesystem with inodecalc=devino-hash to allow cleanup)", s.root)
 		return
 	}
