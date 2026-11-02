@@ -225,12 +225,12 @@ class AdmissionTests(unittest.TestCase):
     def test_push_and_merge_provenance(self):
         a, b, c, tree = 'a' * 40, 'b' * 40, 'c' * 40, 'd' * 40
         push = {'checkout': a, 'tree': tree, 'parents': [b], 'event': 'push', 'head': a, 'base': ''}
-        m.validate_provenance(push, a, 'push', a, '')
+        m.validate_provenance(push, a, 'push', a, '', lambda *_: False)
         merge = dict(push, checkout=c, parents=[b, a], event='pull_request', base=b)
-        m.validate_provenance(merge, c, 'pull_request', a, b)
+        m.validate_provenance(merge, c, 'pull_request', a, b, lambda *_: False)
         for bad in [dict(merge, parents=[a, b]), dict(merge, head=b), dict(merge, tree=''), dict(merge, checkout=a)]:
             with self.assertRaises(ValueError):
-                m.validate_provenance(bad, c, 'pull_request', a, b)
+                m.validate_provenance(bad, c, 'pull_request', a, b, lambda *_: False)
 
     def test_real_asset_shape_hash_and_identity_required(self):
         with tempfile.TemporaryDirectory() as td:

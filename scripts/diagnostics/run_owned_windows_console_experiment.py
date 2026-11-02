@@ -195,7 +195,7 @@ def run(command, cwd, evidence, label, env=None, timeout=900):
     return out
 
 
-def validate_provenance(info, checkout, event, head, base):
+def validate_provenance(info, checkout, event, head, base, is_ancestor):
     if any(not SHA.fullmatch(value) for value in (checkout, head, info.get('tree', ''))):
         raise ValueError('invalid checkout/head/tree identity')
     if info.get('checkout') != checkout or info.get('event') != event or info.get('head') != head or info.get('base') != base:
@@ -204,8 +204,14 @@ def validate_provenance(info, checkout, event, head, base):
     if not isinstance(parents, list) or any(not SHA.fullmatch(p) for p in parents):
         raise ValueError('malformed raw commit parents')
     if event == 'pull_request':
-        if not SHA.fullmatch(base) or parents != [base, head]:
-            raise ValueError('tested merge must contain declared base/head as ordered parents')
+        # The runner records the base tip from the triggering event, while the
+        # merge commit is rebuilt whenever the base branch advances. Comparing
+        # for equality therefore fails on any pull request whose base moved
+        # during the run, even though the tested merge is a faithful descendant.
+        if not SHA.fullmatch(base) or len(parents) != 2 or parents[1] != head:
+            raise ValueError('tested merge must contain declared head as second parent')
+        if parents[0] != base and not is_ancestor(base, parents[0]):
+            raise ValueError('tested merge must descend from declared base')
     elif event != 'push' or checkout != head or base:
         raise ValueError('only bound push or pull_request contexts are admitted')
 
@@ -391,6 +397,15 @@ def verify_records(records, manifest):
             raise ValueError('exact child output/exit/lifecycle contract not met')
 
 
+def base_is_ancestor(repo, ancestor, descendant):
+    result = subprocess.run(['git', 'merge-base', '--is-ancestor', ancestor, descendant],
+                            cwd=repo, env=clean_git_env(), stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, check=False)
+    if result.returncode not in (0, 1):
+        raise RuntimeError('base ancestry probe failed')
+    return result.returncode == 0
+
+
 def provenance(args, evidence):
     repo = args.repo.resolve(strict=True)
     actual = run(['git', 'rev-parse', 'HEAD'], repo, evidence, 'checkout').decode('ascii').strip()
@@ -399,7 +414,8 @@ def provenance(args, evidence):
     info = {'checkout': actual, 'tree': next(s[5:] for s in headers if s.startswith('tree ')),
             'parents': [s[7:] for s in headers if s.startswith('parent ')],
             'event': args.event, 'head': args.head, 'base': args.base}
-    validate_provenance(info, args.checkout, args.event, args.head, args.base)
+    validate_provenance(info, args.checkout, args.event, args.head, args.base,
+                        lambda ancestor, descendant: base_is_ancestor(repo, ancestor, descendant))
     return info
 
 
