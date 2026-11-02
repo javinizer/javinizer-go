@@ -667,8 +667,20 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 				videoCollisionSignature !== currentVideoCollisionSignature())
 		);
 	}
+	function setOrganizing(next: boolean) {
+		if (next && !organizing) {
+			// A preflight response belongs to the editable review phase, never the
+			// running Apply (or a later retry). Invalidate synchronously, before
+			// a queued promise callback can publish its stale report or error.
+			videoCollisionEpoch += 1;
+			videoCollisionPending = false;
+			videoCollisionAttemptSignature = '';
+			videoCollisionSignature = '';
+		}
+		organizing = next;
+	}
 	async function reviewVideoCollisions() {
-		if (editedMovies.size > 0) return;
+		if (organizing || editedMovies.size > 0) return;
 		const targetJobId = jobId;
 		const epoch = ++videoCollisionEpoch;
 		videoCollisionPendingJob = targetJobId;
@@ -703,6 +715,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 		}
 	}
 	async function decideVideoCollision(item: VideoCollision, policy: 'fail' | 'skip' | 'replace') {
+		if (organizing) return;
 		const selected = item.selected_source
 			? videoCollisionReport?.items.find(
 					(candidate) => candidate.source === item.selected_source && !candidate.selected_source,
@@ -1528,7 +1541,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 			organizeStatus = nextStatus;
 		},
 		setOrganizing: (nextOrganizing) => {
-			organizing = nextOrganizing;
+			setOrganizing(nextOrganizing);
 		},
 		setOrganizeProgress: (nextProgress) => {
 			// Monotonic high-water guard: the organize bar must never move backward
@@ -2613,7 +2626,7 @@ export function createReviewState(getJobId: () => string, returnToJobSource: () 
 			return organizing;
 		},
 		set organizing(v) {
-			organizing = v;
+			setOrganizing(v);
 		},
 		get destinationPath() {
 			return destinationPath;
