@@ -4233,8 +4233,8 @@ paths:
       - actresses
   /api/v1/actresses/candidates/{id}/dismiss:
     post:
-      description: Reversibly hides an unverified candidate from the pending queue without
-        changing actor or movie data.
+      description: Reversibly hides an unverified candidate from the pending queue
+        without changing actor or movie data.
       parameters:
       - description: Candidate ID
         in: path
