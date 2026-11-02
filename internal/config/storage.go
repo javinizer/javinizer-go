@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -138,49 +139,43 @@ func (cs *ConfigStorage) Save(cfg *Config, path string) error {
 	}
 	defer unlock()
 
+	return cs.writeConfigLocked(cfg, path, func(path string) ([]byte, error) {
+		return afero.ReadFile(cs.fs, path)
+	}, defaultYAMLEncoderFactory)
+}
+
+// writeConfigLocked owns the full-save merge/encode/publication protocol. The
+// caller owns directory creation and the lock. readFile preserves the caller's
+// filesystem reader; factory is per-call so encoding failures need no global hook.
+func (cs *ConfigStorage) writeConfigLocked(cfg *Config, path string, readFile func(string) ([]byte, error), factory func(io.Writer) yamlEncoder) error {
 	targetDoc, err := configToYAMLDocument(cfg)
 	if err != nil {
 		return err
 	}
 
-	var data []byte
-	existingData, readErr := afero.ReadFile(cs.fs, path)
+	// Convert before reading, and preserve comments and unknown keys when the
+	// existing document is valid. Malformed YAML falls back to canonical output.
+	doc := targetDoc
+	existingData, readErr := readFile(path)
 	if readErr == nil {
-		existingDoc, parseErr := parseYAMLDocument(existingData)
-		if parseErr == nil {
-			mergedDoc := cloneYAMLNode(existingDoc)
-			mergeYAMLNode(mergedDoc, targetDoc)
-
-			data, err = encodeYAMLDocument(mergedDoc)
-			if err != nil {
-				return err
-			}
-		} else {
-			data, err = encodeYAMLDocument(targetDoc)
-			if err != nil {
-				return err
-			}
-		}
-	} else if isNotExist(readErr) {
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
-		}
-	} else {
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
+		if existingDoc, parseErr := parseYAMLDocument(existingData); parseErr == nil {
+			doc = cloneYAMLNode(existingDoc)
+			mergeYAMLNode(doc, targetDoc)
 		}
 	}
-
+	// Missing and unreadable files both use canonical output. For an unreadable
+	// destination, let the write path return the final error, as before.
+	var buf bytes.Buffer
+	if err := encodeYAMLDocumentWith(&buf, doc, factory); err != nil {
+		return err
+	}
+	data := buf.Bytes()
 	if readErr == nil && bytes.Equal(existingData, data) {
 		return nil
 	}
-
 	if err := cs.atomicReplace(path, data, FilePerm); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
 	return nil
 }
 
@@ -526,53 +521,7 @@ func loadLocked(path string) (*Config, error) {
 // writeLocked merges cfg into the existing on-disk config (preserving comments)
 // and atomically writes it. Caller must hold the file lock.
 func writeLocked(path string, cfg *Config) error {
-	targetDoc, err := configToYAMLDocument(cfg)
-	if err != nil {
-		return err
-	}
-
-	var data []byte
-	existingData, readErr := os.ReadFile(path)
-	if readErr == nil {
-		existingDoc, parseErr := parseYAMLDocument(existingData)
-		if parseErr == nil {
-			mergedDoc := cloneYAMLNode(existingDoc)
-			mergeYAMLNode(mergedDoc, targetDoc)
-
-			data, err = encodeYAMLDocument(mergedDoc)
-			if err != nil {
-				return err
-			}
-		} else {
-			// Fallback: write canonical YAML from struct if existing YAML is malformed.
-			data, err = encodeYAMLDocument(targetDoc)
-			if err != nil {
-				return err
-			}
-		}
-	} else if os.IsNotExist(readErr) {
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
-		}
-	} else {
-		// If existing file can't be read (e.g., permissions), fall back to
-		// canonical YAML output and let the write path return the final error.
-		data, err = encodeYAMLDocument(targetDoc)
-		if err != nil {
-			return err
-		}
-	}
-
-	if readErr == nil && bytes.Equal(existingData, data) {
-		return nil
-	}
-
-	if err := atomicReplaceFile(path, data, FilePerm); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
+	return defaultStorage().writeConfigLocked(cfg, path, os.ReadFile, defaultYAMLEncoderFactory)
 }
 
 func decodeConfig(data []byte) (*Config, error) {

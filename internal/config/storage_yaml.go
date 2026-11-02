@@ -207,7 +207,7 @@ type yamlEncoder interface {
 	Close() error
 }
 
-var defaultYAMLEncoderFactory = func(w io.Writer) yamlEncoder {
+func defaultYAMLEncoderFactory(w io.Writer) yamlEncoder {
 	enc := yaml.NewEncoder(w)
 	enc.SetIndent(4)
 	return enc
