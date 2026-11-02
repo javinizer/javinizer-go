@@ -2,7 +2,7 @@ import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiClient } from '$lib/api/client';
-import type { BatchJobResponse } from '$lib/api/types';
+import type { BatchJobResponse, VideoCollision, VideoCollisionReport } from '$lib/api/types';
 import QueryClientWrapper from '$lib/components/QueryClientWrapper.svelte';
 import type { createOrganizeController } from '../logic/organize-controller';
 import type { createReviewState } from './review-state.svelte';
@@ -240,5 +240,78 @@ it.each([false, true])(
 		expect(state.refreshError).toBeNull();
 		expect(state.currentMovie?.title).toBe('Recovered');
 		expect(state.creditWritesBlocked).toBe(false);
+	},
+);
+
+const reviewedVideo: VideoCollision = {
+	source: filePath,
+	destination: '/synthetic/output/movie.mp4',
+	kind: 'file',
+	source_size: 5,
+	destination_size: 7,
+	review_token: 'reviewed-video',
+};
+const videoReport: VideoCollisionReport = {
+	items: [reviewedVideo], new: 0, replaced: 0, skipped: 0, unresolved: 1, same_file: 0,
+};
+
+it('ignores stale destination review controls while organizing and preserves decisions for retry', async () => {
+	const review = vi.spyOn(apiClient, 'reviewVideoCollisions').mockResolvedValue(videoReport);
+	const { state } = await mount();
+	await state.reviewVideoCollisions();
+	await state.decideVideoCollision(reviewedVideo, 'skip');
+	const decisions = JSON.parse(JSON.stringify(state.videoCollisionDecisions));
+	const saved = sessionStorage.getItem('javinizer.review.videoCollisions.a');
+	const writes = vi.spyOn(Storage.prototype, 'setItem');
+	review.mockClear();
+	boundary.organizeDeps!.setOrganizing(true);
+	await state.reviewVideoCollisions();
+	await state.decideVideoCollision(reviewedVideo, 'replace');
+	await state.decideVideoCollision(reviewedVideo, 'fail');
+	expect(review).not.toHaveBeenCalled();
+	expect(writes).not.toHaveBeenCalled();
+	expect(state.videoCollisionDecisions).toEqual(decisions);
+	expect(sessionStorage.getItem('javinizer.review.videoCollisions.a')).toBe(saved);
+	boundary.organizeDeps!.setOrganizing(false);
+	await state.reviewVideoCollisions();
+	expect(review).toHaveBeenCalledOnce();
+	expect(state.videoCollisionDecisions).toEqual(decisions);
+});
+
+it.each([
+	{ outcome: 'resolve', newer: false, during: false },
+	{ outcome: 'resolve', newer: false, during: true },
+	{ outcome: 'reject', newer: false, during: false },
+	{ outcome: 'reject', newer: false, during: true },
+	{ outcome: 'resolve', newer: true, during: false },
+	{ outcome: 'reject', newer: true, during: false },
+])(
+	'discards pre-Apply $outcome (still organizing: $during; newer review: $newer)',
+	async ({ outcome, newer, during }) => {
+		const review = vi.spyOn(apiClient, 'reviewVideoCollisions').mockResolvedValue(videoReport);
+		const { state } = await mount();
+		await state.reviewVideoCollisions();
+		const old = deferred<VideoCollisionReport>();
+		review.mockReturnValueOnce(old.promise);
+		const pending = state.reviewVideoCollisions();
+		expect(state.videoCollisionPending).toBe(true);
+		boundary.organizeDeps!.setOrganizing(true);
+		expect(state.videoCollisionPending).toBe(false);
+		if (!during) boundary.organizeDeps!.setOrganizing(false);
+		const fresh = deferred<VideoCollisionReport>();
+		review.mockReturnValueOnce(fresh.promise);
+		const refreshing = newer ? state.reviewVideoCollisions() : null;
+		if (outcome === 'resolve') old.resolve({ ...videoReport, new: 99 });
+		else old.reject(new Error('stale preflight failure'));
+		await pending;
+		expect(state.videoCollisionReport).toEqual(videoReport);
+		expect(state.videoCollisionError).toBeNull();
+		expect(state.videoCollisionPending).toBe(newer);
+		if (during) boundary.organizeDeps!.setOrganizing(false);
+		const current = refreshing ?? state.reviewVideoCollisions();
+		fresh.resolve({ ...videoReport, new: 2 });
+		await current;
+		expect(state.videoCollisionReport?.new).toBe(2);
+		expect(state.videoCollisionPending).toBe(false);
 	},
 );
