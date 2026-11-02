@@ -3,10 +3,12 @@ package fsutil
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -197,6 +199,243 @@ func TestReplacementBusyFixedReleaseRefusesUnownedOrLegacyStatus(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, token, string(original))
 			}
+		})
+	}
+}
+
+// releaseRefusalFile reports ordinary afero.File operation failures while
+// retaining the real descriptor and its creation-bound kernel identity.
+// afterTokenRead changes only the fixture's metadata after exact bytes are read.
+type releaseRefusalFile struct {
+	*releaseStatusFile
+	statCalls      int
+	failStat       int
+	fault          error
+	readFailure    bool
+	closeResult    error
+	readBytes      int
+	tokenBytes     int
+	afterTokenRead func() error
+}
+
+func (f *releaseRefusalFile) Stat() (os.FileInfo, error) {
+	f.statCalls++
+	if f.statCalls == f.failStat {
+		return nil, &os.PathError{Op: "stat", Path: f.Name(), Err: f.fault}
+	}
+	return f.File.Stat()
+}
+
+func (f *releaseRefusalFile) Close() error {
+	f.closeResult = f.releaseStatusFile.Close()
+	return f.closeResult
+}
+
+func (f *releaseRefusalFile) Read(p []byte) (int, error) {
+	n, err := f.File.Read(p)
+	f.readBytes += n
+	if f.readFailure {
+		// Reader permits data and an error together. Exact bytes alone must
+		// not authorize release when the read also reports an I/O failure.
+		return n, f.fault
+	}
+	if f.afterTokenRead != nil && f.readBytes == f.tokenBytes {
+		change := f.afterTokenRead
+		f.afterTokenRead = nil
+		if changeErr := change(); changeErr != nil {
+			return n, changeErr
+		}
+	}
+	return n, err
+}
+
+type releaseRefusalFS struct {
+	afero.Fs
+	openSeekOffset int64
+	openSeekErr    error
+	file           *releaseRefusalFile
+	openErr        error
+	opens          int
+	flags          int
+}
+
+func (f *releaseRefusalFS) OpenFile(path string, flags int, mode os.FileMode) (afero.File, error) {
+	f.opens++
+	f.flags = flags
+	if f.openErr != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: f.openErr}
+	}
+	file, err := f.Fs.OpenFile(path, flags, mode)
+	if err != nil {
+		return nil, err
+	}
+	f.file.File = file
+	// Negative control on this exact real descriptor; querying its current
+	// offset neither consumes token bytes nor changes the file position.
+	f.openSeekOffset, f.openSeekErr = file.Seek(0, io.SeekCurrent)
+	return f.file, nil
+}
+
+// This matrix tests the existing adapter/helper contract, not manufactured
+// native kernel faults. Nil identity is specifically a defensive helper input;
+// it does not assert a production claimant ever discards its creation proof.
+func TestReplacementBusyFixedReleaseRefusalPreservesOwnership(t *testing.T) {
+	for _, kind := range []string{"nil_identity", "open_failure", "initial_stat_failure", "read_failure", "recheck_stat_failure", "metadata_changed_after_read"} {
+		t.Run(kind, func(t *testing.T) {
+			base := afero.NewOsFs()
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "poster.jpg")
+			foreign := filepath.Join(dir, "foreign.marker")
+			require.NoError(t, os.WriteFile(foreign, []byte("foreign sentinel"), 0600))
+			foreignPin, err := os.Open(foreign)
+			require.NoError(t, err)
+			foreignInfo, foreignStatErr := foreignPin.Stat()
+			foreignCloseErr := foreignPin.Close()
+			require.NoError(t, foreignStatErr)
+			require.NoError(t, foreignCloseErr)
+			release, token, err := AcquireReplacementBusyEx(base, dest)
+			require.NoError(t, err)
+			t.Cleanup(release)
+			marker := ReplacementBusyPath(dest)
+			pin, err := base.Open(marker)
+			require.NoError(t, err)
+			info, statErr := pin.Stat()
+			var device, inode uint64
+			var strong bool
+			if statErr == nil {
+				device, inode, strong = streamedHandleIdentity(pin, info)
+			}
+			closeErr := pin.Close()
+			require.NoError(t, statErr)
+			require.NoError(t, closeErr)
+			require.True(t, strong)
+			claimed := newBoundInstallIdentity(info, device, inode, strong)
+			argument := claimed
+			fault := errors.New("fixture release I/O failure")
+			file := &releaseRefusalFile{
+				releaseStatusFile: &releaseStatusFile{writeN: 1},
+				fault:             fault, tokenBytes: len(token),
+			}
+			fs := &releaseRefusalFS{Fs: base, file: file}
+			want := ""
+			switch kind {
+			case "nil_identity":
+				argument = nil
+				want = "requires creation identity"
+			case "open_failure":
+				fs.openErr = fault
+				want = "open owned busy marker for release"
+			case "initial_stat_failure":
+				file.failStat = 1
+				want = "stat owned busy marker for release"
+			case "read_failure":
+				file.readFailure = true
+				want = "read owned busy marker for release"
+			case "recheck_stat_failure":
+				file.failStat = 2
+				want = "recheck owned busy marker for release"
+			case "metadata_changed_after_read":
+				file.afterTokenRead = func() error {
+					return base.Chtimes(marker, info.ModTime(), info.ModTime().Add(2*time.Second))
+				}
+				want = "recheck owned busy marker identity for release"
+			}
+			visible, err := markReplacementBusyReleased(fs, marker, token, argument)
+			require.False(t, visible)
+			require.ErrorContains(t, err, want)
+			if kind != "nil_identity" && kind != "metadata_changed_after_read" {
+				require.ErrorIs(t, err, fault)
+			}
+			require.Zero(t, file.writes)
+			require.Zero(t, file.syncs)
+			if kind == "nil_identity" {
+				require.Zero(t, fs.opens)
+			} else {
+				require.Equal(t, 1, fs.opens)
+				require.Equal(t, os.O_RDWR, fs.flags, "no create/truncate/append")
+			}
+			if kind == "nil_identity" || kind == "open_failure" {
+				require.Zero(t, file.closes)
+				require.Nil(t, file.File)
+			} else {
+				require.Equal(t, 1, file.closes)
+				require.NoError(t, file.closeResult)
+				require.NoError(t, fs.openSeekErr, "open descriptor must pass the same probe")
+				require.Zero(t, fs.openSeekOffset)
+				// Unlike Windows Stat, Seek checks the real file's closed state
+				// portably; no adapter method or injected failure is involved.
+				_, closedErr := file.File.Seek(0, io.SeekCurrent)
+				require.ErrorIs(t, closedErr, os.ErrClosed, "actual descriptor closed")
+			}
+			if kind == "read_failure" {
+				require.Positive(t, file.readBytes, "data returned with an error must not authorize release")
+				require.LessOrEqual(t, file.readBytes, len(token))
+			}
+			wantStats := map[string]int{
+				"nil_identity": 0, "open_failure": 0,
+				"initial_stat_failure": 1, "read_failure": 1,
+				"recheck_stat_failure": 2, "metadata_changed_after_read": 2,
+			}
+			require.Equal(t, wantStats[kind], file.statCalls)
+			if kind == "recheck_stat_failure" || kind == "metadata_changed_after_read" {
+				require.Equal(t, len(token), file.readBytes)
+				require.Equal(t, 2, file.statCalls)
+			}
+			data, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, token, string(data), "release bit remains zero")
+			post, err := base.Open(marker)
+			require.NoError(t, err)
+			postInfo, postStatErr := post.Stat()
+			postCloseErr := post.Close()
+			require.NoError(t, postStatErr)
+			require.NoError(t, postCloseErr)
+			require.True(t, os.SameFile(info, postInfo))
+			require.Equal(t, info.Size(), postInfo.Size())
+			require.Equal(t, info.Mode(), postInfo.Mode())
+			if kind == "metadata_changed_after_read" {
+				require.True(t, postInfo.ModTime().Equal(info.ModTime().Add(2*time.Second)))
+			} else {
+				require.True(t, postInfo.ModTime().Equal(info.ModTime()))
+			}
+			data, err = os.ReadFile(foreign)
+			require.NoError(t, err)
+			require.Equal(t, "foreign sentinel", string(data))
+			foreignAfter, err := os.Stat(foreign)
+			require.NoError(t, err)
+			require.True(t, os.SameFile(foreignInfo, foreignAfter))
+			require.True(t, foreignInfo.ModTime().Equal(foreignAfter.ModTime()))
+			blockedRelease, _, err := AcquireReplacementBusyEx(base, dest)
+			if blockedRelease != nil {
+				t.Cleanup(blockedRelease)
+			}
+			require.ErrorIs(t, err, ErrReplacementBusy, "refusal never releases the live owner")
+
+			// Remove only the adapter fault (or supply the retained valid claim).
+			// Metadata is rebound from the same owned inode on the next attempt.
+			retryFile := &releaseStatusFile{writeN: 1}
+			retryFS := &releaseStatusFS{Fs: base, file: retryFile}
+			visible, err = markReplacementBusyReleased(retryFS, marker, token, claimed)
+			require.NoError(t, err)
+			require.True(t, visible)
+			require.Equal(t, 1, retryFile.writes)
+			require.Equal(t, 1, retryFile.syncs)
+			require.Equal(t, 1, retryFile.closes)
+			data, err = os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, token[:len(token)-1]+"1", string(data))
+			nextRelease, nextToken, err := AcquireReplacementBusyEx(base, dest)
+			require.NoError(t, err)
+			t.Cleanup(nextRelease)
+			release() // previous capability must not delete a new claimant
+			data, err = os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, nextToken, string(data))
+			data, err = os.ReadFile(foreign)
+			require.NoError(t, err)
+			require.Equal(t, "foreign sentinel", string(data))
+			nextRelease()
+			require.NoFileExists(t, marker)
 		})
 	}
 }
