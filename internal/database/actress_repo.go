@@ -283,6 +283,9 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		if err := tx.Where("actress_id = ?", id).Delete(&models.ActressTranslation{}).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("translations for actress %d", id), err)
 		}
+		if err := deleteCandidateDismissalTx(tx, id); err != nil {
+			return err
+		}
 		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress %d", id), err)
 		}
@@ -594,7 +597,7 @@ func (r *ActressRepository) FindVerifiedByExactName(ctx context.Context, japanes
 	return found, nil
 }
 
-// ListCandidates returns quarantined (unverified) identities, newest first.
+// ListCandidates returns pending, unverified identities, newest first.
 func (r *ActressRepository) ListCandidates(ctx context.Context, limit, offset int) ([]models.Actress, error) {
 	if limit <= 0 {
 		limit = 50
@@ -602,6 +605,7 @@ func (r *ActressRepository) ListCandidates(ctx context.Context, limit, offset in
 	var candidates []models.Actress
 	err := r.GetDB().WithContext(ctx).
 		Where("verified = ?", false).
+		Where("NOT " + candidateDismissalExists).
 		Order("updated_at DESC, id ASC").
 		Limit(limit).Offset(offset).
 		Find(&candidates).Error
@@ -611,10 +615,10 @@ func (r *ActressRepository) ListCandidates(ctx context.Context, limit, offset in
 	return candidates, nil
 }
 
-// CountCandidates returns the number of quarantined candidate identities.
+// CountCandidates returns the number of pending candidate identities.
 func (r *ActressRepository) CountCandidates(ctx context.Context) (int64, error) {
 	var count int64
-	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("verified = ?", false).Count(&count).Error; err != nil {
+	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("verified = ?", false).Where("NOT " + candidateDismissalExists).Count(&count).Error; err != nil {
 		return 0, wrapDBErr("count", "candidate actresses", err)
 	}
 	return count, nil
@@ -656,6 +660,16 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 	var candidate models.Actress
 	if err := tx.First(&candidate, id).Error; err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+	}
+	if candidate.Verified {
+		return ErrCandidateAlreadyVerified
+	}
+	dismissed, err := candidateDismissedTx(tx, id)
+	if err != nil {
+		return err
+	}
+	if dismissed {
+		return ErrCandidateDismissed
 	}
 	result := tx.Model(&models.Actress{}).Where("id = ? AND verified = ?", id, false).Updates(updates)
 	if result.Error != nil {
@@ -1068,7 +1082,7 @@ func (r *ActressRepository) DeleteStaleCandidates(ctx context.Context, olderThan
 	var pruned int64
 	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var candidates []models.Actress
-		if err := tx.Where("verified = ? AND updated_at < ?", false, olderThan).Order("id").Find(&candidates).Error; err != nil {
+		if err := tx.Where("verified = ? AND updated_at < ?", false, olderThan).Where("NOT " + candidateDismissalExists).Order("id").Find(&candidates).Error; err != nil {
 			return wrapDBErr("list", "stale candidates", err)
 		}
 		for i := range candidates {
@@ -1093,6 +1107,7 @@ DELETE FROM actresses
 WHERE id = ?
   AND verified = 0
   AND updated_at < ?
+  AND NOT EXISTS (SELECT 1 FROM actress_candidate_dismissals d WHERE d.actress_id = actresses.id)
   AND id NOT IN (SELECT DISTINCT actress_id FROM movie_credits)
   AND NOT EXISTS (
       SELECT 1

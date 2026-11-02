@@ -9,12 +9,16 @@ vi.mock('$lib/api/client', () => ({
 	apiClient: {
 		listCandidates: vi.fn(),
 		promoteCandidate: vi.fn(),
+		dismissCandidate: vi.fn(),
+		restoreCandidate: vi.fn(),
 	},
 }));
 
 const mod = await import('$lib/api/client');
 const listCandidates = vi.mocked(mod.apiClient.listCandidates);
 const promoteCandidate = vi.mocked(mod.apiClient.promoteCandidate);
+const dismissCandidate = vi.mocked(mod.apiClient.dismissCandidate);
+const restoreCandidate = vi.mocked(mod.apiClient.restoreCandidate);
 
 function candidate(id: number, values: Partial<Actress> = {}): Actress {
 	return { id, verified: false, ...values };
@@ -197,7 +201,7 @@ describe('ActressCandidatesSection', () => {
 		const first = within(group).getByLabelText('First Name') as HTMLInputElement;
 		const toggle = view.getByRole('button', { name: /Candidate identities/i });
 		const next = view.getByRole('button', { name: 'Next' });
-		view.client.setQueryData(['actress-candidates', 100], {
+		view.client.setQueryData(['actress-candidates', false, 100], {
 			candidates: [candidate(2, { first_name: 'Two' })],
 			total: 101,
 		});
@@ -217,6 +221,7 @@ describe('ActressCandidatesSection', () => {
 		await waitFor(() => {
 			const origin = view.client.getQueryData<{ candidates: Actress[]; total: number }>([
 				'actress-candidates',
+				false,
 				0,
 			]);
 			expect(origin?.candidates).toHaveLength(0);
@@ -224,6 +229,7 @@ describe('ActressCandidatesSection', () => {
 		});
 		const other = view.client.getQueryData<{ candidates: Actress[]; total: number }>([
 			'actress-candidates',
+			false,
 			100,
 		]);
 		expect(other?.candidates.map((item) => item.id)).toEqual([2]);
@@ -439,4 +445,111 @@ describe('ActressCandidatesSection', () => {
 		await fireEvent.input(fields.getByLabelText('Japanese Name'), { target: { value: 'みなみ' } });
 		expect(view.getByRole('button', { name: 'Promote みなみ' })).toBeTruthy();
 	});
+	it('dismisses without validating or submitting actor edits and restores from the dismissed filter', async () => {
+		const actor = candidate(1);
+		let dismissed = false;
+		const view = renderSection([actor]);
+		listCandidates.mockImplementation(async (_limit, _offset, filter) => ({
+			candidates: Boolean(filter) === dismissed ? [actor] : [],
+			total: Boolean(filter) === dismissed ? 1 : 0,
+		}));
+		dismissCandidate.mockImplementation(async () => { dismissed = true; });
+		restoreCandidate.mockImplementation(async () => { dismissed = false; });
+		await openCandidates(view);
+		await fireEvent.input(within(view.getByRole('group', { name: /candidate #1/i })).getByLabelText('Thumbnail URL'), { target: { value: 'invalid unsaved edit' } });
+		await fireEvent.click(view.getByRole('button', { name: 'Dismiss #1' }));
+		await waitFor(() => expect(dismissCandidate).toHaveBeenCalledWith(1));
+		await view.findByText('No pending candidates.');
+		expect(promoteCandidate).not.toHaveBeenCalled();
+		await fireEvent.click(view.getByRole('button', { name: 'Dismissed' }));
+		const fields = await view.findByRole('group', { name: /candidate #1/i });
+		expect((within(fields).getByLabelText('Thumbnail URL') as HTMLInputElement).matches(':disabled')).toBe(true);
+		expect(view.queryByRole('button', { name: /Promote/i })).toBeNull();
+		expect(listCandidates).toHaveBeenCalledWith(100, 0, true);
+		await fireEvent.click(view.getByRole('button', { name: 'Restore #1' }));
+		await waitFor(() => expect(restoreCandidate).toHaveBeenCalledWith(1));
+		await view.findByText('No dismissed candidates.');
+		await fireEvent.click(view.getByRole('button', { name: 'Pending' }));
+		await view.findByRole('button', { name: 'Dismiss #1' });
+		expect(listCandidates).toHaveBeenCalledWith(100, 0, false);
+		expect(promoteCandidate).not.toHaveBeenCalled();
+	});
+
+	it('locks actions and filter navigation during dismissal and preserves failures for retry', async () => {
+		let rejectDismiss!: (reason: Error) => void;
+		dismissCandidate.mockReturnValue(new Promise((_resolve, reject) => { rejectDismiss = reject; }));
+		const view = renderSection([candidate(1, { first_name: 'One' })], 101);
+		await openCandidates(view);
+		await fireEvent.click(view.getByRole('button', { name: 'Dismiss One' }));
+		await waitFor(() => expect(dismissCandidate).toHaveBeenCalledTimes(1));
+		for (const name of ['Dismiss One', 'Promote One', 'Dismissed', 'Next']) {
+			expect(view.getByRole('button', { name }).hasAttribute('disabled')).toBe(true);
+		}
+		expect(view.getByRole('button', { name: /Candidate identities/i }).hasAttribute('disabled')).toBe(true);
+		rejectDismiss(new Error('already promoted'));
+		expect((await view.findByRole('alert')).textContent).toContain('already promoted');
+		expect(view.getByRole('group', { name: /candidate #1/i })).toBeTruthy();
+		// onError renders feedback before TanStack dispatches its final error state.
+		await waitFor(() => expect(view.getByRole('button', { name: 'Dismiss One' }).hasAttribute('disabled')).toBe(false));
+		dismissCandidate.mockResolvedValue(undefined);
+		listCandidates.mockResolvedValue({ candidates: [], total: 0 });
+		await fireEvent.click(view.getByRole('button', { name: 'Dismiss One' }));
+		await waitFor(() => expect(dismissCandidate).toHaveBeenCalledTimes(2));
+		await view.findByText('No pending candidates.');
+		await waitFor(() => expect(view.getByRole('button', { name: 'Pending' }).hasAttribute('disabled')).toBe(false));
+	});
+
+	it('moves back from an emptied last page and resets pagination when changing filters', async () => {
+		const view = renderSection([candidate(1, { first_name: 'One' })], 101);
+		let dismissed = false;
+		listCandidates.mockImplementation(async (_limit, offset, filter) => {
+			if (filter) return { candidates: [candidate(2, { first_name: 'Two' })], total: 1 };
+			return { candidates: [candidate(offset ? 2 : 1, { first_name: offset ? 'Two' : 'One' })], total: dismissed ? 100 : 101 };
+		});
+		dismissCandidate.mockImplementation(async () => { dismissed = true; });
+		await openCandidates(view);
+		await fireEvent.click(view.getByRole('button', { name: 'Next' }));
+		await view.findByRole('button', { name: 'Dismiss Two' });
+		await fireEvent.click(view.getByRole('button', { name: 'Dismiss Two' }));
+		await view.findByRole('button', { name: 'Dismiss One' });
+		await waitFor(() => expect(view.queryByRole('button', { name: 'Next' })).toBeNull());
+		await fireEvent.click(view.getByRole('button', { name: 'Dismissed' }));
+		await view.findByRole('button', { name: 'Restore Two' });
+		expect(listCandidates).toHaveBeenLastCalledWith(100, 0, true);
+	});
+
+	it('keeps pending and dismissed caches distinct while a newer filter request is pending', async () => {
+		const view = renderSection([candidate(1, { first_name: 'One' })]);
+		await openCandidates(view);
+		let resolveDismissed!: (value: { candidates: Actress[]; total: number }) => void;
+		listCandidates.mockImplementation(async (_limit, _offset, filter) => filter
+			? new Promise((resolve) => { resolveDismissed = resolve; })
+			: { candidates: [candidate(1, { first_name: 'One' })], total: 1 });
+		await fireEvent.click(view.getByRole('button', { name: 'Dismissed' }));
+		await waitFor(() => expect(listCandidates).toHaveBeenCalledWith(100, 0, true));
+		await fireEvent.click(view.getByRole('button', { name: 'Pending' }));
+		await view.findByRole('button', { name: 'Dismiss One' });
+		resolveDismissed({ candidates: [candidate(2, { first_name: 'Two' })], total: 1 });
+		await waitFor(() => expect(view.client.getQueryData(['actress-candidates', true, 0])).toEqual({ candidates: [candidate(2, { first_name: 'Two' })], total: 1 }));
+		expect(view.queryByRole('button', { name: 'Restore Two' })).toBeNull();
+		expect(view.getByRole('button', { name: 'Dismiss One' })).toBeTruthy();
+	});
+
+	it('retains a dismissed candidate after restore fails and allows retry without promotion', async () => {
+		const view = renderSection([candidate(1, { first_name: 'One' })]);
+		await openCandidates(view);
+		await fireEvent.click(view.getByRole('button', { name: 'Dismissed' }));
+		await view.findByRole('button', { name: 'Restore One' });
+		restoreCandidate.mockRejectedValueOnce(new Error('restore failed'));
+		await fireEvent.click(view.getByRole('button', { name: 'Restore One' }));
+		expect((await view.findByRole('alert')).textContent).toContain('restore failed');
+		expect(view.getByRole('button', { name: 'Restore One' }).hasAttribute('disabled')).toBe(false);
+		restoreCandidate.mockResolvedValueOnce();
+		listCandidates.mockResolvedValue({ candidates: [], total: 0 });
+		await fireEvent.click(view.getByRole('button', { name: 'Restore One' }));
+		await view.findByText('No dismissed candidates.');
+		expect(restoreCandidate).toHaveBeenCalledTimes(2);
+		expect(promoteCandidate).not.toHaveBeenCalled();
+	});
+
 });

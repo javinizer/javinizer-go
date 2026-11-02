@@ -118,6 +118,30 @@ Manage actress database with images and metadata.
 | `POST` | `/api/v1/actresses/merge` | Apply a target/source merge with conflict resolutions |
 | `GET` | `/api/v1/actresses/export` | Export the full actress database as a JSON array (streamed) |
 | `POST` | `/api/v1/actresses/import` | Import/update actresses from a JSON array |
+| `GET` | `/api/v1/actresses/candidates` | List pending candidates; `?dismissed=true` lists dismissed candidates instead |
+| `POST` | `/api/v1/actresses/candidates/:id/promote` | Confirm an unverified candidate as a shared actor identity |
+| `POST` | `/api/v1/actresses/candidates/:id/dismiss` | Hide a candidate from the pending review queue only |
+| `POST` | `/api/v1/actresses/candidates/:id/restore` | Restore a dismissed candidate to the pending review queue |
+
+**Candidate review decisions:** Dismiss is reversible from the Dismissed filter. It does
+not delete or change the actor, remove movie credits, resolve collisions, suppress
+cast entries, or alter identity matching. Existing movie credits remain active.
+Use movie-credit suppression for “this actor is not in this movie,” not dismissal.
+
+Candidate lists retain the `{ candidates, total }` response shape and `limit`/`offset`
+pagination; `total` is specific to the selected pending/dismissed list. Omitted
+`dismissed` defaults to false. Invalid boolean values return 400. Both lists contain
+only unverified identities and use deterministic newest-update-first ordering, then ID.
+Dismiss/restore require no body and return `{ "ok": true }`; repeats are idempotent.
+Invalid IDs return 400, missing identities 404, and verified identities 409.
+Promotion of a dismissed candidate returns 409: restore it before promoting.
+
+Dismissal is stored separately from the actor and retained through rescrapes that
+resolve to that same identity. It is not a global name/source blacklist; a distinct
+identity can still appear as a new candidate. Dismissed identities are protected
+from stale-candidate garbage collection so they remain available for restoration.
+Explicit global actor deletion remains destructive and removes its dismissal record;
+merging an identity is likewise a separate catalog action, not a queue decision.
 
 **Example - Search actresses:**
 ```bash

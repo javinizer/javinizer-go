@@ -1,6 +1,7 @@
 package actress
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -51,19 +52,40 @@ type collisionListResponse struct {
 //	@Produce		json
 //	@Param			limit	query		int	false	"Max results"	default(50)
 //	@Param			offset	query		int	false	"Skip results"	default(0)
+//	@Param			dismissed	query		bool	false	"List dismissed candidates instead of pending candidates"	default(false)
 //	@Success		200		{object}	candidateListResponse
+//	@Failure		400		{object}	contracts.ErrorResponse
 //	@Failure		500		{object}	contracts.ErrorResponse
 //	@Router			/api/v1/actresses/candidates [get]
 func ListCandidates(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		dismissed, err := strconv.ParseBool(c.DefaultQuery("dismissed", "false"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "dismissed must be a boolean"})
+			return
+		}
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-		candidates, err := deps.ActressRepo.ListCandidates(c.Request.Context(), limit, offset)
+		var list func(context.Context, int, int) ([]models.Actress, error)
+		var countCandidates func(context.Context) (int64, error)
+		if dismissed {
+			if deps.DB == nil {
+				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
+				return
+			}
+			repo := database.NewActressRepository(deps.DB)
+			list = repo.ListDismissedCandidates
+			countCandidates = repo.CountDismissedCandidates
+		} else {
+			list = deps.ActressRepo.ListCandidates
+			countCandidates = deps.ActressRepo.CountCandidates
+		}
+		candidates, err := list(c.Request.Context(), limit, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		count, err := deps.ActressRepo.CountCandidates(c.Request.Context())
+		count, err := countCandidates(c.Request.Context())
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
@@ -130,7 +152,7 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			switch {
 			case errors.Is(err, database.ErrInvalidLookup):
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-			case errors.Is(err, database.ErrCandidateAlreadyVerified):
+			case errors.Is(err, database.ErrCandidateAlreadyVerified), errors.Is(err, database.ErrCandidateDismissed):
 				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 			default:
 				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})

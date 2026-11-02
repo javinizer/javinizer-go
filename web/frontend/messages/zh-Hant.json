@@ -438,8 +438,8 @@
     }
   ],
   "browse_use_this_folder": "使用此資料夾",
-  "candidates_description": "由擷取建立但無法與目錄配對的隔離身分。提升前不會參與補充與呈現。",
-  "candidates_empty": "沒有候選身分。目錄已清理。",
+  "candidates_description": "擷取時發現的未驗證身分。請在將其加入演員庫前核實相關證據。",
+  "candidates_empty": "沒有待審核的候選人。",
   "candidates_fields": "候選身分 #{id} 的標準欄位",
   "candidates_hide": "隱藏",
   "candidates_load_failed": "載入候選身分失敗",
@@ -2856,5 +2856,15 @@
   "actress_sync_reload_changed": "證據已變更。來源選擇和未提交的同意已清除。請重新搜尋、選擇身分並檢閱後再確認。",
   "actress_sync_reload_unchanged": "證據未變更。已保留現有選擇和未提交的檢閱；未提交任何工作。",
   "actress_sync_reload_busy": "其他證據載入正在進行。請等待完成後重新整理狀態或重試載入。",
-  "actress_sync_reload_failed": "證據載入未完成。最後可用的證據已保留。請重新整理狀態核實目前證據，必要時明確重試。"
+  "actress_sync_reload_failed": "證據載入未完成。最後可用的證據已保留。請重新整理狀態核實目前證據，必要時明確重試。",
+  "candidates_dismiss": "忽略",
+  "candidates_dismiss_for": "忽略 {name}",
+  "candidates_restore": "還原",
+  "candidates_restore_for": "還原 {name}",
+  "candidates_pending_filter": "待審核",
+  "candidates_dismissed_filter": "已忽略",
+  "candidates_dismissed_empty": "沒有已忽略的候選人。",
+  "candidates_dismiss_description": "忽略只會將候選人從此審核佇列中隱藏，不會變更演員記錄或影片演員表。可在「已忽略」中還原並重新審核。",
+  "candidates_queue_updating": "正在更新候選人審核狀態",
+  "candidates_queue_update_failed": "無法更新候選人審核狀態"
 }

@@ -33,6 +33,20 @@ describe('ActressClient identity/credit endpoints', () => {
 		expect(init.method).toBeUndefined();
 	});
 
+	it('lists dismissed candidates separately and posts queue-only dismiss/restore without actor payloads', async () => {
+		fetchMock.mockImplementation(() => Promise.resolve(okResponse({ candidates: [], total: 0, ok: true })));
+		await client.listCandidates(10, 20, true);
+		expect(fetchMock.mock.calls[0][0]).toBe('http://api.test/api/v1/actresses/candidates?limit=10&offset=20&dismissed=true');
+		await client.dismissCandidate(7);
+		await client.restoreCandidate(7);
+		for (const [index, action] of [[1, 'dismiss'], [2, 'restore']] as const) {
+			const [url, init] = fetchMock.mock.calls[index];
+			expect(url).toBe(`http://api.test/api/v1/actresses/candidates/7/${action}`);
+			expect(init.method).toBe('POST');
+			expect(init.body).toBeUndefined();
+		}
+	});
+
 	it('promoteCandidate posts to the promote endpoint', async () => {
 		fetchMock.mockResolvedValue(okResponse({ id: 7, verified: true, origin: 'user' }));
 		const res = await client.promoteCandidate(7, { first_name: 'A', last_name: 'B' });

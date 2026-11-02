@@ -4208,6 +4208,11 @@ paths:
         in: query
         name: offset
         type: integer
+      - default: false
+        description: List dismissed candidates instead of pending candidates
+        in: query
+        name: dismissed
+        type: boolean
       produces:
       - application/json
       responses:
@@ -4215,11 +4220,54 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/internal_api_actress.candidateListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: List candidate identities
+      tags:
+      - actresses
+  /api/v1/actresses/candidates/{id}/dismiss:
+    post:
+      description: Reversibly hides an unverified candidate from the pending queue without
+        changing actor or movie data.
+      parameters:
+      - description: Candidate ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ok:
+                type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Dismiss a candidate from review
       tags:
       - actresses
   /api/v1/actresses/candidates/{id}/promote:
@@ -4266,6 +4314,45 @@ paths:
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Promote a candidate identity
+      tags:
+      - actresses
+  /api/v1/actresses/candidates/{id}/restore:
+    post:
+      description: Restores an unverified candidate to review without changing actor
+        or movie data.
+      parameters:
+      - description: Candidate ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ok:
+                type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+      summary: Restore a dismissed candidate
       tags:
       - actresses
   /api/v1/actresses/collisions:

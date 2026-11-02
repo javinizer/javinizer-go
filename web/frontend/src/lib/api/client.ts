@@ -280,12 +280,19 @@ class APIClient {
 	}
 
 	// Actress identity / credit operations
-	async listCandidates(limit = 50, offset = 0) {
-		return this.actresses.listCandidates(limit, offset);
+	async listCandidates(limit = 50, offset = 0, dismissed = false) {
+		return this.actresses.listCandidates(limit, offset, dismissed);
 	}
 	async promoteCandidate(id: number, request?: Parameters<ActressClient['promoteCandidate']>[1]) {
 		return this.actresses.promoteCandidate(id, request);
 	}
+	async dismissCandidate(id: number) {
+		return this.actresses.dismissCandidate(id);
+	}
+	async restoreCandidate(id: number) {
+		return this.actresses.restoreCandidate(id);
+	}
+
 	async listCollisions(movieId: string) {
 		return this.actresses.listCollisions(movieId);
 	}

@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { ShieldQuestion, Check, Loader2 } from 'lucide-svelte';
+	import { ShieldQuestion, Check, Loader2, Archive, Undo2 } from 'lucide-svelte';
 	import { createQuery, createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
@@ -23,13 +23,15 @@
 		dirty: Record<CandidateField, boolean>;
 	};
 	type CandidateValidation = { name?: boolean; thumb?: boolean };
-	type PromotionInput = {
+	type QueueInput = {
 		candidate: Candidate;
-		values: CandidateDraft;
-		queryKey: readonly ['actress-candidates', number];
+		queryKey: readonly ['actress-candidates', boolean, number];
+		dismissed: boolean;
 		pageOffset: number;
 		pageTotal: number;
 	};
+
+	type PromotionInput = QueueInput & { values: CandidateDraft };
 
 	const CANDIDATE_PAGE_SIZE = 100;
 	const candidateFields: CandidateField[] = [
@@ -41,6 +43,7 @@
 
 	let open = $state(false);
 	let candidateOffset = $state(0);
+	let showDismissed = $state(false);
 	let drafts = $state<Record<string, CandidateDraftState>>({});
 	let validationErrors = $state<Record<string, CandidateValidation>>({});
 	let serverErrors = $state<Record<string, string>>({});
@@ -48,12 +51,13 @@
 	const queryClient = useQueryClient();
 
 	const candidatesQuery = createQuery(() => ({
-		queryKey: ['actress-candidates', candidateOffset],
-		queryFn: () => apiClient.listCandidates(CANDIDATE_PAGE_SIZE, candidateOffset),
+		queryKey: ['actress-candidates', showDismissed, candidateOffset] as const,
+		queryFn: ({ queryKey }) => apiClient.listCandidates(CANDIDATE_PAGE_SIZE, queryKey[2], queryKey[1]),
 		enabled: open
 	}));
 
 	const promoteMutation = createMutation(() => ({
+		onMutate: () => queryClient.cancelQueries({ queryKey: ['actress-candidates'] }),
 		mutationFn: async ({ candidate, values }: PromotionInput) =>
 			apiClient.promoteCandidate(candidate.id, values),
 		onSuccess: (promoted, input) => {
@@ -61,29 +65,48 @@
 			delete drafts[key];
 			delete validationErrors[key];
 			delete serverErrors[key];
-			queryClient.setQueryData<CandidateListResponse>(input.queryKey, (current) =>
-				current
-					? {
-							...current,
-							candidates: current.candidates.filter((item) => item.id !== input.candidate.id),
-							total: Math.max(0, current.total - 1)
-						}
-					: current
-			);
-			const remaining = Math.max(0, input.pageTotal - 1);
-			const lastOffset = Math.max(
-				0,
-				(Math.ceil(remaining / CANDIDATE_PAGE_SIZE) - 1) * CANDIDATE_PAGE_SIZE
-			);
-			if (candidateOffset === input.pageOffset && candidateOffset > lastOffset) {
-				candidateOffset = lastOffset;
-			}
-			void queryClient.invalidateQueries({ queryKey: ['actress-candidates'] });
+			removeFromQueue(input);
 			void onPromoted(promoted);
 		},
 		onError: (error, input) => {
 			serverErrors[candidateKey(input.candidate)] =
 				error instanceof Error ? error.message : m.candidates_promotion_failed();
+		}
+	}));
+
+	function removeFromQueue(input: QueueInput) {
+		queryClient.setQueryData<CandidateListResponse>(input.queryKey, (current) =>
+			current
+				? {
+					...current,
+					candidates: current.candidates.filter((item) => item.id !== input.candidate.id),
+					total: Math.max(0, current.total - 1)
+				}
+				: current
+		);
+		const remaining = Math.max(0, input.pageTotal - 1);
+		const lastOffset = Math.max(
+			0,
+			(Math.ceil(remaining / CANDIDATE_PAGE_SIZE) - 1) * CANDIDATE_PAGE_SIZE
+		);
+		if (showDismissed === input.dismissed && candidateOffset === input.pageOffset && candidateOffset > lastOffset) {
+			candidateOffset = lastOffset;
+		}
+		void queryClient.invalidateQueries({ queryKey: ['actress-candidates'] });
+	}
+
+	const queueMutation = createMutation(() => ({
+		onMutate: () => queryClient.cancelQueries({ queryKey: ['actress-candidates'] }),
+		mutationFn: ({ candidate, dismissed }: QueueInput) => dismissed
+			? apiClient.restoreCandidate(candidate.id)
+			: apiClient.dismissCandidate(candidate.id),
+		onSuccess: (_, input) => {
+			delete serverErrors[candidateKey(input.candidate)];
+			removeFromQueue(input);
+		},
+		onError: (error, input) => {
+			serverErrors[candidateKey(input.candidate)] =
+				error instanceof Error ? error.message : m.candidates_queue_update_failed();
 		}
 	}));
 
@@ -102,7 +125,7 @@
 	let totalPages = $derived(Math.max(1, Math.ceil(total / CANDIDATE_PAGE_SIZE)));
 	let canGoPrev = $derived(candidateOffset > 0);
 	let canGoNext = $derived(candidateOffset + CANDIDATE_PAGE_SIZE < total);
-	let pending = $derived(promoteMutation.isPending);
+	let pending = $derived(promoteMutation.isPending || queueMutation.isPending);
 
 	function hasCandidateID(candidate: Actress): candidate is Candidate {
 		return Number.isSafeInteger(candidate.id) && (candidate.id ?? 0) > 0;
@@ -143,12 +166,14 @@
 		delete validationErrors[key];
 		delete serverErrors[key];
 		promoteMutation.reset();
+		queueMutation.reset();
 	}
 
 	function clearViewFeedback() {
 		validationErrors = {};
 		serverErrors = {};
 		promoteMutation.reset();
+		queueMutation.reset();
 	}
 
 	function editCandidate(candidate: Candidate, field: CandidateField) {
@@ -168,6 +193,7 @@
 	}
 
 	function promote(candidate: Candidate, draft: CandidateDraft) {
+		if (pending || showDismissed) return;
 		const key = candidateKey(candidate);
 		clearCandidateFeedback(candidate);
 		const invalidName = draft.first_name.trim() === '' && draft.japanese_name.trim() === '';
@@ -179,10 +205,30 @@
 		promoteMutation.mutate({
 			candidate,
 			values: { ...draft },
-			queryKey: ['actress-candidates', candidateOffset],
+			queryKey: ['actress-candidates', showDismissed, candidateOffset],
+			dismissed: showDismissed,
 			pageOffset: candidateOffset,
 			pageTotal: total
 		});
+	}
+
+	function updateQueue(candidate: Candidate) {
+		if (pending) return;
+		clearCandidateFeedback(candidate);
+		queueMutation.mutate({
+			candidate,
+			queryKey: ['actress-candidates', showDismissed, candidateOffset],
+			dismissed: showDismissed,
+			pageOffset: candidateOffset,
+			pageTotal: total
+		});
+	}
+
+	function changeFilter(dismissed: boolean) {
+		if (pending || dismissed === showDismissed) return;
+		clearViewFeedback();
+		candidateOffset = 0;
+		showDismissed = dismissed;
 	}
 
 	function changePage(offset: number) {
@@ -192,6 +238,7 @@
 	}
 
 	async function refreshCandidates() {
+		if (pending) return;
 		clearViewFeedback();
 		await candidatesQuery.refetch();
 	}
@@ -246,6 +293,11 @@
 	{#if open}
 		<div id="actress-candidates-list" in:fade|local={{ duration: 220 }} class="space-y-3">
 			<p class="text-xs text-muted-foreground">{m.candidates_description()}</p>
+			<p class="text-xs text-muted-foreground">{m.candidates_dismiss_description()}</p>
+			<div class="flex gap-2">
+				<Button variant="outline" size="sm" aria-pressed={!showDismissed} disabled={pending} onclick={() => changeFilter(false)}>{m.candidates_pending_filter()}</Button>
+				<Button variant="outline" size="sm" aria-pressed={showDismissed} disabled={pending} onclick={() => changeFilter(true)}>{m.candidates_dismissed_filter()}</Button>
+			</div>
 
 			{#if fetchError}
 				<div class="flex items-center justify-between gap-2 rounded border border-destructive/30 bg-destructive/5 p-2">
@@ -261,7 +313,7 @@
 					<Loader2 class="size-4 animate-spin" /> {m.common_loading()}
 				</div>
 			{:else if !fetchError && candidatesList.length === 0}
-				<p class="text-sm text-muted-foreground">{m.candidates_empty()}</p>
+				<p class="text-sm text-muted-foreground">{showDismissed ? m.candidates_dismissed_empty() : m.candidates_empty()}</p>
 			{:else}
 				<ul class="divide-y divide-border">
 					{#each candidatesList as candidate (candidate.id)}
@@ -272,11 +324,11 @@
 							{@const nameErrorId = `candidate-${key}-name-error`}
 							{@const thumbErrorId = `candidate-${key}-thumb-error`}
 							{@const serverErrorId = `candidate-${key}-server-error`}
-							{@const candidatePending = pending && promoteMutation.variables?.candidate.id === candidate.id}
+							{@const candidatePending = (promoteMutation.isPending && promoteMutation.variables?.candidate.id === candidate.id) || (queueMutation.isPending && queueMutation.variables?.candidate.id === candidate.id)}
 							<li class="grid gap-3 py-3 md:grid-cols-[1fr_auto] md:items-end">
 								<fieldset
 									class="grid min-w-0 gap-2 sm:grid-cols-2"
-									disabled={pending}
+									disabled={pending || showDismissed}
 									aria-busy={candidatePending}
 								>
 									<legend class="sr-only">{m.candidates_fields({ id: key })}</legend>
@@ -335,26 +387,46 @@
 										</p>
 									{/if}
 									{#if candidatePending}
-										<p class="sr-only" role="status">{m.candidates_promoting()}</p>
+										<p class="sr-only" role="status">{promoteMutation.isPending ? m.candidates_promoting() : m.candidates_queue_updating()}</p>
 									{/if}
 									{#if candidate.dmm_id}
 										<p class="text-xs text-muted-foreground sm:col-span-2">DMM {candidate.dmm_id}</p>
 									{/if}
 								</fieldset>
-								<Button
-									variant="outline"
-									size="sm"
-									onclick={() => promote(candidate, draft)}
-									disabled={pending}
-									aria-label={m.candidates_promote_for({ name: candidateDisplayName(candidate, draft) })}
-								>
-									{#if candidatePending}
-										<Loader2 class="size-3.5 animate-spin" />
-									{:else}
-										<Check class="size-3.5" />
+								<div class="flex gap-2">
+									{#if !showDismissed}
+										<Button
+											variant="outline"
+											size="sm"
+											onclick={() => promote(candidate, draft)}
+											disabled={pending}
+											aria-label={m.candidates_promote_for({ name: candidateDisplayName(candidate, draft) })}
+										>
+											{#if candidatePending && promoteMutation.isPending}
+												<Loader2 class="size-3.5 animate-spin" />
+											{:else}
+												<Check class="size-3.5" />
+											{/if}
+											{m.candidates_promote()}
+										</Button>
 									{/if}
-									{m.candidates_promote()}
-								</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => updateQueue(candidate)}
+										disabled={pending}
+										aria-label={showDismissed ? m.candidates_restore_for({ name: candidateDisplayName(candidate, draft) }) : m.candidates_dismiss_for({ name: candidateDisplayName(candidate, draft) })}
+									>
+										{#if candidatePending && queueMutation.isPending}
+											<Loader2 class="size-3.5 animate-spin" />
+										{:else if showDismissed}
+											<Undo2 class="size-3.5" />
+										{:else}
+											<Archive class="size-3.5" />
+										{/if}
+										{showDismissed ? m.candidates_restore() : m.candidates_dismiss()}
+									</Button>
+								</div>
 							</li>
 						{/if}
 					{/each}
