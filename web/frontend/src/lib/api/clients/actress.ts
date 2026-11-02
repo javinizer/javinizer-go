@@ -86,8 +86,9 @@ export class ActressClient extends BaseClient {
 		});
 	}
 
-	async listCandidates(limit = 50, offset = 0): Promise<CandidateListResponse> {
+	async listCandidates(limit = 50, offset = 0, dismissed = false): Promise<CandidateListResponse> {
 		const query = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
+		if (dismissed) query.set('dismissed', 'true');
 		return this.request<CandidateListResponse>(`/api/v1/actresses/candidates?${query}`);
 	}
 
@@ -96,6 +97,14 @@ export class ActressClient extends BaseClient {
 			method: 'POST',
 			body: JSON.stringify(request),
 		});
+	}
+
+	async dismissCandidate(id: number): Promise<void> {
+		await this.request(`/api/v1/actresses/candidates/${id}/dismiss`, { method: 'POST' });
+	}
+
+	async restoreCandidate(id: number): Promise<void> {
+		await this.request(`/api/v1/actresses/candidates/${id}/restore`, { method: 'POST' });
 	}
 
 	async listCollisions(movieId: string): Promise<{ collisions: CreditCollision[] }> {

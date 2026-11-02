@@ -154,8 +154,8 @@
   "browse_selected_path": "[ Šëlëçtëd Påth: ]",
   "browse_title": "[ Bröwsë & Šçråpë ]",
   "browse_updating_started": "[ Üpdåtíñg mëtådåtå stårtëd för {count} fílës ]",
-  "candidates_description": "[ Qüåråñtíñëd ídëñtítíës çrëåtëd by sçråpës thåt çöüld ñöt bë måtçhëd tö yöür çåtålög. Thëy årë ëxçlüdëd fröm ëñríçhmëñt åñd rëñdëríñg üñtíl prömötëd. ]",
-  "candidates_empty": "[ Ñö çåñdídåtës. Yöür çåtålög ís çlëåñ. ]",
+  "candidates_description": "[ Üñvërífíëd ídëñtítíës föüñd düríñg sçråpíñg. Rëvíëw thë ëvídëñçë bëförë prömötíñg åñ ídëñtíty tö yöür çåtålög. ]",
+  "candidates_empty": "[ Nö pëñdíñg çåñdídåtës. ]",
   "candidates_fields": "[ Çåñöñíçål fíëlds för çåñdídåtë #{id} ]",
   "candidates_hide": "[ Hídë ]",
   "candidates_load_failed": "[ Fåílëd tö löåd çåñdídåtës ]",
@@ -2200,5 +2200,15 @@
   "actress_sync_reload_changed": "Evidence changed. Source choices and unsubmitted consent were cleared. Search, choose identities and review again before confirming.",
   "actress_sync_reload_unchanged": "Evidence is unchanged. Existing choices and unsubmitted reviews were preserved; no job was submitted.",
   "actress_sync_reload_busy": "Another evidence reload is running. Refresh status or retry the reload after it finishes.",
-  "actress_sync_reload_failed": "Evidence reload did not complete. The last usable evidence remains available. Refresh status to check the current evidence, then explicitly retry if needed."
+  "actress_sync_reload_failed": "Evidence reload did not complete. The last usable evidence remains available. Refresh status to check the current evidence, then explicitly retry if needed.",
+  "candidates_dismiss": "[ Dísmíss ]",
+  "candidates_dismiss_for": "[ Dísmíss {name} ]",
+  "candidates_restore": "[ Rëstörë ]",
+  "candidates_restore_for": "[ Rëstörë {name} ]",
+  "candidates_pending_filter": "[ Pëñdíñg ]",
+  "candidates_dismissed_filter": "[ Dísmíssëd ]",
+  "candidates_dismissed_empty": "[ Nö dísmíssëd çåñdídåtës. ]",
+  "candidates_dismiss_description": "[ Dísmíss hídës å çåñdídåtë fröm thís rëvíëw qüëüë öñly. Åçtör rëçörds åñd mövíë çåsts årë üñçhåñgëd. Rëstörë ít fröm Dísmíssëd tö rëvíëw ít ågåíñ. ]",
+  "candidates_queue_updating": "[ Üpdåtíñg çåñdídåtë rëvíëw ståtüs ]",
+  "candidates_queue_update_failed": "[ Cöüld ñöt üpdåtë çåñdídåtë rëvíëw ståtüs ]"
 }

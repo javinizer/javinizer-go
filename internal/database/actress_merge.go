@@ -541,6 +541,9 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				return wrapDBErr("merge", fmt.Sprintf("actress aliases for %s", canonicalName), err)
 			}
 
+			if err := deleteCandidateDismissalTx(tx, sourceID); err != nil {
+				return err
+			}
 			if err := tx.Delete(&models.Actress{}, sourceID).Error; err != nil {
 				return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
 			}

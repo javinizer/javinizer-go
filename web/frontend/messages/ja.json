@@ -438,8 +438,8 @@
     }
   ],
   "browse_use_this_folder": "このフォルダーを使用",
-  "candidates_description": "カタログと照合できなかったスクレイプ由来の隔離された人物です。昇格するまでエンリッチメントと表示から除外されます。",
-  "candidates_empty": "候補はありません。カタログは整理されています。",
+  "candidates_description": "スクレイピングで見つかった未確認の人物です。カタログに登録する前に根拠を確認してください。",
+  "candidates_empty": "未確認の候補はありません。",
   "candidates_fields": "候補 #{id} の正式フィールド",
   "candidates_hide": "隠す",
   "candidates_load_failed": "候補を読み込めませんでした",
@@ -2856,5 +2856,15 @@
   "actress_sync_reload_changed": "証拠が変更されました。参照元の選択と未送信の同意を消去しました。検索と本人確認をやり直し、変更内容を確認してから確定してください。",
   "actress_sync_reload_unchanged": "証拠は変更されていません。選択と未送信のレビューを保持しました。ジョブは送信されていません。",
   "actress_sync_reload_busy": "別の証拠再読み込みが実行中です。完了後に状態を更新するか、再読み込みを再試行してください。",
-  "actress_sync_reload_failed": "証拠の再読み込みが完了しませんでした。最後に利用できた証拠は保持されています。状態を更新し、必要なら明示的に再試行してください。"
+  "actress_sync_reload_failed": "証拠の再読み込みが完了しませんでした。最後に利用できた証拠は保持されています。状態を更新し、必要なら明示的に再試行してください。",
+  "candidates_dismiss": "非表示",
+  "candidates_dismiss_for": "{name}を非表示",
+  "candidates_restore": "復元",
+  "candidates_restore_for": "{name}を復元",
+  "candidates_pending_filter": "未確認",
+  "candidates_dismissed_filter": "非表示済み",
+  "candidates_dismissed_empty": "非表示の候補はありません。",
+  "candidates_dismiss_description": "非表示にすると、この確認リストからのみ候補が隠れます。出演者の記録や作品の出演者は変更されません。再確認するには「非表示済み」から復元してください。",
+  "candidates_queue_updating": "候補の確認状態を更新中",
+  "candidates_queue_update_failed": "候補の確認状態を更新できませんでした"
 }

@@ -14,6 +14,7 @@ var (
 	ErrCollisionNotOpen          = errors.New("collision is not open")
 	ErrActressCandidateAmbiguous = errors.New("normalized actress candidate has conflicting identities")
 	ErrCandidateAlreadyVerified  = errors.New("identity is already verified")
+	ErrCandidateDismissed        = errors.New("candidate is dismissed; restore it before promotion")
 )
 
 // IsNotFound reports whether err indicates a record-not-found condition.

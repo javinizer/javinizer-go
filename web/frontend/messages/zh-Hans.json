@@ -438,8 +438,8 @@
     }
   ],
   "browse_use_this_folder": "使用此文件夹",
-  "candidates_description": "由抓取创建但无法与目录匹配的隔离身份。升级前不会参与补充和呈现。",
-  "candidates_empty": "没有候选身份。目录已清理。",
+  "candidates_description": "抓取时发现的未验证身份。请在将其加入演员库前核实相关证据。",
+  "candidates_empty": "没有待审核的候选人。",
   "candidates_fields": "候选身份 #{id} 的规范字段",
   "candidates_hide": "隐藏",
   "candidates_load_failed": "加载候选身份失败",
@@ -2856,5 +2856,15 @@
   "actress_sync_reload_changed": "证据已变化。来源选择和未提交的同意已清除。请重新搜索、选择身份并审阅后再确认。",
   "actress_sync_reload_unchanged": "证据未变化。已保留现有选择和未提交的审阅；未提交任何任务。",
   "actress_sync_reload_busy": "其他证据加载正在进行。请等待完成后刷新状态或重试加载。",
-  "actress_sync_reload_failed": "证据加载未完成。最后可用的证据已保留。请刷新状态核实当前证据，必要时明确重试。"
+  "actress_sync_reload_failed": "证据加载未完成。最后可用的证据已保留。请刷新状态核实当前证据，必要时明确重试。",
+  "candidates_dismiss": "忽略",
+  "candidates_dismiss_for": "忽略 {name}",
+  "candidates_restore": "恢复",
+  "candidates_restore_for": "恢复 {name}",
+  "candidates_pending_filter": "待审核",
+  "candidates_dismissed_filter": "已忽略",
+  "candidates_dismissed_empty": "没有已忽略的候选人。",
+  "candidates_dismiss_description": "忽略只会将候选人从此审核队列中隐藏，不会更改演员记录或影片演员表。可在“已忽略”中恢复并重新审核。",
+  "candidates_queue_updating": "正在更新候选人审核状态",
+  "candidates_queue_update_failed": "无法更新候选人审核状态"
 }

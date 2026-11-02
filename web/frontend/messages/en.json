@@ -465,8 +465,8 @@
     }
   ],
   "browse_use_this_folder": "Use This Folder",
-  "candidates_description": "Quarantined identities created by scrapes that could not be matched to your catalog. They are excluded from enrichment and rendering until promoted.",
-  "candidates_empty": "No candidates. Your catalog is clean.",
+  "candidates_description": "Unverified identities found during scraping. Review the evidence before promoting an identity to your catalog.",
+  "candidates_empty": "No pending candidates.",
   "candidates_fields": "Canonical fields for candidate #{id}",
   "candidates_hide": "Hide",
   "candidates_load_failed": "Failed to load candidates",
@@ -2891,5 +2891,15 @@
   "actress_sync_reload_changed": "Evidence changed. Source choices and unsubmitted consent were cleared. Search, choose identities and review again before confirming.",
   "actress_sync_reload_unchanged": "Evidence is unchanged. Existing choices and unsubmitted reviews were preserved; no job was submitted.",
   "actress_sync_reload_busy": "Another evidence reload is running. Refresh status or retry the reload after it finishes.",
-  "actress_sync_reload_failed": "Evidence reload did not complete. The last usable evidence remains available. Refresh status to check the current evidence, then explicitly retry if needed."
+  "actress_sync_reload_failed": "Evidence reload did not complete. The last usable evidence remains available. Refresh status to check the current evidence, then explicitly retry if needed.",
+  "candidates_dismiss": "Dismiss",
+  "candidates_dismiss_for": "Dismiss {name}",
+  "candidates_restore": "Restore",
+  "candidates_restore_for": "Restore {name}",
+  "candidates_pending_filter": "Pending",
+  "candidates_dismissed_filter": "Dismissed",
+  "candidates_dismissed_empty": "No dismissed candidates.",
+  "candidates_dismiss_description": "Dismiss hides a candidate from this review queue only. Actor records and movie casts are unchanged. Restore it from Dismissed to review it again.",
+  "candidates_queue_updating": "Updating candidate review status",
+  "candidates_queue_update_failed": "Could not update candidate review status"
 }

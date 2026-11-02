@@ -19,6 +19,8 @@ func RegisterRoutes(protected *gin.RouterGroup, deps ActressDeps) {
 	protected.POST("/actresses/import", importActresses(deps))
 	protected.GET("/actresses/candidates", ListCandidates(deps))
 	protected.POST("/actresses/candidates/:id/promote", PromoteCandidate(deps))
+	protected.POST("/actresses/candidates/:id/dismiss", DismissCandidate(deps))
+	protected.POST("/actresses/candidates/:id/restore", RestoreCandidate(deps))
 	protected.GET("/actresses/collisions", ListCollisions(deps))
 	protected.POST("/actresses/collisions/:id/resolve", ResolveCollision(deps))
 	protected.POST("/actresses/credits/:id/override", UpdateCreditOverride(deps))
