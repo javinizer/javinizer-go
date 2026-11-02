@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Both pinned subjects lock Playwright 1.59.1 (no Ubuntu 26.04 support).
+        os: [ubuntu-24.04, windows-latest]
         version: [main17092, v1.5.2]
         include:
           - version: main17092
