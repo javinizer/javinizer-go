@@ -441,11 +441,13 @@ test('destination review stays hidden when resuming an active Apply with a valid
 	const active = job(1);
 	active.status = 'running';
 	delete active.completed_at;
+	active.completed = 1;
 	active.failed = 0;
 	active.results[SOURCE].status = 'completed';
 	delete active.results[SOURCE].error;
 	delete active.results[SOURCE].error_code;
-	await page.route(`**/api/v1/batch/${JOB_ID}`, (route) => route.fulfill({ json: active }));
+	const isJobDetail = (url: URL) => url.pathname === `/api/v1/batch/${JOB_ID}`;
+	await page.route(isJobDetail, (route) => route.fulfill({ json: active }));
 	await page.addInitScript(({ key, jobId, source, destination }) => {
 		sessionStorage.setItem(key, JSON.stringify({
 			jobId, operation: 'organize', preApplyGeneration: 0, acceptedApplyGeneration: 1,
@@ -453,7 +455,14 @@ test('destination review stays hidden when resuming an active Apply with a valid
 			skipNfo: false, skipDownload: false, failed: {}, succeeded: [], eligibleFilePaths: [source],
 		}));
 	}, { key: KEY, jobId: JOB_ID, source: SOURCE, destination: DESTINATION });
+	// Detail requests include ?include_data=true. Verify this fixture was served,
+	// rather than silently falling through to the default completed generation 0.
+	const loaded = page.waitForResponse((response) =>
+		response.request().method() === 'GET' && isJobDetail(new URL(response.url())),
+	);
 	await page.goto(`/review/${JOB_ID}?view=detail`);
+	expect(await (await loaded).json()).toMatchObject({ status: 'running', apply_generation: 1 });
+	await expect(page.getByRole('heading', { name: 'Organizing Files...', exact: true })).toBeVisible();
 	await expect(page.getByRole('button', { name: /^Organizing/ }).first()).toBeDisabled();
 	await expect(page.getByTestId('video-collision-review')).toHaveCount(0);
 	expect(state.posts).toEqual([]);
