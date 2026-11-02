@@ -63,7 +63,8 @@ concurrency:
 jobs:
   browser:
     name: Genuine R18 source desktop and mobile
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 supports Ubuntu 24.04, not 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       OFFLINE_EVIDENCE_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

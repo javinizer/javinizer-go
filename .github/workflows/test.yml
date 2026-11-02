@@ -1318,7 +1318,8 @@ jobs:
   # Gate merge: set this job as a required status check in branch protection.
   fullstack-e2e:
     name: Fullstack E2E Tests
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 supports Ubuntu 24.04, not 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -1392,7 +1393,8 @@ jobs:
   # local-only live scrapers (test/e2e/live, never in CI).
   frontend-e2e:
     name: Frontend-only E2E Tests
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 supports Ubuntu 24.04, not 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
 
     steps:
@@ -1449,7 +1451,8 @@ jobs:
   # Vite-dev-server suites (frontend-e2e, fullstack-e2e) cannot exercise.
   static-e2e:
     name: Static-flavor E2E Tests
-    runs-on: ubuntu-latest
+    # Playwright 1.59.1 supports Ubuntu 24.04, not 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       console_asset_id: ${{ steps.console-assets-upload.outputs.artifact-id }}
