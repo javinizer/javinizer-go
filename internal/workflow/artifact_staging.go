@@ -419,17 +419,25 @@ func (s *artifactStage) cleanup() {
 	}
 	s.root = quarantine
 	if !artifactStageDirMatches(s.fs, s.root, stagedIdentity) || artifactStageDirStillNamed(s.fs, originalRoot) {
-		if restored, ok := artifactStageRestoreOriginalAfterIdentityDrift(s.fs, s.root, originalRoot); ok {
-			s.root = originalRoot
-			if readArtifactStageProof(s.fs, s.root) {
-				if err := removeArtifactTreeWithRetry(s.fs, s.root, restored); err == nil {
-					removeArtifactStageProofAfterTree(s.fs, proofSrc)
-					return
+		// A filesystem can derive the inode from the path: mergerfs does with
+		// inodecalc=hybrid-hash, its default, whenever the tree is reached
+		// through a container bind mount, and renaming mints a new identity for
+		// the same object. Metadata cannot tell that apart from a replant (the
+		// handle reports the same derived inode), and the sealed manifest is
+		// copyable, so nothing here may authorize deletion. Retain the tree with
+		// its completed proof and name the remedy instead of destroying the only
+		// evidence a later cleanup could use. Carry the completed proof beside
+		// the quarantined name so the retained tree keeps its ownership evidence.
+		if _, authenticated := readArtifactStageAuthenticatedManifest(s.fs, s.root); authenticated {
+			if _, statErr := s.fs.Stat(proofSrc); statErr == nil {
+				if err := s.fs.Rename(proofSrc, artifactStageProofPath(s.root)); err != nil {
+					writeArtifactStageProof(s.fs, s.root)
 				}
+			} else {
+				writeArtifactStageProof(s.fs, s.root)
 			}
 		}
-		_ = s.fs.Remove(proofSrc)
-		logging.Warnf("artifact staging cleanup retained %s: quarantined root identity changed during the rename", s.root)
+		logging.Warnf("artifact staging cleanup retained %s: directory identity changed during the rename (path-derived inode; remount the filesystem with inodecalc=devino-hash to allow cleanup)", s.root)
 		return
 	}
 	if _, statErr := s.fs.Stat(proofSrc); statErr == nil {

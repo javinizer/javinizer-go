@@ -3,9 +3,9 @@
 package workflow
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -13,16 +13,12 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/javinizer/javinizer-go/internal/fsutil"
 )
 
 // renameUnstableFS models a filesystem that derives a directory's inode number
-// from its path: a rename mints a new inode, and renaming back to a known path
-// restores the one that path always had. mergerfs does this with the default
-// inodecalc=hybrid-hash whenever the tree is reached through a container bind
-// mount, which made every cleanup rename its own staging root and then refuse
-// to delete it.
+// from its path, so a rename mints a new inode for the same object. mergerfs
+// does this with the default inodecalc=hybrid-hash whenever the tree is
+// reached through a container bind mount.
 type renameUnstableFS struct {
 	afero.Fs
 	mu       sync.Mutex
@@ -78,24 +74,7 @@ func (f *renameUnstableFS) Rename(oldname, newname string) error {
 	return nil
 }
 
-func TestSweepArtifactStagingReclaimsWhenRenameChangesIdentity(t *testing.T) {
-	parent := t.TempDir()
-	fs := newRenameUnstableFS(afero.NewOsFs())
-	setSweepSeams(t, fsutil.ProcessDead, nil)
-	root := seedStagingRoot(t, fs, parent, nil)
-
-	sweepArtifactStaging(fs, parent)
-
-	exists, _ := afero.DirExists(fs, root)
-	assert.False(t, exists, "an abandoned staging root must be reclaimed even when the rename changes its identity")
-	entries, err := afero.ReadDir(fs, parent)
-	require.NoError(t, err)
-	for _, entry := range entries {
-		assert.NotContains(t, entry.Name(), artifactStageDirPrefix, "no staging residue left behind")
-	}
-}
-
-func TestArtifactStageCleanupReclaimsWhenRenameChangesIdentity(t *testing.T) {
+func TestArtifactStageCleanupRetainsProofWhenRenameChangesIdentity(t *testing.T) {
 	parent := t.TempDir()
 	fs := newRenameUnstableFS(afero.NewOsFs())
 	root := seedStagingRoot(t, fs, parent, nil)
@@ -103,93 +82,21 @@ func TestArtifactStageCleanupReclaimsWhenRenameChangesIdentity(t *testing.T) {
 
 	stage.cleanup()
 
-	exists, _ := afero.DirExists(fs, root)
-	assert.False(t, exists, "cleanup must delete the staged tree when the rename changes its identity")
 	entries, err := afero.ReadDir(fs, parent)
 	require.NoError(t, err)
+	quarantined := ""
 	for _, entry := range entries {
-		assert.NotContains(t, entry.Name(), artifactStageDirPrefix, "no quarantine residue left behind")
+		if entry.IsDir() && strings.Contains(entry.Name(), artifactStageQuarantineMark) {
+			quarantined = filepath.Join(parent, entry.Name())
+		}
 	}
-}
+	require.NotEmpty(t, quarantined, "a drifted tree must stay under a quarantine name, not be deleted")
 
-type refusingRenameFS struct{ afero.Fs }
-
-func (f refusingRenameFS) Rename(string, string) error { return errors.New("rename refused") }
-
-type copyingRenameFS struct{ afero.Fs }
-
-func (f copyingRenameFS) Rename(oldname, newname string) error {
-	if err := f.Fs.Rename(oldname, newname); err != nil {
-		return err
-	}
-	return f.Fs.MkdirAll(oldname, 0o755)
-}
-
-type mintOnRenameFS struct{ *renameUnstableFS }
-
-func (f mintOnRenameFS) Rename(oldname, newname string) error {
-	if err := f.renameUnstableFS.Fs.Rename(oldname, newname); err != nil {
-		return err
-	}
-	key := filepath.Clean(newname)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sequence++
-	f.saved[key] = 2_000_000_000 + f.sequence
-	f.known[key] = true
-	return nil
-}
-
-func TestArtifactStageRestoreRefusesInvalidInput(t *testing.T) {
-	assert.False(t, func() bool {
-		_, ok := artifactStageRestoreOriginalAfterIdentityDrift(nil, "/q", "/o")
-		return ok
-	}(), "a nil filesystem cannot be restored")
-
-	fs := afero.NewMemMapFs()
-	for _, tc := range []struct{ quarantined, original string }{
-		{"", "/o"},
-		{"/q", ""},
-	} {
-		_, ok := artifactStageRestoreOriginalAfterIdentityDrift(fs, tc.quarantined, tc.original)
-		assert.False(t, ok, "empty staging names must refuse")
-	}
-}
-
-func TestArtifactStageRestoreRefusesWhenRenameFails(t *testing.T) {
-	base := afero.NewMemMapFs()
-	setSweepSeams(t, fsutil.ProcessDead, nil)
-	root := seedStagingRoot(t, base, "/lib", nil)
-	quarantined := root + artifactStageQuarantineMark + "deadbeef"
-	require.NoError(t, base.Rename(root, quarantined))
-
-	_, ok := artifactStageRestoreOriginalAfterIdentityDrift(refusingRenameFS{Fs: base}, quarantined, root)
-
-	assert.False(t, ok, "a refused rename leaves the identity unproven")
-}
-
-func TestArtifactStageRestoreRefusesWhenQuarantineNameSurvives(t *testing.T) {
-	base := afero.NewMemMapFs()
-	root := seedStagingRoot(t, base, "/lib", nil)
-	quarantined := root + artifactStageQuarantineMark + "feedface"
-	require.NoError(t, base.Rename(root, quarantined))
-
-	_, ok := artifactStageRestoreOriginalAfterIdentityDrift(copyingRenameFS{Fs: base}, quarantined, root)
-
-	assert.False(t, ok, "a rename that leaves the quarantine entry behind is not a restore")
-}
-
-func TestArtifactStageRestoreRefusesDifferentRestoredIdentity(t *testing.T) {
-	parent := t.TempDir()
-	base := newRenameUnstableFS(afero.NewOsFs())
-	root := seedStagingRoot(t, base, parent, nil)
-	quarantined := root + artifactStageQuarantineMark + "0011aabb"
-	require.NoError(t, base.Rename(root, quarantined))
-
-	_, ok := artifactStageRestoreOriginalAfterIdentityDrift(mintOnRenameFS{renameUnstableFS: base}, quarantined, root)
-
-	assert.False(t, ok, "a restored identity that differs from the sealed proof must refuse")
-	restoredBack, err := afero.DirExists(base, quarantined)
+	exists, err := afero.DirExists(fs, quarantined)
 	require.NoError(t, err)
-	assert.True(t, restoredBack, "the refused tree goes back under the quarantine name")
+	assert.True(t, exists, "a tree whose identity cannot be re-proven must be retained, never deleted")
+
+	_, proofErr := fs.Stat(quarantined + ".proof")
+	assert.NoError(t, proofErr,
+		"the completed proof must survive retention so a later cleanup can still reclaim the tree")
 }

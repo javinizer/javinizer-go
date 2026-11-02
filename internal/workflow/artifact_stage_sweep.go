@@ -434,19 +434,14 @@ func sweepArtifactStaging(fs afero.Fs, parent string) {
 			// at the quarantine name, or replants the original root name, refuses
 			// before any completion mark or RemoveAll can touch foreign bytes.
 			if !artifactStageDirMatches(fs, target, identity) || artifactStageDirStillNamed(fs, candidate) {
-				restored, ok := artifactStageRestoreOriginalAfterIdentityDrift(fs, target, candidate)
-				if !ok {
-					continue
-				}
-				identity = restored
-			} else {
-				// The pre-quarantine proof sidecar from an earlier cleanup failure
-				// belongs to this same tree: carry it so the removal deletes both.
-				if _, statErr := fs.Stat(artifactStageProofPath(candidate)); statErr == nil {
-					_ = fs.Rename(artifactStageProofPath(candidate), artifactStageProofPath(target))
-				}
-				candidate = target
+				continue
 			}
+			// The pre-quarantine proof sidecar from an earlier cleanup failure
+			// belongs to this same tree: carry it so the removal deletes both.
+			if _, statErr := fs.Stat(artifactStageProofPath(candidate)); statErr == nil {
+				_ = fs.Rename(artifactStageProofPath(candidate), artifactStageProofPath(target))
+			}
+			candidate = target
 		} else if !artifactStageDirMatches(fs, candidate, identity) {
 			continue
 		}
