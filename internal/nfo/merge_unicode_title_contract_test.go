@@ -1,6 +1,7 @@
 package nfo
 
 import (
+	"path/filepath"
 	"testing"
 	"unicode/utf8"
 
@@ -33,7 +34,7 @@ func TestMergeWithExistingNFOEmptyScrapedTitlePreservesUnicodeFallback(t *testin
 	})
 	require.NoError(t, result.Err)
 	require.True(t, result.Merged)
-	require.Equal(t, path, result.FoundNFOPath)
+	require.Equal(t, filepath.FromSlash(path), result.FoundNFOPath)
 	require.NotNil(t, result.Movie)
 	require.Equal(t, "題名", result.Movie.Title)
 	require.True(t, utf8.ValidString(result.Movie.Title))
