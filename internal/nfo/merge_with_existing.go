@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -186,7 +187,8 @@ func stripCodePrefix(title, movieID string) string {
 		return title
 	}
 	stripped = strings.TrimSpace(stripped)
-	if stripped != "" && !isAlnum(rune(stripped[0])) {
+	// Remove only an ASCII separator; a non-ASCII title prefix must remain intact.
+	if stripped != "" && stripped[0] < utf8.RuneSelf && !isAlnum(rune(stripped[0])) {
 		stripped = strings.TrimSpace(stripped[1:])
 	}
 	return stripped
