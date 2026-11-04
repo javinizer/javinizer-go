@@ -359,6 +359,9 @@ javinizer genre add "Creampie" "Cream Pie"
 javinizer word add "censored" "original"
 
 # Actress database
+javinizer actress list                             # find verified database IDs
+javinizer actress search "name"                    # search names and DMM IDs
+javinizer actress credit add ABC-123 --actress-id 12 # add a persistent database credit
 javinizer actress merge --target <id> --source <id>   # merge duplicates
 javinizer actress export
 

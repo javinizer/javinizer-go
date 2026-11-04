@@ -470,6 +470,42 @@ javinizer tui ~/Videos --update-mode --preset conservative
 
 Manage actress records and deduplicate duplicates.
 
+#### `actress list` / `actress search`
+
+Find verified actress database IDs without opening the GUI:
+
+```bash
+javinizer actress list --limit 50 --offset 0
+javinizer actress search "name"
+javinizer actress search "名前" --json
+```
+
+Both commands accept `--limit` (1–1000, default 50), `--offset` (default 0), and
+`--json`. Search matches partial names, full names in either order, and partial DMM IDs. Unverified scraper candidates
+are excluded. Use the **ID** column for `--actress-id`, not the external DMM ID.
+
+#### `actress credit add`
+
+Add a verified actress to an existing movie without replacing its other credits:
+
+```bash
+javinizer actress credit add ABC-123 --actress-id 12
+```
+
+The movie argument can be a movie ID or content ID. It must match exactly one
+stored movie across both fields; ambiguous matches are rejected. Use a unique
+content ID when several editions share a movie ID.
+
+The operation is transactional and marks the credit as user-owned, preserving it
+through later scrapes. Repeating the command does not duplicate the credit.
+Existing per-credit display overrides and ordering are retained. A suppressed
+credit is rejected rather than silently restored; restore it explicitly first using the credit-management API
+(`POST /api/v1/actresses/credits/{credit-id}/suppress` with `{"suppressed":false}`). Unverified actresses cannot be attached with this command.
+
+This changes the **database only**. Existing NFO files are not rewritten, and
+media files are not renamed or moved. Review and apply the movie separately when
+you want to regenerate its artifacts.
+
 #### `actress merge`
 
 Merge one actress record into another:
