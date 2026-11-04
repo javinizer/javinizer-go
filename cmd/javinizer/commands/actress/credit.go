@@ -41,35 +41,36 @@ func newCatalogCommand(search bool) *cobra.Command {
 			return err
 		}
 		defer func() { _ = deps.Close() }()
-		repo := database.NewActressRepository(deps.DB)
-		var actresses []models.Actress
-		if search {
-			actresses, err = repo.SearchPaged(cmd.Context(), query, limit, offset)
-		} else {
-			actresses, err = repo.List(cmd.Context(), limit, offset)
-		}
-		if err != nil {
-			return err
-		}
-		asJSON, _ := cmd.Flags().GetBool("json")
-		if asJSON {
-			if actresses == nil {
-				actresses = []models.Actress{}
-			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(actresses)
-		}
-		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-		if _, err := fmt.Fprintln(w, "ID\tNAME\tJAPANESE NAME\tDMM ID"); err != nil {
-			return err
-		}
-		for _, a := range actresses {
-			if _, err := fmt.Fprintf(w, "%d\t%q\t%q\t%d\n", a.ID, a.FullName(), a.JapaneseName, a.DMMID); err != nil {
-				return err
-			}
-		}
-		return w.Flush()
+		return runActressCatalog(cmd, database.NewActressRepository(deps.DB), search, query, limit, offset)
 	}
 	return cmd
+}
+
+// runActressCatalog separates database/output work from command bootstrap.
+func runActressCatalog(cmd *cobra.Command, repo *database.ActressRepository, search bool, query string, limit, offset int) error {
+	var actresses []models.Actress
+	var err error
+	if search {
+		actresses, err = repo.SearchPaged(cmd.Context(), query, limit, offset)
+	} else {
+		actresses, err = repo.List(cmd.Context(), limit, offset)
+	}
+	if err != nil {
+		return err
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if asJSON {
+		// GORM Find initializes an empty slice for a successful empty result.
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(actresses)
+	}
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+	// Every row has four cells, with user text quoted to escape controls.
+	// These writes only buffer cells; underlying output errors occur at Flush.
+	_, _ = fmt.Fprintln(w, "ID\tNAME\tJAPANESE NAME\tDMM ID")
+	for _, a := range actresses {
+		_, _ = fmt.Fprintf(w, "%d\t%q\t%q\t%d\n", a.ID, a.FullName(), a.JapaneseName, a.DMMID)
+	}
+	return w.Flush()
 }
 
 func newCreditCommand() *cobra.Command {
