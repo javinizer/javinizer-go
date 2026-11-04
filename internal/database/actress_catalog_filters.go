@@ -7,8 +7,10 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-// actressSearchCondition matches names and partial decimal DMM identifiers.
-const actressSearchCondition = "first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ? OR CAST(dmm_id AS TEXT) LIKE ?"
+// actressSearchCondition matches partial names, full names in either order,
+// Japanese names and partial decimal DMM identifiers. COALESCE preserves a
+// single available name when legacy rows have a NULL in the other name column.
+const actressSearchCondition = "(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) LIKE ? OR (COALESCE(last_name, '') || ' ' || COALESCE(first_name, '')) LIKE ? OR japanese_name LIKE ? OR CAST(dmm_id AS TEXT) LIKE ?"
 
 const missingActressThumbnailClause = "javinizer_missing_actress_thumbnail(COALESCE(thumb_url,'')) = 1"
 
