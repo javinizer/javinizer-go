@@ -38,57 +38,14 @@ func TestReloadCancellationDuringNativeArtifactRead(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	// A separate process owns a native lease on the valid candidate artifact.
-	// Only its SIGIO handler is changed; Reload and all production coverage stay
-	// in this process, using the real store and an ordinary cancellable context.
-	executable, err := os.Executable()
-	require.NoError(t, err)
-	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestReloadCancellationDuringNativeArtifactRead$", fmt.Sprintf("-test.timeout=%ds", reloadLeaseHelperTimeoutSeconds))
-	command.Env = append(os.Environ(), reloadLeaseHelperPath+"="+filepath.Join(f.directory, next.Digest()+".ndjson"))
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.StdoutPipe()
-	require.NoError(t, err)
-	release, err := command.StdinPipe()
-	require.NoError(t, err)
-	require.NoError(t, command.Start())
-	finished := make(chan struct{})
-	var commandErr error
-	var helperOutput bytes.Buffer
-	events := make(chan string, 2)
-	go func() {
-		defer close(finished)
-		defer close(events)
-		scanner := bufio.NewScanner(output)
-		for scanner.Scan() {
-			fmt.Fprintln(&helperOutput, scanner.Text())
-			if event := scanner.Text(); event == "leased" || event == "reader blocked" {
-				events <- event
-			}
-		}
-		commandErr = command.Wait()
-		if err := scanner.Err(); err != nil {
-			commandErr = errors.Join(commandErr, fmt.Errorf("read lease helper output: %w", err))
-		}
-	}()
 	var reloadFinished chan struct{}
 	t.Cleanup(func() {
 		cancel()
-		_ = release.Close()
-		select {
-		case <-finished:
-		default:
-			_ = command.Process.Kill()
-			awaitServiceSignal(t, finished)
-		}
 		if reloadFinished != nil {
 			awaitServiceSignal(t, reloadFinished)
 		}
-		if t.Failed() {
-			t.Logf("lease helper: %v\n%s%s", commandErr, helperOutput.String(), stderr.String())
-		}
 	})
-	require.Equal(t, "leased", awaitServiceSignal(t, events))
+	events, releaseLease := startNativeArtifactReadLease(t, filepath.Join(f.directory, next.Digest()+".ndjson"))
 	type reloadResult struct {
 		info SourceInfo
 		err  error
@@ -105,10 +62,7 @@ func TestReloadCancellationDuringNativeArtifactRead(t *testing.T) {
 	// lifetime, the open stays blocked until lease release or helper termination.
 	require.Equal(t, "reader blocked", awaitServiceSignal(t, events))
 	cancel()
-	_, err = fmt.Fprintln(release, "release")
-	require.NoError(t, err)
-	awaitServiceSignal(t, finished)
-	require.NoError(t, commandErr, stderr.String())
+	releaseLease()
 	got := awaitServiceSignal(t, result)
 	require.ErrorIs(t, got.err, context.Canceled)
 	require.Equal(t, "reload_cancelled", got.info.ReloadProblemCode)
@@ -136,6 +90,63 @@ func TestReloadCancellationDuringNativeArtifactRead(t *testing.T) {
 	require.Equal(t, "更新名", fresh.Proposals[0].AfterName)
 	require.Equal(t, before, reloadDatabaseState(t, f.db))
 	requireServiceCounts(t, f.db, 0, 0)
+}
+
+// startNativeArtifactReadLease runs the signal handler in a separate process.
+// The caller must register its reader cleanup first, so a failure releases this
+// lease before trying to join a reader blocked in a native open.
+func startNativeArtifactReadLease(t *testing.T, path string) (<-chan string, func()) {
+	t.Helper()
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	command := exec.CommandContext(t.Context(), executable, "-test.run=^TestReloadCancellationDuringNativeArtifactRead$", fmt.Sprintf("-test.timeout=%ds", reloadLeaseHelperTimeoutSeconds))
+	command.Env = append(os.Environ(), reloadLeaseHelperPath+"="+path)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.StdoutPipe()
+	require.NoError(t, err)
+	release, err := command.StdinPipe()
+	require.NoError(t, err)
+	require.NoError(t, command.Start())
+	finished := make(chan struct{})
+	var commandErr error
+	var helperOutput bytes.Buffer
+	events := make(chan string, 2)
+	go func() {
+		defer close(finished)
+		defer close(events)
+		scanner := bufio.NewScanner(output)
+		for scanner.Scan() {
+			fmt.Fprintln(&helperOutput, scanner.Text())
+			if event := scanner.Text(); event == "leased" || event == "reader blocked" {
+				events <- event
+			}
+		}
+		commandErr = command.Wait()
+		if err := scanner.Err(); err != nil {
+			commandErr = errors.Join(commandErr, fmt.Errorf("read lease helper output: %w", err))
+		}
+	}()
+	t.Cleanup(func() {
+		_ = release.Close()
+		select {
+		case <-finished:
+		default:
+			_ = command.Process.Kill()
+			awaitServiceSignal(t, finished)
+		}
+		if t.Failed() {
+			t.Logf("lease helper: %v\n%s%s", commandErr, helperOutput.String(), stderr.String())
+		}
+	})
+	require.Equal(t, "leased", awaitServiceSignal(t, events))
+	return events, func() {
+		t.Helper()
+		_, err := fmt.Fprintln(release, "release")
+		require.NoError(t, err)
+		awaitServiceSignal(t, finished)
+		require.NoError(t, commandErr, stderr.String())
+	}
 }
 
 func holdReloadArtifactLease(t *testing.T, path string) {
