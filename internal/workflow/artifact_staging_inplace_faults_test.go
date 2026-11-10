@@ -20,6 +20,7 @@ func TestInPlaceLegacyStagedPublicationCleanupFaults(t *testing.T) {
 		want string
 	}{
 		{"inverse persistence", "persist inverse before source cleanup"},
+		{"source replacement after inverse", "source changed"},
 		{"original removal", "remove original after artifact publication"},
 		{"untracked rollback arm", "track staged publication destination"},
 	} {
@@ -35,6 +36,11 @@ func TestInPlaceLegacyStagedPublicationCleanupFaults(t *testing.T) {
 			switch tc.name {
 			case "inverse persistence":
 				log = &completionFaultLog{complete: func() error { return errors.New("inverse unavailable") }}
+			case "source replacement after inverse":
+				log = &completionFaultLog{complete: func() error {
+					require.NoError(t, base.Rename(source, source+".retained"))
+					return afero.WriteFile(base, source, []byte("foreign successor"), 0o644)
+				}}
 			case "original removal":
 				fs = &pr260PublishFinalFS{Fs: base, op: "remove", path: source}
 				org = organizer.NewOrganizer(fs, cfg, template.NewEngine(), nil)
@@ -60,6 +66,15 @@ func TestInPlaceLegacyStagedPublicationCleanupFaults(t *testing.T) {
 			state := &applyPipelineState{operationID: "op", organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource}}
 			publishErr := stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, publishErr, tc.want)
+			if tc.name == "source replacement after inverse" {
+				require.ErrorIs(t, publishErr, errArtifactSourceChanged)
+				require.False(t, stage.sourceCleanupArmed)
+				for path, want := range map[string]string{source: "foreign successor", source + ".retained": "video"} {
+					body, readErr := afero.ReadFile(base, path)
+					require.NoError(t, readErr)
+					require.Equal(t, want, string(body))
+				}
+			}
 		})
 	}
 }
