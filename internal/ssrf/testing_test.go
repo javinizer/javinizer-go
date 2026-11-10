@@ -36,3 +36,34 @@ func currentLookupIP() func(string) ([]net.IP, error) {
 	}
 	return net.LookupIP
 }
+
+func TestSetLookupIPForTestNilTemporarilyRestoresDefaultResolver(t *testing.T) {
+	// An IP literal is resolved locally by net.DefaultResolver, so resetting
+	// the hook never depends on a real DNS server or external network access.
+	const address = "203.0.113.20"
+	calls := 0
+	t.Cleanup(SetLookupIPForTest(func(host string) ([]net.IP, error) {
+		calls++
+		require.Equal(t, address, host)
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}))
+
+	_, err := resolvePublicIPs(t.Context(), address)
+	require.ErrorContains(t, err, "private/internal IP")
+	require.Equal(t, 1, calls)
+
+	t.Run("default resolver", func(t *testing.T) {
+		t.Cleanup(SetLookupIPForTest(nil))
+		ips, err := resolvePublicIPs(t.Context(), address)
+		require.NoError(t, err)
+		require.Len(t, ips, 1)
+		require.True(t, ips[0].Equal(net.ParseIP(address)))
+		require.Equal(t, 1, calls, "cleared hook must not be called")
+	})
+
+	// The nested cleanup must restore the original security decision, rather
+	// than leave later tests silently using the process-wide default resolver.
+	_, err = resolvePublicIPs(t.Context(), address)
+	require.ErrorContains(t, err, "private/internal IP")
+	require.Equal(t, 2, calls)
+}
