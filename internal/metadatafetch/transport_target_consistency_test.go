@@ -15,6 +15,8 @@ func TestRoundTripRejectsInconsistentTargetWithoutDialing(t *testing.T) {
 	// These are contracts of the lower-level transport boundary, not inputs
 	// accepted by Fetch's string URL validation. A URL value can carry an
 	// authority in Opaque that differs from the Host validated for DNS pinning.
+	// Use a loopback request authority so the offline HTTP guard also permits
+	// the request to reach this stricter transport-local consistency check.
 	for _, tc := range []struct {
 		name   string
 		target url.URL
@@ -22,7 +24,7 @@ func TestRoundTripRejectsInconsistentTargetWithoutDialing(t *testing.T) {
 	}{
 		{
 			name:   "opaque authority differs from pinned host",
-			target: url.URL{Scheme: "http", Host: "203.0.113.7", Opaque: "//203.0.113.8/private?token=secret"},
+			target: url.URL{Scheme: "http", Host: "203.0.113.7", Opaque: "//127.0.0.1/private?token=secret"},
 			want:   ErrTarget,
 		},
 		{
