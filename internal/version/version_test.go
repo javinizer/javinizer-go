@@ -119,6 +119,24 @@ func TestApplyBuildInfo(t *testing.T) {
 		wantDate  string
 	}{
 		{
+			name:      "missing build info preserves development defaults",
+			version:   "dev",
+			commit:    "unknown",
+			buildDate: "unknown",
+			wantVer:   "dev",
+			wantCom:   "unknown",
+			wantDate:  "unknown",
+		},
+		{
+			name:      "missing build info preserves injected release values",
+			version:   "v1.2.3",
+			commit:    "abc123",
+			buildDate: "2026-01-02T03:04:05Z",
+			wantVer:   "v1.2.3",
+			wantCom:   "abc123",
+			wantDate:  "2026-01-02T03:04:05Z",
+		},
+		{
 			name:      "uses module version when current version is dev",
 			version:   "dev",
 			commit:    "unknown",
