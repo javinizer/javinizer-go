@@ -28,9 +28,10 @@ func TestVacateLinkObjectWindowsSharingRefusalPreservesLinkAndAllowsRetry(t *tes
 	ptr, err := windows.UTF16PtrFromString(name)
 	require.NoError(t, err)
 	// Open the reparse point itself, not its target, and intentionally omit
-	// FILE_SHARE_DELETE. The native kernel must refuse renaming this observed
+	// FILE_SHARE_DELETE. Request data access: metadata-only opens do not enforce
+	// this sharing restriction. The kernel must refuse renaming this observed
 	// link while the handle is alive; no syscall or filesystem seam is replaced.
-	handle, err := windows.CreateFile(ptr, windows.FILE_READ_ATTRIBUTES,
+	handle, err := windows.CreateFile(ptr, windows.GENERIC_READ,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	require.NoError(t, err)
