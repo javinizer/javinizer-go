@@ -55,3 +55,29 @@ func TestCreateTestVideoFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("dummy video content"), content)
 }
+
+func TestInvalidConfigFixturesFailWithoutBeingReplaced(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path func(*testing.T) string
+	}{
+		{"invalid config", InvalidConfigPath},
+		{"deprecated alias", UnreachableConfigPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := tc.path(t)
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			require.True(t, info.Mode().IsRegular())
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NotEmpty(t, before)
+			cfg, err := config.LoadOrCreate(path)
+			require.ErrorContains(t, err, "yaml")
+			require.Nil(t, cfg)
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, before, after, "invalid fixture must fail loading rather than create a default config")
+		})
+	}
+}

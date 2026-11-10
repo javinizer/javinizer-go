@@ -25,7 +25,7 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 		}
 		os.Exit(0)
 	}
-	for _, name := range []string{"malformed config", "invalid environment", "blocked log parent", "valid initialization", "relocated log"} {
+	for _, name := range []string{"malformed config", "invalid environment", "blocked log parent", "valid initialization", "relocated log", "stdout log directory"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "config.yaml")
@@ -54,6 +54,9 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 				cfg.Logging.Output = filepath.Join(blocker, "app.log")
 			case "valid initialization":
 				wantCode, want = 0, "Config is already at current version"
+			case "stdout log directory":
+				wantCode, want = 0, "set, but logging.output has no file target; output remains: stdout"
+				overrides = append(overrides, "LOG_LEVEL=debug", "JAVINIZER_LOG_DIR="+filepath.Join(dir, "unused-logs"))
 			case "relocated log":
 				wantCode = 0
 				cfg.Logging.Output = filepath.Join(dir, "original", "app.log")
@@ -106,6 +109,10 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 				kept, err := os.ReadFile(blocker)
 				require.NoError(t, err)
 				require.Equal(t, "keep this file", string(kept))
+			}
+			if name == "stdout log directory" {
+				_, err := os.Stat(filepath.Join(dir, "unused-logs"))
+				require.ErrorIs(t, err, os.ErrNotExist, "stdout-only logging must not create the override directory")
 			}
 			if relocated != "" {
 				log, err := os.ReadFile(relocated)
