@@ -2,6 +2,9 @@ package batch
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
+	"github.com/javinizer/javinizer-go/internal/worker/jobpersist"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,31 +69,95 @@ func TestLaunchJobScrape_Success(t *testing.T) {
 	assert.NotEqual(t, models.JobStatusRunning, job.Lifecycle().GetJobStatus())
 }
 
-// TestStartScrapeAsyncLaunch_WaitErrorPath drives a scrape that ends in a
-// failed/cancelled terminal state so the tracked goroutine's Wait-error arm
-// (logging.Warnf) executes. The movie file does not exist, so every per-file
-// scrape fails and the phase terminates unsuccessfully.
+// A source barrier ensures cancellation happens after the real scrape starts,
+// rather than racing admission or relying on per-file errors to fail the job.
+type cancellationJoinScraper struct {
+	noPosterStubScraper
+	entered   chan struct{}
+	cancelled chan struct{}
+	release   chan struct{}
+}
+
+func (s *cancellationJoinScraper) Search(ctx context.Context, _ string) (*models.ScraperResult, error) {
+	close(s.entered)
+	<-ctx.Done()
+	close(s.cancelled)
+	<-s.release
+	return nil, ctx.Err()
+}
+
 func TestStartScrapeAsyncLaunch_WaitErrorPath(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "IPX-900.mp4")
+	require.NoError(t, os.WriteFile(file, []byte("video"), 0600))
 	cfg := config.DefaultConfig(nil, nil)
-	cfg.API.Security.AllowedDirectories = []string{"/tmp"}
+	cfg.API.Security.AllowedDirectories = []string{root}
+	source := &cancellationJoinScraper{
+		entered: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{}),
+	}
+	cfg.Scrapers.Priority = []string{source.Name()}
 	deps := createTestDeps(t, cfg, "")
+	deps.CoreDeps.GetRegistry().RegisterInstance(source)
 	rt := testkit.GetTestRuntime(deps)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(source.release) }) }
+	// Release the barrier even if an assertion fails, before runtime teardown.
+	defer release()
 
 	out, err := StartScrapeUseCase(context.Background(), rt, StartScrapeInput{
-		Files: []string{"/tmp/does-not-exist-ZZZ-999.mp4"},
+		Files: []string{file}, SelectedScrapers: []string{source.Name()},
 	})
-	if err != nil {
-		// File validation may reject the input pre-launch; in that case this
-		// test cannot drive the Wait-error arm and is skipped deliberately.
-		t.Skipf("usecase rejected input before launch: %v", err)
-	}
-
-	require.True(t, rt.WaitBackgroundTasks(10*time.Second),
-		"tracked scrape goroutine must complete even for failed jobs")
-
+	require.NoError(t, err)
+	require.NotEmpty(t, out.JobID)
 	job, ok := deps.GetJobStore().GetBatchJob(out.JobID)
 	require.True(t, ok)
-	status := job.GetStatus().Status
-	assert.NotEqual(t, models.JobStatusRunning, status,
-		"failed scrape must reach a terminal state")
+	defer job.Cancel()
+	select {
+	case <-source.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("admitted scrape did not reach the source")
+	}
+	require.Equal(t, models.JobStatusRunning, job.GetStatus().Status)
+	job.Cancel()
+	select {
+	case <-source.cancelled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("job cancellation did not reach the source context")
+	}
+	// Cancellation alone is not completion: the tracked task must retain
+	// ownership until the source returns and phase persistence has finished.
+	require.False(t, rt.WaitBackgroundTasks(10*time.Millisecond),
+		"tracked scrape must not finish while its source is still blocked")
+	release()
+	require.True(t, rt.WaitBackgroundTasks(10*time.Second),
+		"tracked scrape must join the cancelled phase and its final persistence")
+	require.EqualError(t, job.Wait(), "job "+out.JobID+" cancelled")
+	status := job.GetStatus()
+	require.Equal(t, models.JobStatusCancelled, status.Status)
+	require.Empty(t, status.CurrentPhase)
+	require.Zero(t, status.Completed)
+	require.Len(t, status.Results, 1)
+	for _, result := range status.Results {
+		require.NotEqual(t, models.JobStatusCompleted, result.Status)
+		require.Nil(t, result.Movie)
+	}
+	row, err := deps.Repos.JobRepo.FindByID(context.Background(), out.JobID)
+	require.NoError(t, err)
+	persisted, decodeErrors := jobpersist.Decode(row)
+	require.Empty(t, decodeErrors)
+	require.Equal(t, models.JobStatusCancelled, persisted.Status)
+	require.Empty(t, persisted.CurrentPhase)
+	require.Len(t, persisted.Results, 1)
+	persistedResult := persisted.Results[file]
+	require.NotNil(t, persistedResult)
+	require.Equal(t, status.Results[file].Status, persistedResult.Status)
+	require.Equal(t, status.Results[file].ResultID, persistedResult.ResultID)
+	require.Nil(t, persistedResult.Movie)
+	require.NotNil(t, persistedResult.EndedAt,
+		"joining the tracked task must include final result persistence")
+	var movies int64
+	require.NoError(t, deps.Repos.DB.Model(&models.Movie{}).Count(&movies).Error)
+	require.Zero(t, movies, "cancelled scrape must not commit partial movie metadata")
+	require.NoError(t, deps.JobStore.DeleteJob(out.JobID),
+		"joined scrape must release its admission lease so the job can be deleted")
 }
