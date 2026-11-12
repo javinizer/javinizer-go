@@ -74,6 +74,16 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 	outputs := strings.Split(cfg.Output, ",")
 	var writers []io.Writer
 	var closers []io.Closer
+	// Retain ownership until every output is ready. All failure paths release
+	// files opened earlier, including failures added here in the future.
+	ready := false
+	defer func() {
+		if !ready {
+			for _, c := range closers {
+				_ = c.Close()
+			}
+		}
+	}()
 
 	for _, output := range outputs {
 		output = strings.TrimSpace(output)
@@ -90,10 +100,6 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 			// It's a file path - create directory if needed
 			dir := filepath.Dir(output)
 			if err := os.MkdirAll(dir, config.DirPerm); err != nil {
-				// Close any files we've opened so far
-				for _, c := range closers {
-					_ = c.Close()
-				}
 				return nil, nil, fmt.Errorf("failed to create log directory %q: %w", dir, err)
 			}
 
@@ -106,17 +112,11 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 						// Stat failed for a reason other than "not exists" (e.g. permission);
 						// surface it instead of letting logger setup silently succeed with
 						// an unusable output file.
-						for _, c := range closers {
-							_ = c.Close()
-						}
 						return nil, nil, fmt.Errorf("failed to stat log file %q: %w", output, err)
 					}
 					// File does not exist — create it with the intended permissions.
 					file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY, config.FilePerm)
 					if err != nil {
-						for _, c := range closers {
-							_ = c.Close()
-						}
 						return nil, nil, fmt.Errorf("failed to create log file %q: %w", output, err)
 					}
 					_ = file.Close()
@@ -136,10 +136,6 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 				// No rotation - plain file append
 				file, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, config.FilePerm)
 				if err != nil {
-					// Close any files we've opened so far
-					for _, c := range closers {
-						_ = c.Close()
-					}
 					return nil, nil, fmt.Errorf("failed to open log file %q: %w", output, err)
 				}
 				writers = append(writers, file)
@@ -153,12 +149,10 @@ func resolveLogWriters(cfg *Config) ([]io.Writer, []io.Closer, error) {
 	// AltScreen displays and hides misconfigurations (e.g. an empty output string
 	// produced by FileOnlyOutput with an empty defaultPath).
 	if len(writers) == 0 {
-		for _, c := range closers {
-			_ = c.Close()
-		}
 		return nil, nil, fmt.Errorf("no valid log outputs configured in %q (expected stdout, stderr, or a file path)", cfg.Output)
 	}
 
+	ready = true
 	return writers, closers, nil
 }
 

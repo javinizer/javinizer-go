@@ -57,6 +57,10 @@ func TestFailedWriterReloadPreservesActiveLogger(t *testing.T) {
 			firstContents, err := os.ReadFile(first)
 			require.NoError(t, err)
 			require.Empty(t, firstContents, "no records should be routed to partially prepared output")
+			// Windows also requires setup to release the partially opened file
+			// before it can be removed. Linux descriptor ownership is checked
+			// separately because unlinking an open file succeeds there.
+			require.NoError(t, os.Remove(first))
 		})
 	}
 }
