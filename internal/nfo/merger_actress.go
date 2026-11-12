@@ -39,7 +39,7 @@ func mergeActresses(fieldName string, scraped, nfo []models.Actress, strategy Me
 	case MergeArrays:
 		// Merge and deduplicate with cross-source matching.
 		// Unlike the naive key-based approach, this matches actresses across
-		// sources using all available identifiers (JapaneseName, DMMID, romanized name)
+		// sources using Japanese names and romanized names
 		// to avoid creating duplicate entries for the same person.
 		merged := mergeActressSlices(scraped, nfo, false)
 		fm.recordMerged(fieldName, 0.9)
@@ -157,7 +157,7 @@ func matchEntriesByDirection(entries []actressEntry, lookup actressLookupIndices
 }
 
 // deduplicateActresses builds entries from both slices, performs cross-source matching
-// by JapaneseName/romanized name/DMMID, and returns matches for strategy resolution.
+// by JapaneseName/romanized name, and returns matches for strategy resolution.
 func deduplicateActresses(scraped, nfo []models.Actress) []actressMatch {
 	entries := make([]actressEntry, 0, len(scraped)+len(nfo))
 
@@ -168,23 +168,13 @@ func deduplicateActresses(scraped, nfo []models.Actress) []actressMatch {
 		entries = append(entries, actressEntry{actress: a, fromScraper: false, partnerIdx: -1})
 	}
 
-	// Build lookup indices for both sources
+	// Match NFO entries against scraped candidates in input order. Matching by
+	// Japanese name or either romanized-name order is symmetric. Once an NFO
+	// entry has no available partner, later matches only consume candidates;
+	// a reverse pass cannot discover an additional pair.
 	scrapedIndices := buildActressLookupIndices(entries, true)
-	nfoIndices := buildActressLookupIndices(entries, false)
-
-	// Phase 1: Match NFO actresses to scraped actresses using NFO's identifiers
-	// (matchEntriesByDirection eagerly marks matched entries)
-	phase1 := matchEntriesByDirection(entries, scrapedIndices, false)
-	for _, pair := range phase1 {
-		entries[pair.bIdx].partnerIdx = pair.aIdx
-		entries[pair.aIdx].partnerIdx = pair.bIdx
-	}
-
-	// Phase 2: Reverse match — for any unmatched scraped actresses, try to find
-	// an NFO match using the scraped actress's identifiers against NFO lookup indices.
-	// (matchEntriesByDirection eagerly marks matched entries)
-	phase2 := matchEntriesByDirection(entries, nfoIndices, true)
-	for _, pair := range phase2 {
+	pairs := matchEntriesByDirection(entries, scrapedIndices, false)
+	for _, pair := range pairs {
 		entries[pair.bIdx].partnerIdx = pair.aIdx
 		entries[pair.aIdx].partnerIdx = pair.bIdx
 	}
