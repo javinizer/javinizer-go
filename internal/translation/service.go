@@ -453,13 +453,9 @@ func (s *Service) translateWithProvider(ctx context.Context, provider Translator
 		logging.Debugf("Translation: all %d attempts failed (last LLM output length=%d)", maxTranslationRetries, len(lastResult.RawLLM))
 	}
 
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, &translationError{
-		Kind:    TranslationErrorProvider,
-		Message: fmt.Sprintf("translation failed after %d attempts", maxTranslationRetries),
-	}
+	// The positive retry limit guarantees an attempt. Every unsuccessful
+	// attempt assigns a non-nil error; successful attempts return above.
+	return nil, lastErr
 }
 
 func isRetryableError(err error, result *translationResult) bool {
