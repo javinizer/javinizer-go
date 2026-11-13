@@ -53,7 +53,7 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Verify real DMM browser cookies and rendering with an offline fixture proxy
+    - name: Verify real DMM browser rendering and cancellation with an offline fixture proxy
       env:
         JAVINIZER_TEST_NATIVE_DMM_BROWSER: '1'
       run: |
@@ -62,9 +62,10 @@ jobs:
         export CHROME_BIN
         test -n "$CHROME_BIN"
         "$CHROME_BIN" --version
+        python3 -B -m unittest discover -s scripts -p verify_dmm_browser_coverage_test.py -v
         go test -count=1 -timeout=120s -v -covermode=atomic \
           -coverprofile=coverage-dmm-browser.out ./internal/scraper/dmm \
-          -run '^TestNativeBrowserScrapeURLCookieAndRenderingContract$' \
+          -run '^TestNativeBrowser(ScrapeURLCookieAndRenderingContract|CancellationAfterNavigation)$' \
           2>&1 | tee coverage-dmm-browser.log
         python3 scripts/verify_dmm_browser_coverage.py coverage-dmm-browser.out coverage-dmm-browser.log \
           | tee coverage-dmm-browser-proof.json
