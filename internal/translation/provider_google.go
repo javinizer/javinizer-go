@@ -179,6 +179,7 @@ func translateWithGoogleFree(ctx context.Context, httpClient httpclient.HTTPClie
 	results := make([]googleFreeResult, len(texts))
 
 	var firstErr error
+	var admissionErr error
 	var errOnce sync.Once
 
 	for i, text := range texts {
@@ -190,7 +191,7 @@ func translateWithGoogleFree(ctx context.Context, httpClient httpclient.HTTPClie
 		}
 
 		if err := sem.Acquire(egCtx, 1); err != nil {
-			_ = eg.Wait()
+			admissionErr = err
 			break
 		}
 
@@ -220,6 +221,10 @@ func translateWithGoogleFree(ctx context.Context, httpClient httpclient.HTTPClie
 
 	if firstErr != nil {
 		return nil, firstErr
+	}
+
+	if admissionErr != nil {
+		return nil, admissionErr
 	}
 
 	result := make([]string, len(texts))
