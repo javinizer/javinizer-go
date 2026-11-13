@@ -535,7 +535,7 @@ func mergeReplacementLedgerIntents(priorRaw, newRaw string, promotePinnedDeletes
 	return models.MarshalLedgerJSON(fresh)
 }
 
-func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMoves []models.SubtitleMove, downloadPaths []string, primaryResident ...bool) string {
+func buildGeneratedFilesJSON(_ logging.Logger, nfoPath string, subtitleMoves []models.SubtitleMove, downloadPaths []string, primaryResident ...bool) string {
 	gf := models.GeneratedFilesJSON{PrimaryResident: len(primaryResident) > 0 && primaryResident[0]}
 
 	deleteList := make([]string, 0, 1+len(downloadPaths))
@@ -569,16 +569,7 @@ func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMove
 		return ""
 	}
 
-	data, err := json.Marshal(gf)
-	if err != nil {
-		logger.Warnf("Failed to marshal generatedFilesJSON: %v (attempting partial recovery)", err)
-		data, err = json.Marshal(models.GeneratedFilesJSON{Delete: gf.Delete})
-		if err != nil {
-			logger.Warnf("Failed to marshal partial generatedFilesJSON: %v", err)
-			return ""
-		}
-	}
-	return string(data)
+	return models.MarshalLedgerJSON(gf)
 }
 
 // completionLedgerMerge computes the completion-transaction journal: the apply
