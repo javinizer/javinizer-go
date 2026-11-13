@@ -131,9 +131,6 @@ WHERE actress_id = ?
 		if !hasSource {
 			continue
 		}
-		if !hasTarget {
-			nextActresses = append(nextActresses, models.Actress{ID: targetID})
-		}
 
 		stub := models.Movie{ContentID: movie.ContentID}
 		if err := tx.Model(&stub).Association("Actresses").Replace(nextActresses); err != nil {
