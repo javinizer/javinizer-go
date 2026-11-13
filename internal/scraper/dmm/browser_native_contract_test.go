@@ -33,6 +33,9 @@ func TestNativeBrowserScrapeURLCookieAndRenderingContract(t *testing.T) {
 	require.NoError(t, err, "real browser executable must start: %s", version)
 	t.Logf("native browser: %s", strings.TrimSpace(string(version)))
 
+	const fixtureAuthority = "video.dmm.co.jp:18080"
+	const fixtureOrigin = "http://" + fixtureAuthority
+
 	type observedRequest struct {
 		path, query, age, locale, userAgent string
 	}
@@ -40,11 +43,11 @@ func TestNativeBrowserScrapeURLCookieAndRenderingContract(t *testing.T) {
 	var observed []observedRequest
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("fixture request: method=%q scheme=%q expected_url_host=%t expected_host_header=%t content_path=%t expected_query=%t fixture_tls_target=%t",
-			r.Method, r.URL.Scheme, r.URL.Host == "video.dmm.co.jp", r.Host == "video.dmm.co.jp",
+			r.Method, r.URL.Scheme, r.URL.Host == fixtureAuthority, r.Host == fixtureAuthority,
 			r.URL.Path == "/av/content/", r.URL.RawQuery == "id=ipx00535" || r.URL.RawQuery == "id=ipx00536",
-			r.Method == http.MethodConnect && r.URL.Host == "video.dmm.co.jp:443")
+			r.Method == http.MethodConnect && r.URL.Hostname() == "video.dmm.co.jp")
 		// Never tunnel TLS or forward unexpected browser background requests.
-		if r.Method != http.MethodGet || r.URL.Scheme != "http" || r.URL.Host != "video.dmm.co.jp" || r.Host != "video.dmm.co.jp" {
+		if r.Method != http.MethodGet || r.URL.Scheme != "http" || r.URL.Host != fixtureAuthority || r.Host != fixtureAuthority {
 			http.Error(w, "fixture proxy: upstream access forbidden", http.StatusForbidden)
 			return
 		}
@@ -101,7 +104,8 @@ document.querySelector('h1').textContent = 'Native browser rendered fixture';
 	require.True(t, ok, "DMM must expose the supported direct-URL contract")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	const sourceURL = "http://video.dmm.co.jp/av/content/?id=ipx00535"
+	const sourceURL = fixtureOrigin + "/av/content/?id=ipx00535"
+	require.True(t, handler.CanHandleURL(sourceURL))
 	result, err := handler.ScrapeURL(ctx, sourceURL)
 	require.NoError(t, err, "fixture HTTP navigation must work without bypassing TLS/browser security")
 	require.NotNil(t, result)
@@ -110,7 +114,7 @@ document.querySelector('h1').textContent = 'Native browser rendered fixture';
 	require.Equal(t, "ipx00535", result.ContentID)
 	require.Equal(t, sourceURL, result.SourceURL)
 
-	result, err = handler.ScrapeURL(ctx, "http://video.dmm.co.jp/av/content/?id=ipx00536")
+	result, err = handler.ScrapeURL(ctx, fixtureOrigin+"/av/content/?id=ipx00536")
 	require.Nil(t, result, "rendering a page without movie metadata must not invent a movie")
 	typed, ok := models.AsScraperError(err)
 	require.True(t, ok, "expected typed not-found error, got %v", err)
