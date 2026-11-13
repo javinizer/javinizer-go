@@ -30,9 +30,7 @@ func TestMiss_NewTransport_SOCKS5WithAuthFull(t *testing.T) {
 	assert.Nil(t, transport.Proxy, "SOCKS5 should clear HTTP_PROXY")
 }
 
-// --- NewRestyClientNoProxy: transport creation succeeds (lines 146-149) ---
-// This tests that the error branch in NewRestyClientNoProxy is not taken
-// (since NewTransport(nil) should never fail).
+// NewRestyClientNoProxy installs an explicit direct transport.
 
 func TestMiss_NewRestyClientNoProxy_TransportSet(t *testing.T) {
 	client := NewRestyClientNoProxy(30*time.Second, 3)
