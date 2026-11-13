@@ -461,11 +461,11 @@ func (s *RuntimeSnapshot) PosterManager() poster.PosterManagerInterface {
 	// Stale snapshot: don't touch the shared cache — build an uncached manager
 	// from this snapshot's captured config.
 	r.reloadMu.RLock()
-	current := r.reloadGen == s.gen
-	r.reloadMu.RUnlock()
-	if !current {
+	if r.reloadGen != s.gen {
+		r.reloadMu.RUnlock()
 		return buildFromSnap()
 	}
+	defer r.reloadMu.RUnlock()
 	return rs.GetPosterManager(buildFromSnap)
 }
 
@@ -641,12 +641,14 @@ func (r *APIRuntime) GetPosterGen() poster.PosterGenerator {
 // The manager is lazily initialized on first access and invalidated on config reload.
 // Returns nil if config is unavailable.
 func (r *APIRuntime) GetPosterManager() poster.PosterManagerInterface {
+	rs := r.GetRuntime()
+	r.reloadMu.RLock()
+	defer r.reloadMu.RUnlock()
 	if !r.deps.CoreDeps.HasConfig() {
 		return nil
 	}
 	cfg := r.deps.CoreDeps.GetConfig()
 
-	rs := r.GetRuntime()
 	if rs == nil {
 		// Fallback: create a fresh instance if runtime state is not yet initialized.
 		httpClient := ssrf.NewSSRFSafeClient(0)
