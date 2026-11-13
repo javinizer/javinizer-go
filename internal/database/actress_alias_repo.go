@@ -332,9 +332,6 @@ func recomputeActressCandidateQuarantineUnconditionallyTx(tx *gorm.DB) error {
 	verifiedDMMlessByKey := make(map[string]struct{})
 	verifiedCanonicalKeys := make(map[string]struct{})
 	for i := range verified {
-		if verified[i].DMMID > 0 {
-			continue
-		}
 		for key := range canonicalActressRepresentationKeys(&verified[i]) {
 			verifiedDMMlessByKey[key] = struct{}{}
 			verifiedCanonicalKeys[key] = struct{}{}
