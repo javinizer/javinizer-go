@@ -38,6 +38,7 @@ import (
 // The isEmpty function determines whether the cached value is considered unset.
 type lazyValue struct {
 	value   any
+	gen     uint64
 	mu      sync.RWMutex
 	build   func() any
 	isEmpty func(any) bool
@@ -50,31 +51,35 @@ func newLazyValue(build func() any, isEmpty func(any) bool) *lazyValue {
 
 // Get returns the cached value, constructing it on first access using double-checked locking.
 func (lv *lazyValue) Get() any {
-	lv.mu.RLock()
-	v := lv.value
-	lv.mu.RUnlock()
-	if !lv.isEmpty(v) {
+	for {
+		lv.mu.RLock()
+		v, gen := lv.value, lv.gen
+		lv.mu.RUnlock()
+		if !lv.isEmpty(v) {
+			return v
+		}
+
+		newVal := lv.build()
+
+		lv.mu.Lock()
+		if lv.gen != gen {
+			lv.mu.Unlock()
+			continue
+		}
+		if lv.isEmpty(lv.value) {
+			lv.value = newVal
+		}
+		v = lv.value
+		lv.mu.Unlock()
 		return v
 	}
-
-	newVal := lv.build()
-
-	lv.mu.Lock()
-	// Double-check: another goroutine may have built the value while we waited.
-	if !lv.isEmpty(lv.value) {
-		lv.mu.Unlock()
-		return lv.value
-	}
-	lv.value = newVal
-	lv.mu.Unlock()
-
-	return newVal
 }
 
 // Invalidate clears the cached value so the next Get() rebuilds it.
 func (lv *lazyValue) Invalidate() {
 	lv.mu.Lock()
 	lv.value = nil
+	lv.gen++
 	lv.mu.Unlock()
 }
 
@@ -175,8 +180,8 @@ type APIRuntime struct {
 // rt.Deps() for the immutable container.
 func NewAPIRuntime(deps *APIDeps) *APIRuntime {
 	r := &APIRuntime{deps: deps}
-	r.workflowFactory = newLazyValue(r.buildWorkflowFactory, func(v any) bool { return v == nil })
-	r.batchJobFactory = newLazyValue(r.buildBatchJobFactory, func(v any) bool { return v == nil })
+	r.workflowFactory = newLazyValue(r.buildWorkflowFactoryLocked, func(v any) bool { return v == nil })
+	r.batchJobFactory = newLazyValue(r.buildBatchJobFactoryLocked, func(v any) bool { return v == nil })
 	return r
 }
 
@@ -359,13 +364,17 @@ func (s *RuntimeSnapshot) ScanOnlyWorkflow() (workflow.WorkflowInterface, error)
 // Matcher constructs a matcher from the snapshot's APIConfig. Cheap (no shared
 // cache involved), and consistent with snap.APIConfig() by construction.
 func (s *RuntimeSnapshot) Matcher() matcher.MatcherInterface {
-	matchCfg := s.apiCfg.MatcherConfig()
+	return newMatcherFromAPIConfig(s.apiCfg)
+}
+
+func newMatcherFromAPIConfig(apiCfg APIConfig) matcher.MatcherInterface {
+	matchCfg := apiCfg.MatcherConfig()
 	mat, err := matcher.NewMatcher(&matcher.Config{
 		RegexEnabled: matchCfg.RegexEnabled,
 		RegexPattern: matchCfg.RegexPattern,
 	})
 	if err != nil {
-		logging.Warnf("Failed to create matcher from snapshot APIConfig: %v", err)
+		logging.Warnf("Failed to create matcher from APIConfig: %v", err)
 		return nil
 	}
 	return mat
@@ -385,7 +394,7 @@ func (s *RuntimeSnapshot) Matcher() matcher.MatcherInterface {
 // that mutates the shared JobStore and every reconstructed job, so a stale
 // request could otherwise roll current jobs back to old Matcher/PosterGen/
 // BatchCfg after the new epoch was published. Reconstruction hydration stays on
-// the current-epoch lazy build path (buildBatchJobFactory), which is always
+// the current-epoch lazy build path (buildBatchJobFactoryLocked), which is always
 // up-to-date by definition.
 func (s *RuntimeSnapshot) BatchJobFactory() worker.BatchJobFactoryInterface {
 	r := s.rt
@@ -469,10 +478,8 @@ func NewSnapshotForTesting(rt *APIRuntime, apiCfg APIConfig) *RuntimeSnapshot {
 	return &RuntimeSnapshot{rt: rt, apiCfg: apiCfg}
 }
 
-// getWorkflowFactory returns the cached WorkflowFactory, constructing it on first access.
-// buildWorkflowFactory constructs a new WorkflowFactory from the current config.
-// Used as the build function for the lazy workflowFactory value.
-func (r *APIRuntime) buildWorkflowFactory() any {
+// buildWorkflowFactoryLocked constructs a factory while the caller holds reloadMu.
+func (r *APIRuntime) buildWorkflowFactoryLocked() any {
 	return buildWorkflowFactoryFrom(r.deps.CoreDeps.GetConfig(), r.deps.CoreDeps.GetRegistry(), r.deps.Repos)
 }
 
@@ -509,6 +516,8 @@ func buildWorkflowFactoryFrom(cfg *config.Config, registry *scraperutil.ScraperR
 // supports all workflow modes — callers use NewWorkflow, NewScrapeOnlyWorkflow, or
 // NewScanOnlyWorkflow on the same factory instance.
 func (r *APIRuntime) getWorkflowFactory() (*workflow.WorkflowFactory, error) {
+	r.reloadMu.RLock()
+	defer r.reloadMu.RUnlock()
 	f := r.workflowFactory.Get()
 	if f == nil {
 		return nil, fmt.Errorf("workflow factory not available — check config and registry")
@@ -532,25 +541,26 @@ func (r *APIRuntime) GetWorkflow() workflow.WorkflowInterface {
 	return wf
 }
 
-// buildBatchJobFactory constructs a new BatchJobFactory from the current config.
-// Used as the build function for the lazy batchJobFactory value.
+// buildBatchJobFactoryLocked constructs and hydrates a factory while the caller holds reloadMu.
 //
 // Per W-3: retrieves the PosterGenerator from the cached WorkflowFactory instead of
 // constructing a new ScrapePosterGenerator, collapsing the construction site.
-func (r *APIRuntime) buildBatchJobFactory() any {
-	apiCfg := r.GetAPIConfig()
-	batchCfg := apiCfg.BatchConfig()
+func (r *APIRuntime) buildBatchJobFactoryLocked() any {
+	batchCfg := r.apiCfg.BatchConfig()
 
 	// Per W-3: the factory must always be available when the API layer runs
 	// (API server starts after bootstrapping). If PosterGen is nil, return nil
 	// to signal failure rather than constructing a new one outside the factory.
-	posterGen := r.GetPosterGen()
+	var posterGen poster.PosterGenerator
+	if f := r.workflowFactory.Get(); f != nil {
+		posterGen = f.(*workflow.WorkflowFactory).PosterGen()
+	}
 	if posterGen == nil {
 		logging.Error("buildBatchJobFactory: workflow factory PosterGen is nil — cannot construct batch job factory without it")
 		return nil
 	}
 
-	matcher := r.NewMatcher()
+	matcher := newMatcherFromAPIConfig(r.apiCfg)
 	workerBatchCfg := worker.BatchJobConfig{MaxWorkers: batchCfg.MaxWorkers, WorkerTimeout: batchCfg.WorkerTimeout, RequestTimeout: batchCfg.RequestTimeout, ScraperPriority: batchCfg.ScraperPriority, NFOEnabled: batchCfg.NFOEnabled, PosterDisabled: !batchCfg.DownloadPoster}
 
 	// Re-hydrate reconstructed jobs with infrastructure deps (matcher, posterGen,
@@ -578,6 +588,8 @@ func (r *APIRuntime) buildBatchJobFactory() any {
 // every call, re-reading APIConfig and creating a new ScrapePosterGenerator each time.
 // Caching in APIRuntime avoids repeated construction for the same config/matcher/posterGen.
 func (r *APIRuntime) GetBatchJobFactory() worker.BatchJobFactoryInterface {
+	r.reloadMu.RLock()
+	defer r.reloadMu.RUnlock()
 	f := r.batchJobFactory.Get()
 	if f == nil {
 		return nil
@@ -590,17 +602,7 @@ func (r *APIRuntime) GetBatchJobFactory() worker.BatchJobFactoryInterface {
 // don't need to import the matcher package directly.
 // Returns nil if the matcher cannot be created (e.g., invalid regex pattern).
 func (r *APIRuntime) NewMatcher() matcher.MatcherInterface {
-	apiCfg := r.GetAPIConfig()
-	matchCfg := apiCfg.MatcherConfig()
-	mat, err := matcher.NewMatcher(&matcher.Config{
-		RegexEnabled: matchCfg.RegexEnabled,
-		RegexPattern: matchCfg.RegexPattern,
-	})
-	if err != nil {
-		logging.Warnf("Failed to create matcher from APIConfig: %v", err)
-		return nil
-	}
-	return mat
+	return newMatcherFromAPIConfig(r.GetAPIConfig())
 }
 
 // GetBatchWorkflow constructs the workflow used by a batch job.
