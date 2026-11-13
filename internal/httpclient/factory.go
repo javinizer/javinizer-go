@@ -40,6 +40,15 @@ func normalizeProxyURL(raw string) string {
 	return "http://" + trimmed
 }
 
+// newDirectTransport preserves the default transport's safety timeouts while
+// enforcing config-only proxy behavior. Cloning without proxy configuration
+// cannot return a configuration error.
+func newDirectTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return transport
+}
+
 // NewTransport creates an http.Transport with optional proxy support
 func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 	if proxyProfile != nil && proxyProfile.URL != "" {
@@ -48,11 +57,7 @@ func NewTransport(proxyProfile *models.ProxyProfile) (*http.Transport, error) {
 		logging.Debugf("HTTPClient: Creating transport without proxy")
 	}
 
-	// Clone default transport to preserve Go's safety timeouts
-	// (DialContext timeout, TLSHandshakeTimeout, ExpectContinueTimeout, etc.)
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// Enforce config-only proxy behavior: never inherit HTTP(S)_PROXY from environment.
-	transport.Proxy = nil
+	transport := newDirectTransport()
 
 	if proxyProfile != nil && proxyProfile.URL != "" {
 		parsedProxyURL, err := url.Parse(normalizeProxyURL(proxyProfile.URL))
@@ -141,13 +146,8 @@ func NewRestyClientNoProxy(timeout time.Duration, retries int) *resty.Client {
 	client.SetTimeout(timeout)
 	client.SetRetryCount(retries)
 
-	transport, err := NewTransport(nil)
-	if err != nil {
-		logging.Warnf("HTTP client: failed to create explicit no-proxy transport, using Resty default transport: %v", err)
-		return client
-	}
-
-	client.SetTransport(transport)
+	logging.Debugf("HTTPClient: Creating transport without proxy")
+	client.SetTransport(newDirectTransport())
 	return client
 }
 
