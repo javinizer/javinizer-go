@@ -110,10 +110,7 @@ func (b *jobEventBroadcaster) Send(event JobEvent) {
 			case <-ch:
 			default:
 			}
-			select {
-			case ch <- event:
-			default:
-			}
+			ch <- event
 		}
 	}
 }
