@@ -39,6 +39,10 @@ func TestNativeBrowserScrapeURLCookieAndRenderingContract(t *testing.T) {
 	var mu sync.Mutex
 	var observed []observedRequest
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("fixture request: method=%q scheme=%q expected_url_host=%t expected_host_header=%t content_path=%t expected_query=%t fixture_tls_target=%t",
+			r.Method, r.URL.Scheme, r.URL.Host == "video.dmm.co.jp", r.Host == "video.dmm.co.jp",
+			r.URL.Path == "/av/content/", r.URL.RawQuery == "id=ipx00535" || r.URL.RawQuery == "id=ipx00536",
+			r.Method == http.MethodConnect && r.URL.Host == "video.dmm.co.jp:443")
 		// Never tunnel TLS or forward unexpected browser background requests.
 		if r.Method != http.MethodGet || r.URL.Scheme != "http" || r.URL.Host != "video.dmm.co.jp" || r.Host != "video.dmm.co.jp" {
 			http.Error(w, "fixture proxy: upstream access forbidden", http.StatusForbidden)
