@@ -112,14 +112,7 @@ func (r *APIRuntime) reloadConfigLocked(cfg *config.Config, reg *scraperutil.Scr
 		// fallback, but the failure is logged so it is diagnosable.
 		logging.Warnf("%v", dumpErr)
 	}
-	newRegistry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
-	if err != nil {
-		_ = reg.Close()
-		if r18DumpCloser != nil {
-			_ = r18DumpCloser.Close()
-		}
-		return fmt.Errorf("failed to initialize scraper registry: %w", err)
-	}
+	newRegistry := scraper.PopulateScraperRegistry(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), r.deps.Repos.ContentIDMappingRepo, r18DumpLookup)
 	// Keep old registries and their dump handles alive for in-flight workflows.
 	// Shutdown releases them once server tasks and requests have drained.
 	r.deps.CoreDeps.RetireR18DevDumpCloser(r18DumpCloser)
