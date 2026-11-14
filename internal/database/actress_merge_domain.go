@@ -115,19 +115,12 @@ func defaultResolutionsFromConflicts(conflicts []ActressMergeConflict) map[strin
 }
 
 // canonicalActressName returns the canonical name for an actress.
-// Priority: JapaneseName > FullName() > FirstName > LastName.
+// Priority: JapaneseName > FullName().
 func canonicalActressName(actress *models.Actress) string {
 	if nonEmptyString(actress.JapaneseName) {
 		return strings.TrimSpace(actress.JapaneseName)
 	}
-	fullName := strings.TrimSpace(actress.FullName())
-	if fullName != "" {
-		return fullName
-	}
-	if nonEmptyString(actress.FirstName) {
-		return strings.TrimSpace(actress.FirstName)
-	}
-	return strings.TrimSpace(actress.LastName)
+	return strings.TrimSpace(actress.FullName())
 }
 
 // splitAliasList splits a pipe-separated alias string into individual aliases.
