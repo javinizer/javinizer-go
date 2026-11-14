@@ -87,10 +87,7 @@ func translateWithGooglePaid(ctx context.Context, httpClient httpclient.HTTPClie
 		requestBody.Source = sourceLang
 	}
 
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, err
-	}
+	body, _ := json.Marshal(requestBody)
 
 	translateURL := baseURL + "/language/translate/v2?key=" + url.QueryEscape(apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, translateURL, bytes.NewReader(body))
