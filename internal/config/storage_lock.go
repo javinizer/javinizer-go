@@ -90,9 +90,6 @@ func parseConfigLockMetadata(content string) (pid int, createdUnixNano int64, ok
 	})
 
 	for _, part := range parts {
-		if part == "" {
-			continue
-		}
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
 			continue

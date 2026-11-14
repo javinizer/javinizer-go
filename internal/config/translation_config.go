@@ -417,10 +417,7 @@ func (tc *TranslationConfig) SettingsHash() string {
 	}
 
 	// Serialize to JSON with sorted keys for determinism
-	jsonBytes, err := json.Marshal(hashInput)
-	if err != nil {
-		return "" // Should never happen with simple struct
-	}
+	jsonBytes, _ := json.Marshal(hashInput)
 
 	// Compute SHA256 hash
 	hash := sha256.Sum256(jsonBytes)
