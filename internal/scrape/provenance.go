@@ -108,9 +108,6 @@ func ActressSourceKey(actress models.Actress) string {
 	if normalized := models.NormalizeActressNameKey(strings.TrimSpace(actress.FirstName + " " + actress.LastName)); normalized != "" {
 		return "name:" + normalized
 	}
-	if normalized := models.NormalizeActressNameKey(strings.TrimSpace(actress.LastName + " " + actress.FirstName)); normalized != "" {
-		return "name:" + normalized
-	}
 	return ""
 }
 
@@ -132,9 +129,6 @@ func actressSourceKeysFromInfo(info models.ActressInfo) []string {
 	deduped := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
-		if key == "" {
-			continue
-		}
 		if _, exists := seen[key]; exists {
 			continue
 		}
