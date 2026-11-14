@@ -859,17 +859,16 @@ func (e *Engine) TruncateTitleBytes(title string, maxBytes int) string {
 		// Return as many bytes as we can fit (no marker)
 		runes := []rune(title)
 		currentBytes := 0
+		endIdx := 0
 		for i, r := range runes {
 			runeSize := len(string(r))
 			if currentBytes+runeSize > maxBytes {
-				if i == 0 {
-					return "" // Can't fit even one rune
-				}
-				return string(runes[:i])
+				break
 			}
 			currentBytes += runeSize
+			endIdx = i + 1
 		}
-		return title // Shouldn't reach here
+		return string(runes[:endIdx])
 	}
 
 	// Reserve space for marker
