@@ -215,9 +215,7 @@ func translateWithGoogleFree(ctx context.Context, httpClient httpclient.HTTPClie
 		})
 	}
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
+	_ = eg.Wait()
 
 	if firstErr != nil {
 		return nil, firstErr

@@ -110,9 +110,5 @@ func ResolveURL(base, raw string) string {
 	if err != nil {
 		return raw
 	}
-	resolved := baseURL.ResolveReference(ref)
-	if resolved == nil {
-		return raw
-	}
-	return resolved.String()
+	return baseURL.ResolveReference(ref).String()
 }
