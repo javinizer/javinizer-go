@@ -203,23 +203,24 @@ func (s *Snapshot) Resolve(display string) Decision {
 	if len(owners) == 0 {
 		return fail("unknown")
 	}
+	var owner record
 	for _, r := range owners {
-		if r.quarantined {
-			return fail("quarantined")
-		}
-		if !r.verified {
-			return fail("candidate")
-		}
-		if r.origin != "user" && r.origin != "import" {
-			return fail("untrusted_origin")
-		}
-		if key(r.first) == "" || key(r.last) == "" {
-			return fail("no_complete_split")
-		}
-		if target != key(r.first+" "+r.last) && target != key(r.last+" "+r.first) {
-			return fail("alias_name_mismatch")
-		}
-		return Decision{Resolved: true, FirstName: r.first, LastName: r.last, CatalogID: r.id, Confidence: "catalog_consistent", Reason: "matched"}
+		owner = r
 	}
-	return fail("unknown")
+	if owner.quarantined {
+		return fail("quarantined")
+	}
+	if !owner.verified {
+		return fail("candidate")
+	}
+	if owner.origin != "user" && owner.origin != "import" {
+		return fail("untrusted_origin")
+	}
+	if key(owner.first) == "" || key(owner.last) == "" {
+		return fail("no_complete_split")
+	}
+	if target != key(owner.first+" "+owner.last) && target != key(owner.last+" "+owner.first) {
+		return fail("alias_name_mismatch")
+	}
+	return Decision{Resolved: true, FirstName: owner.first, LastName: owner.last, CatalogID: owner.id, Confidence: "catalog_consistent", Reason: "matched"}
 }
