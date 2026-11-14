@@ -135,10 +135,8 @@ func (r *ActressRepository) ApplyOfflineNameSync(ctx context.Context, lease Actr
 			}
 			evidence, err := syncNameEvidence(snapshot, task.SourceKey, now, time.Duration(job.MaxAgeNS))
 			status, reason := "unchanged", ""
-			if errors.Is(err, ErrActressSyncStale) {
+			if err != nil {
 				status, reason = "skipped", "stale_evidence"
-			} else if err != nil {
-				return err
 			} else {
 				if evidence.Metadata.JapaneseName != task.AfterName {
 					return ErrActressSyncStale
