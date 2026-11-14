@@ -58,10 +58,7 @@ func organizeMetadata(mode string, result *workflow.ApplyResult) string {
 	if result != nil && result.OrganizeResult != nil && len(result.OrganizeResult.Warnings) > 0 {
 		m["warnings"] = result.OrganizeResult.Warnings
 	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "{}"
-	}
+	b, _ := json.Marshal(m)
 	return string(b)
 }
 
