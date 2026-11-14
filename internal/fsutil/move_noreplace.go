@@ -29,7 +29,8 @@ import (
 // stagingFileMode restores the pre-#224 mode semantics for staging writes:
 // the legacy OpenFile path let the kernel apply the process umask,
 // CreateExclusiveStagingFile deliberately Chmods the exact requested mode
-// instead. Without re-masking, organized files would land wider than the
+// instead (best effort on filesystems that refuse chmod, see
+// CreateExclusiveStagingFileModeBestEffort). Without re-masking, organized files would land wider than the
 // configured umask permits (codex P1). With no cached umask this degenerates
 // to config.FilePerm unchanged.
 func stagingFileMode() os.FileMode {
@@ -268,7 +269,7 @@ func copyStreamNoReplaceInstallReproof(fs afero.Fs, srcFile afero.File, dst stri
 	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
 		return nil, err
 	}
-	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
+	staged, handle, err := CreateExclusiveStagingFileModeBestEffort(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if err != nil {
 		return nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}
@@ -341,7 +342,7 @@ func copyStreamNoReplaceDigestReproof(fs afero.Fs, srcFile afero.File, dst strin
 	if err := ProbeNoClobberPublish(fs, filepath.Dir(dst)); err != nil {
 		return "", nil, err
 	}
-	staged, handle, err := CreateExclusiveStagingFile(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
+	staged, handle, err := CreateExclusiveStagingFileModeBestEffort(fs, dst, ".nrstg", noreplaceOrdinal.Add(1), mode)
 	if err != nil {
 		return "", nil, fmt.Errorf("no-replace copy: exclusive staging for %s: %w", dst, err)
 	}

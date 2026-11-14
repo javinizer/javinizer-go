@@ -101,11 +101,13 @@ func CreateExclusiveStagingFile(fs afero.Fs, dest, suffix string, start uint64, 
 }
 
 // CreateExclusiveStagingFileModeBestEffort is CreateExclusiveStagingFile for
-// staging files whose permission bits carry no security or access contract
-// (sealed ownership markers): a filesystem that refuses mode changes outright
-// (stagingModeChangeRefused) keeps its inherited permissions instead of
-// failing the staging. Media staging must keep the strict variant so a
-// refused chmod never silently narrows or widens published file access.
+// staging files on volumes whose permission model may refuse mode changes
+// (ZFS aclmode=restricted, NFS squash/mapall; issue #367): when the chmod is
+// refused outright (stagingModeChangeRefused) the file keeps its
+// filesystem-assigned permissions instead of failing the staging. Used for
+// sealed ownership markers, the destination media-move staging and the
+// no-clobber probe. Restore/backup paths that must reproduce exact recorded
+// permissions keep the strict variant.
 func CreateExclusiveStagingFileModeBestEffort(fs afero.Fs, dest, suffix string, start uint64, mode os.FileMode) (string, afero.File, error) {
 	return createExclusiveStagingFile(fs, dest, suffix, start, mode, true)
 }
