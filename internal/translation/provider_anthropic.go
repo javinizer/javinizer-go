@@ -71,10 +71,7 @@ func (a *anthropicChatAdapter) BuildRequest(ctx context.Context, baseURL, model 
 		"system":     systemPrompt,
 		"messages":   []anthropicMessage{{Role: "user", Content: userPrompt}},
 	}
-	body, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, err
-	}
+	body, _ := json.Marshal(requestBody)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {

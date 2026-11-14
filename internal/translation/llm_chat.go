@@ -225,10 +225,7 @@ func (a *openAIChatAdapter) BuildRequest(ctx context.Context, baseURL, model str
 	if a.omitTemperature {
 		request.Temperature = nil
 	}
-	body, err := json.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
+	body, _ := json.Marshal(request)
 
 	url := baseURL + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
