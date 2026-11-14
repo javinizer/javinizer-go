@@ -159,14 +159,8 @@ type fileMigrationLocker struct {
 }
 
 func (l *fileMigrationLocker) Lock(ctx context.Context, _ *sql.DB) error {
-	locked, err := l.fileLock.TryLockContext(ctx, migrationLockRetry)
-	if err != nil {
-		return err
-	}
-	if !locked {
-		return fmt.Errorf("unable to acquire file lock %q", l.fileLock.Path())
-	}
-	return nil
+	_, err := l.fileLock.TryLockContext(ctx, migrationLockRetry)
+	return err
 }
 
 func (l *fileMigrationLocker) Unlock(_ context.Context, _ *sql.DB) error {
