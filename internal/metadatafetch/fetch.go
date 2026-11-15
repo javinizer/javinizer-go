@@ -214,15 +214,21 @@ func (c *Client) fetch(parent context.Context, rawURL string, imageLimits *image
 				return Result{}, ErrImage
 			}
 		}
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		digest := sha256.Sum256(data)
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
-		return Result{Bytes: data, FinalURL: current.String(), SHA256: digest}, nil
+		return finalizeResult(ctx, data, current)
 	}
+}
+
+// finalizeResult keeps cancellation checks on both sides of hashing so a
+// canceled request never exposes a partially finalized result.
+func finalizeResult(ctx context.Context, data []byte, current *url.URL) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	digest := sha256.Sum256(data)
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	return Result{Bytes: data, FinalURL: current.String(), SHA256: digest}, nil
 }
 
 func readResponse(ctx context.Context, response *http.Response, maxBytes int64) ([]byte, error) {
