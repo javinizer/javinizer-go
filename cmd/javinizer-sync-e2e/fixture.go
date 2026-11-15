@@ -13,6 +13,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/actresscache/sources/r18dump"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -163,42 +164,68 @@ func inspect(root string) error {
 		if err != nil {
 			return err
 		}
-		cols, err := rows.Columns()
+		out[key], err = readInspectionRows(rows)
 		if err != nil {
-			_ = rows.Close()
 			return err
 		}
-		out[key] = []map[string]any{}
-		for rows.Next() {
-			values := make([]any, len(cols))
-			ptrs := make([]any, len(cols))
-			for i := range ptrs {
-				ptrs[i] = &values[i]
-			}
-			if err := rows.Scan(ptrs...); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			row := map[string]any{}
-			for i, col := range cols {
-				if b, ok := values[i].([]byte); ok {
-					values[i] = string(b)
-				}
-				row[col] = values[i]
-			}
-			out[key] = append(out[key], row)
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		// These fixed SELECTs use single-result SQLite rows. Exhausting Next
-		// closes them, and Err above reports any iteration/close failure.
-		// Retain the idempotent close without a second, unreachable error path.
-		_ = rows.Close()
 	}
+	return commitInspection(tx, out, os.Stdout)
+}
+
+// inspectionRows keeps row decoding separate from the read-only connection and
+// transaction. Production always supplies the real *sql.Rows returned above.
+type inspectionRows interface {
+	Columns() ([]string, error)
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close() error
+}
+
+// readInspectionRows owns and closes rows, including when cancellation closes
+// them between QueryContext and Columns or between Next and Scan.
+func readInspectionRows(rows inspectionRows) ([]map[string]any, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	out := []map[string]any{}
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range ptrs {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		row := map[string]any{}
+		for i, col := range cols {
+			if b, ok := values[i].([]byte); ok {
+				values[i] = string(b)
+			}
+			row[col] = values[i]
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	// These fixed SELECTs use single-result SQLite rows. Exhausting Next
+	// closes them, and Err above reports any iteration/close failure.
+	// Retain the idempotent close without a second, unreachable error path.
+	_ = rows.Close()
+	return out, nil
+}
+
+// commitInspection emits no snapshot unless the read transaction commits. The
+// caller retains transaction ownership and its deferred rollback on failure.
+func commitInspection(tx *sql.Tx, out map[string][]map[string]any, w io.Writer) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(out)
+	return json.NewEncoder(w).Encode(out)
 }

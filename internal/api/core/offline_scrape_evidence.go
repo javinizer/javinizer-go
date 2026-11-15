@@ -84,6 +84,14 @@ func (r *APIRuntime) BeginOfflineScrapeEvidence(ctx context.Context, requested b
 // BeginOfflineScrapeEvidenceForFiles pins one generation before any fanout.
 // The caller releases only after every admitted reader/worker has joined.
 func (r *APIRuntime) BeginOfflineScrapeEvidenceForFiles(ctx context.Context, requested bool, count int) (context.Context, func(), error) {
+	return r.beginOfflineScrapeEvidenceForFiles(ctx, requested, count, func(linked context.Context, count int) (context.Context, func()) {
+		return r.OfflineScrapeEvidence().BeginBatch(linked, true, count)
+	})
+}
+
+// beginOfflineScrapeEvidenceForFiles owns admission and cancellation until pin
+// returns. The per-call boundary keeps lazy reader access inside that lifetime.
+func (r *APIRuntime) beginOfflineScrapeEvidenceForFiles(ctx context.Context, requested bool, count int, pin func(context.Context, int) (context.Context, func())) (context.Context, func(), error) {
 	if !requested {
 		var disabled *scrapeevidence.Service
 		clean, release := disabled.Begin(ctx, false)
@@ -101,7 +109,7 @@ func (r *APIRuntime) BeginOfflineScrapeEvidenceForFiles(ctx context.Context, req
 			done()
 		}
 	}()
-	pinned, release := r.OfflineScrapeEvidence().BeginBatch(linked, true, count)
+	pinned, release := pin(linked, count)
 	var once sync.Once
 	ready = true
 	return pinned, func() { once.Do(func() { cancel(); release(); done() }) }, nil
