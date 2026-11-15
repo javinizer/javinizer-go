@@ -335,6 +335,22 @@ func resolveExePath(override string) (string, error) {
 // downloadAndReplace fetches the checksums and the asset, verifies the SHA256,
 // and atomically swaps the binary into place.
 func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, asset string) error {
+	return downloadAndReplaceWithStagingFile(ctx, opts, exePath, tag, asset, func(dir, pattern string) (upgradeStagingFile, error) {
+		return os.CreateTemp(dir, pattern)
+	})
+}
+
+// upgradeStagingFile is the open staging resource whose contents must be flushed
+// and closed before verification and publication. The production implementation
+// remains an OS file in the installed binary's directory for atomic replacement.
+type upgradeStagingFile interface {
+	io.Writer
+	Name() string
+	Sync() error
+	Close() error
+}
+
+func downloadAndReplaceWithStagingFile(ctx context.Context, opts UpgradeOptions, exePath, tag, asset string, createTemp func(string, string) (upgradeStagingFile, error)) error {
 	out := opts.Out
 	dir := filepath.Dir(exePath)
 
@@ -354,7 +370,7 @@ func downloadAndReplace(ctx context.Context, opts UpgradeOptions, exePath, tag, 
 	// Write the asset to a temp file in the same directory as the running
 	// binary so the final rename is atomic (same filesystem). A cross-device
 	// rename would fail with EXDEV.
-	tmp, err := os.CreateTemp(dir, ".javinizer-upgrade-*.tmp")
+	tmp, err := createTemp(dir, ".javinizer-upgrade-*.tmp")
 	if err != nil {
 		if os.IsPermission(err) {
 			return fmt.Errorf("no write permission to %s — re-run with sudo, or install via Homebrew/Scoop", dir)
