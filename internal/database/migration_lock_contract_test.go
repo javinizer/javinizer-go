@@ -42,10 +42,11 @@ func TestFileMigrationLockerContextContract(t *testing.T) {
 					cancel()
 				}
 				defer cancel()
-				locker := &fileMigrationLocker{fileLock: flock.New(path)}
+				fileLock := flock.New(path)
+				locker := &fileMigrationLocker{fileLock: fileLock}
 				t.Cleanup(func() { require.NoError(t, locker.fileLock.Close()) })
 				require.ErrorIs(t, locker.Lock(ctx, nil), want)
-				require.False(t, locker.fileLock.Locked())
+				require.False(t, fileLock.Locked())
 				require.Equal(t, held, holder.Locked())
 			})
 		}
@@ -59,7 +60,8 @@ func TestFileMigrationLockerWaitingContract(t *testing.T) {
 			holder := flock.New(path)
 			require.NoError(t, holder.Lock())
 			t.Cleanup(func() { require.NoError(t, holder.Close()) })
-			locker := &fileMigrationLocker{fileLock: flock.New(path)}
+			fileLock := flock.New(path)
+			locker := &fileMigrationLocker{fileLock: fileLock}
 			t.Cleanup(func() { require.NoError(t, locker.fileLock.Close()) })
 			ctx, cancel := context.WithCancel(context.Background())
 			if outcome == "deadline" {
@@ -91,7 +93,7 @@ func TestFileMigrationLockerWaitingContract(t *testing.T) {
 			switch outcome {
 			case "release":
 				require.NoError(t, err)
-				require.True(t, locker.fileLock.Locked())
+				require.True(t, fileLock.Locked())
 				acquired, probeErr := holder.TryLock()
 				require.NoError(t, probeErr)
 				require.False(t, acquired)
@@ -105,7 +107,7 @@ func TestFileMigrationLockerWaitingContract(t *testing.T) {
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			}
 			if outcome != "release" {
-				require.False(t, locker.fileLock.Locked())
+				require.False(t, fileLock.Locked())
 				require.True(t, holder.Locked())
 				require.NoError(t, holder.Unlock())
 				require.NoError(t, locker.Lock(context.Background(), nil))
@@ -117,12 +119,13 @@ func TestFileMigrationLockerWaitingContract(t *testing.T) {
 
 func TestFileMigrationLockerFilesystemErrorContract(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing", "migration.lock")
-	locker := &fileMigrationLocker{fileLock: flock.New(path)}
+	fileLock := flock.New(path)
+	locker := &fileMigrationLocker{fileLock: fileLock}
 	t.Cleanup(func() { require.NoError(t, locker.fileLock.Close()) })
 	err := locker.Lock(context.Background(), nil)
 	require.ErrorIs(t, err, fs.ErrNotExist)
 	var pathErr *fs.PathError
 	require.True(t, errors.As(err, &pathErr))
 	require.Equal(t, path, pathErr.Path)
-	require.False(t, locker.fileLock.Locked())
+	require.False(t, fileLock.Locked())
 }

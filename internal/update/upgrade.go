@@ -526,6 +526,13 @@ func replaceBinaryUnix(target, source string) error {
 // if the rollback ALSO fails, the error is surfaced (not swallowed) and names
 // the .old path so the user can recover manually.
 func replaceBinaryWindows(target, source string) error {
+	return replaceBinaryWindowsWithRename(target, source, os.Rename)
+}
+
+// replaceBinaryWindowsWithRename keeps rename failures local to one replacement
+// attempt. Stat and Remove always use the real filesystem so backup discovery
+// and cleanup retain the same safety checks as the production path.
+func replaceBinaryWindowsWithRename(target, source string, rename func(string, string) error) error {
 	old := target + ".old"
 
 	// Self-heal from a prior interrupted upgrade: restore .old -> target so the
@@ -533,21 +540,21 @@ func replaceBinaryWindows(target, source string) error {
 	// only good copy.
 	if _, err := os.Stat(target); os.IsNotExist(err) {
 		if _, err := os.Stat(old); err == nil {
-			if err := os.Rename(old, target); err != nil {
+			if err := rename(old, target); err != nil {
 				return fmt.Errorf("restore previous binary from .old: %w", err)
 			}
 		}
 	}
 
 	_ = os.Remove(old) // best effort; may be locked from a prior run
-	if err := os.Rename(target, old); err != nil {
+	if err := rename(target, old); err != nil {
 		return fmt.Errorf("rename current binary to .old: %w", err)
 	}
-	if err := os.Rename(source, target); err != nil {
+	if err := rename(source, target); err != nil {
 		// Rollback: restore the previous binary. If the rollback ALSO fails,
 		// surface it (don't silently leave no binary at target) and point the
 		// user at the .old file for manual recovery.
-		if rbErr := os.Rename(old, target); rbErr != nil {
+		if rbErr := rename(old, target); rbErr != nil {
 			return fmt.Errorf("install new binary: %w (rollback also failed: %v; previous binary preserved at %s — rename it back manually)", err, rbErr, old)
 		}
 		return fmt.Errorf("install new binary: %w", err)

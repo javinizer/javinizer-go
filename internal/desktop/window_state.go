@@ -82,11 +82,29 @@ func SaveWindowState(s WindowState) error {
 	if err != nil {
 		return fmt.Errorf("desktop: cannot marshal window state: %w", err)
 	}
+	return persistWindowState(path, data, func(dir, pattern string) (windowStateTempFile, error) {
+		return os.CreateTemp(dir, pattern)
+	})
+}
+
+// windowStateTempFile is the staging resource that must be written and closed
+// before its pathname is permissioned and published. Production uses an OS file
+// in the target directory so replacement remains atomic.
+type windowStateTempFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	Close() error
+}
+
+// persistWindowState owns persistence after path resolution and serialization.
+// The per-call factory permits deterministic staging failures without replacing
+// process-wide filesystem operations.
+func persistWindowState(path string, data []byte, createTemp func(string, string) (windowStateTempFile, error)) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("desktop: cannot create window state dir %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".window-state-*.json")
+	tmp, err := createTemp(dir, ".window-state-*.json")
 	if err != nil {
 		return fmt.Errorf("desktop: cannot create temp window state file: %w", err)
 	}

@@ -37,7 +37,7 @@ var startupMigrationMu sync.Mutex
 // - check pending migrations
 // - create a pre-migration SQLite backup snapshot when pending work exists
 // - apply migrations
-func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
+func (db *DB) RunMigrationsOnStartup(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -51,6 +51,10 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("initialize startup migration lock: %w", err)
 	}
+	return db.runMigrationsWithLocker(ctx, sqlDB, migrationLocker)
+}
+
+func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrationLocker gooselock.Locker) (err error) {
 	if err := migrationLocker.Lock(ctx, sqlDB); err != nil {
 		return fmt.Errorf("acquire startup migration lock: %w", err)
 	}
@@ -154,8 +158,14 @@ func (processMigrationLocker) Unlock(_ context.Context, _ *sql.DB) error {
 	return nil
 }
 
+type migrationFileLock interface {
+	TryLockContext(context.Context, time.Duration) (bool, error)
+	Unlock() error
+	Close() error
+}
+
 type fileMigrationLocker struct {
-	fileLock *flock.Flock
+	fileLock migrationFileLock
 }
 
 func (l *fileMigrationLocker) Lock(ctx context.Context, _ *sql.DB) error {
