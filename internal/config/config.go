@@ -57,23 +57,28 @@ func UmaskValue() int {
 // ValidateHTTPBaseURL checks that raw is a valid HTTP or HTTPS URL.
 // An empty string is accepted (the field is optional).
 func ValidateHTTPBaseURL(path, raw string) error {
+	_, err := parseHTTPBaseURL(path, raw)
+	return err
+}
+
+func parseHTTPBaseURL(path, raw string) (*url.URL, error) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	raw = strings.TrimSpace(raw)
 	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
-		return fmt.Errorf("%s must be a valid HTTP or HTTPS URL", path)
+		return nil, fmt.Errorf("%s must be a valid HTTP or HTTPS URL", path)
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("%s must be a valid URL: %w", path, err)
+		return nil, fmt.Errorf("%s must be a valid URL: %w", path, err)
 	}
 	// url.Parse accepts "http://" (no host) and "http:///path". Require a host
 	// so a base URL with no authority is rejected rather than silently accepted.
 	if u.Host == "" {
-		return fmt.Errorf("%s must be a valid HTTP or HTTPS URL with a host", path)
+		return nil, fmt.Errorf("%s must be a valid HTTP or HTTPS URL with a host", path)
 	}
-	return nil
+	return u, nil
 }
 
 // ValidateScraperBaseURL validates a configurable scraper base URL and enforces
@@ -85,15 +90,12 @@ func ValidateHTTPBaseURL(path, raw string) error {
 // comparison is case-insensitive. An empty raw value is allowed (the scraper
 // falls back to its compiled-in default).
 func ValidateScraperBaseURL(path, raw string, allowedHosts []string) error {
-	if err := ValidateHTTPBaseURL(path, raw); err != nil {
+	u, err := parseHTTPBaseURL(path, raw)
+	if err != nil {
 		return err
 	}
 	if raw == "" {
 		return nil
-	}
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return fmt.Errorf("%s must be a valid URL: %w", path, err)
 	}
 	host := strings.ToLower(u.Hostname())
 	for _, allowed := range allowedHosts {
@@ -233,11 +235,7 @@ func (c *Config) MarshalYAML() (interface{}, error) {
 		"webui":          c.WebUI,
 	}
 
-	scrapersYAML, err := c.Scrapers.MarshalYAML()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal scrapers: %w", err)
-	}
-	m["scrapers"] = scrapersYAML
+	m["scrapers"] = c.Scrapers.marshalScrapersMap(false)
 
 	return m, nil
 }
