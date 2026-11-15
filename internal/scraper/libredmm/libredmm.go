@@ -197,74 +197,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		}
 	}
 
-	attempts := s.maxPollAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
-
-	for attempt := 1; attempt <= attempts; attempt++ {
-		payload, finalURL, status, err := s.fetchMovieJSONCtx(ctx, targetURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query LibreDMM: %w", err)
-		}
-		if finalURL != "" {
-			targetURL = finalURL
-		}
-
-		switch status {
-		case 200:
-			if msg := scraperutil.CleanString(payload.Err); msg != "" {
-				return nil, fmt.Errorf("LibreDMM returned error: %s", msg)
-			}
-			result := payloadToResult(payload, targetURL, id, s.client.GetClient())
-			s.filterPlaceholderScreenshotsCtx(ctx, result)
-			return result, nil
-		case 202:
-			msg := scraperutil.CleanString(payload.Err)
-			if msg == "" {
-				msg = "processing"
-			}
-			if attempt == attempts {
-				return nil, fmt.Errorf("LibreDMM is still %s for %s", msg, id)
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(s.pollInterval):
-			}
-		case 404:
-			return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
-		case 502:
-			msg := scraperutil.CleanString(payload.Err)
-			if msg != "" {
-				return nil, models.NewScraperStatusError(
-					"LibreDMM",
-					502,
-					fmt.Sprintf("LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down): %s", msg),
-				)
-			}
-			return nil, models.NewScraperStatusError(
-				"LibreDMM",
-				502,
-				"LibreDMM is temporarily unavailable (HTTP 502 Bad Gateway; host may be down)",
-			)
-		default:
-			if msg := scraperutil.CleanString(payload.Err); msg != "" {
-				return nil, models.NewScraperStatusError(
-					"LibreDMM",
-					status,
-					fmt.Sprintf("LibreDMM returned status code %d: %s", status, msg),
-				)
-			}
-			return nil, models.NewScraperStatusError(
-				"LibreDMM",
-				status,
-				fmt.Sprintf("LibreDMM returned status code %d", status),
-			)
-		}
-	}
-
-	return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
+	return s.pollMovieCtx(ctx, targetURL, id)
 }
 
 // ResolveDownloadProxyForHost declares LibreDMM-owned media hosts for downloader proxy routing.
@@ -322,12 +255,18 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, err
 	}
 
+	return s.pollMovieCtx(ctx, targetURL, id)
+}
+
+// pollMovieCtx shares the bounded polling behavior of Search and ScrapeURL.
+func (s *scraper) pollMovieCtx(ctx context.Context, targetURL, id string) (*models.ScraperResult, error) {
 	attempts := s.maxPollAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
 
-	for attempt := 1; attempt <= attempts; attempt++ {
+	// Every terminal status returns; only a pending response can advance the loop.
+	for attempt := 1; ; attempt++ {
 		payload, finalURL, status, err := s.fetchMovieJSONCtx(ctx, targetURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to query LibreDMM: %w", err)
@@ -389,7 +328,6 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}
 
-	return nil, models.NewScraperNotFoundError("LibreDMM", fmt.Sprintf("movie %s not found on LibreDMM", id))
 }
 
 func (s *scraper) fetchMovieJSONCtx(ctx context.Context, targetURL string) (*moviePayload, string, int, error) {
