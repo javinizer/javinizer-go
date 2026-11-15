@@ -502,15 +502,10 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 		if scraperutil.HasJapanese(name) {
 			info.JapaneseName = name
 		} else {
+			// CleanString and the empty-name guard guarantee at least one field.
 			parts := strings.Fields(name)
-			switch len(parts) {
-			case 0:
-			case 1:
-				info.FirstName = parts[0]
-			default:
-				info.FirstName = parts[0]
-				info.LastName = strings.Join(parts[1:], " ")
-			}
+			info.FirstName = parts[0]
+			info.LastName = strings.Join(parts[1:], " ")
 		}
 		actresses = append(actresses, info)
 	}
