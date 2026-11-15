@@ -16,6 +16,12 @@ func provisionPlatformSupported() error { return nil }
 // nonblocking admission so a substituted FIFO cannot hang the CLI. Pin and
 // verify the same regular inode; the operator must exclude concurrent writers.
 func openProvisionInput(path string, maxBytes int64) (*os.File, error) {
+	return openProvisionInputWithOpenFile(path, maxBytes, os.OpenFile)
+}
+
+// Keep the open boundary local to each call so tests can interleave real leaf
+// changes without replacing the metadata, identity or descriptor checks.
+func openProvisionInputWithOpenFile(path string, maxBytes int64, openFile func(string, int, os.FileMode) (*os.File, error)) (*os.File, error) {
 	before, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -23,7 +29,7 @@ func openProvisionInput(path string, maxBytes int64) (*os.File, error) {
 	if !before.Mode().IsRegular() || before.Size() > maxBytes {
 		return nil, fmt.Errorf("dump must be a bounded regular file, not a symlink or special file")
 	}
-	file, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	file, err := openFile(path, os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
