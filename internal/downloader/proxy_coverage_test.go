@@ -1,8 +1,10 @@
 package downloader
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -263,25 +265,24 @@ func TestDo_ProxyClientCreationFails_FallsBackToDirect(t *testing.T) {
 // --- NewHTTPClient coverage ---
 
 func TestNewHTTPClient_DownloadProxyEmptyURL(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{
+	client := NewHTTPClient(HTTPClientConfig{
 		Timeout:       10 * time.Second,
 		DownloadProxy: &models.ProxyProfile{URL: ""},
 	})
-	require.NoError(t, err)
 	adaptive := client.(*adaptiveDownloaderHTTPClient)
 	assert.Nil(t, adaptive.forceClient, "empty URL should not set forceClient")
 	assert.NotNil(t, adaptive.directClient)
 }
 
 func TestNewHTTPClient_DownloadProxyInvalidURL(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{
+	client := NewHTTPClient(HTTPClientConfig{
 		Timeout:       10 * time.Second,
 		DownloadProxy: &models.ProxyProfile{URL: "http://[::1]:%invalid"},
 	})
-	require.NoError(t, err)
 	adaptive := client.(*adaptiveDownloaderHTTPClient)
 	assert.Nil(t, adaptive.forceClient, "invalid proxy URL should not set forceClient")
 	assert.NotNil(t, adaptive.directClient, "should fall back to direct client")
+	assertDownloadClientCanRequest(t, client)
 }
 
 // --- NewHTTPClient: test-injectable error paths via newHTTPClientFunc ---
@@ -294,13 +295,11 @@ func TestNewHTTPClient_FallbackOnDirectClientError(t *testing.T) {
 	t.Cleanup(func() { newHTTPClientFunc = origFunc })
 
 	cfg := HTTPClientConfig{Timeout: 5 * time.Second}
-	client, err := NewHTTPClient(cfg)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
+	client := NewHTTPClient(cfg)
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
+	assertDownloadClientCanRequest(t, client)
 }
 
 func TestNewHTTPClient_FallbackOnProxyClientError(t *testing.T) {
@@ -315,13 +314,42 @@ func TestNewHTTPClient_FallbackOnProxyClientError(t *testing.T) {
 		Timeout:       5 * time.Second,
 		DownloadProxy: &models.ProxyProfile{URL: proxyURL},
 	}
-	client, err := NewHTTPClient(cfg)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
+	client := NewHTTPClient(cfg)
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
+	assertDownloadClientCanRequest(t, client)
+}
+
+// A constructor fallback must be usable, not merely non-nil, and preserve
+// the caller's cancellation. Responses come only from this owned loopback server.
+func assertDownloadClientCanRequest(t *testing.T, client httpclient.HTTPClient) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fixture" || r.Header.Get("X-Fixture") != "constructor" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, "download fallback fixture")
+	}))
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/fixture", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Fixture", "constructor")
+	req.Close = true
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "download fallback fixture", string(body))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	resp, err = client.Do(req.Clone(ctx))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, resp)
 }
 
 // --- generateActressFilename coverage ---

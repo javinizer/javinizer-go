@@ -265,12 +265,9 @@ func buildNFO(fs afero.Fs, nfoCfg *nfo.Config, engine *template.Engine) (nfo.Gen
 }
 
 // buildDownloader constructs the media downloader and its HTTP client.
-func buildDownloader(httpCfg downloader.HTTPClientConfig, fs afero.Fs, downloadCfg *downloader.Config, engine *template.Engine) (downloader.DownloaderInterface, httpclient.HTTPClient, error) {
-	httpClient, httpErr := downloader.NewHTTPClient(httpCfg)
-	if httpErr != nil {
-		return nil, nil, fmt.Errorf("buildDownloader: failed to create HTTP client: %w", httpErr)
-	}
-	return downloader.NewDownloader(httpClient, fs, downloadCfg, engine), httpClient, nil
+func buildDownloader(httpCfg downloader.HTTPClientConfig, fs afero.Fs, downloadCfg *downloader.Config, engine *template.Engine) (downloader.DownloaderInterface, httpclient.HTTPClient) {
+	httpClient := downloader.NewHTTPClient(httpCfg)
+	return downloader.NewDownloader(httpClient, fs, downloadCfg, engine), httpClient
 }
 
 // buildPosterGenerator constructs the poster generator from its dependencies.
@@ -357,10 +354,7 @@ func NewFactoryConfigFromRepos(cfg *config.Config, registry ScraperResolver, rep
 	fileScanner := buildScanner(fs, dcs.snCfg)
 	fileOrganizer := buildOrganizer(fs, dcs.orgCfg, sharedEngine, fileMatcher)
 	nfoGenerator, nfoIface := buildNFO(fs, dcs.nfoCfg, sharedEngine)
-	mediaDownloader, httpClient, httpErr := buildDownloader(downloadHTTPCfg, fs, dcs.downloadCfg, sharedEngine)
-	if httpErr != nil {
-		return workflowFactoryConfig{}, httpErr
-	}
+	mediaDownloader, httpClient := buildDownloader(downloadHTTPCfg, fs, dcs.downloadCfg, sharedEngine)
 	posterGen := buildPosterGenerator(fs, dcs.scrapeCfg, httpClient, time.Duration(dcs.downloadCfg.DownloadTimeout)*time.Second)
 
 	scraperObj, agg, scraperErr := buildScraper(dcs.scrapeCfg, dcs.aggCfg, dcs.translation, registry, httpClient, fs, repos.ContentRepos, repos.ReplacementRepos)
