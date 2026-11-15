@@ -943,9 +943,3 @@ func TestUpgrade_ReplaceBinaryFailure_Aborts(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
 }
-
-// The rollback-also-failed branch (replaceBinaryWindows) requires staging a
-// state where rename-to-old succeeds, install-rename fails, AND rollback-rename
-// fails — the dir would need to be writable for the first two renames but not
-// the third, which cannot be staged deterministically without fragile mid-
-// operation filesystem locking. It is left as a documented defensive branch.
