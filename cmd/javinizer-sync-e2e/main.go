@@ -180,10 +180,21 @@ func run() error {
 	defer signal.Stop(sig)
 	// Disabled services intentionally do not run an artifact reader. Do not wait
 	// for their Ready channel: readiness is the listening HTTP server in that mode.
-	err = func() error {
-		if mode != disabledMode {
+	var ready <-chan struct{}
+	if mode != disabledMode {
+		ready = rt.OfflineNameSync().Ready()
+	}
+	return waitForFixtureShutdown(srv, ready, result, sig, rt.Shutdown)
+}
+
+// waitForFixtureShutdown owns readiness and orderly shutdown once HTTP serving
+// has started. The worker must stop before HTTP connections are drained, so no
+// background fixture work can outlive the server's shutdown.
+func waitForFixtureShutdown(srv *http.Server, ready <-chan struct{}, result <-chan error, sig <-chan os.Signal, stopWorker func()) error {
+	err := func() error {
+		if ready != nil {
 			select {
-			case <-rt.OfflineNameSync().Ready():
+			case <-ready:
 			case err := <-result:
 				return err
 			case <-sig:
@@ -198,7 +209,7 @@ func run() error {
 			return nil
 		}
 	}()
-	rt.Shutdown()
+	stopWorker()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shutdownErr := srv.Shutdown(ctx)
