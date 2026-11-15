@@ -133,8 +133,21 @@ func validateAndOpenPath(userPath string, cfg *SecurityNarrowConfig, browse bool
 		return nil, "", err
 	}
 
+	return openValidatedDirectory(canonicalPath, os.Stat, os.Open)
+}
+
+// openValidatedDirectory owns the stat/open/verify sequence after policy and
+// canonicalization checks have succeeded. The per-call filesystem operations
+// let tests interleave failures deterministically without racing the filesystem
+// or replacing process-wide functions. A successful return transfers ownership
+// of the descriptor to the caller; every post-open rejection closes it here.
+func openValidatedDirectory(
+	canonicalPath string,
+	stat func(string) (os.FileInfo, error),
+	open func(string) (*os.File, error),
+) (*os.File, string, error) {
 	// Get pre-open file identity for TOCTOU verification
-	preInfo, err := os.Stat(canonicalPath)
+	preInfo, err := stat(canonicalPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, "", apperrors.NewPathError(apperrors.ErrPathNotExist, canonicalPath)
@@ -151,7 +164,7 @@ func validateAndOpenPath(userPath string, cfg *SecurityNarrowConfig, browse bool
 
 	// Open the validated directory to prevent TOCTOU symlink swap attacks.
 	// The file descriptor keeps a reference to the validated directory inode.
-	f, err := os.Open(canonicalPath)
+	f, err := open(canonicalPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, "", apperrors.NewPathError(apperrors.ErrPathNotExist, canonicalPath)
