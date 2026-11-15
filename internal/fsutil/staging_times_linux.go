@@ -17,15 +17,19 @@ import (
 // route x/sys/unix's own Futimes takes on Linux. Exposed as a test seam so
 // tests can record the fd+times and replay kernel failures.
 var stagedHandleChtimes = func(fd uintptr, atime, mtime time.Time) error {
+	return setStagedHandleTimes(fd, atime, mtime, unix.UtimesNanoAt)
+}
+
+func setStagedHandleTimes(fd uintptr, atime, mtime time.Time, utimesNanoAt func(int, string, []unix.Timespec, int) error) error {
 	ts := []unix.Timespec{unix.NsecToTimespec(atime.UnixNano()), unix.NsecToTimespec(mtime.UnixNano())}
-	if err := unix.UtimesNanoAt(int(fd), "", ts, unix.AT_EMPTY_PATH); err == nil {
+	if err := utimesNanoAt(int(fd), "", ts, unix.AT_EMPTY_PATH); err == nil {
 		return nil
 	} else if err == unix.ENOENT || err == unix.EINVAL {
 		// Pre-AT_EMPTY_PATH kernels: address the inode through its
 		// /proc/self/fd alias instead (glibc's futimens fallback does the
 		// same). The alias names THIS process's descriptor, never the staged
 		// directory name, so a swapped staged path still cannot redirect it.
-		return unix.UtimesNanoAt(unix.AT_FDCWD, "/proc/self/fd/"+strconv.Itoa(int(fd)), ts, 0)
+		return utimesNanoAt(unix.AT_FDCWD, "/proc/self/fd/"+strconv.Itoa(int(fd)), ts, 0)
 	} else {
 		return err
 	}
