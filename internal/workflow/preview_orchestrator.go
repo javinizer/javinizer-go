@@ -385,10 +385,8 @@ func (o *previewOrchImpl) executePreview(
 		}
 	}
 
-	if primaryPlan == nil {
-		return &PreviewResult{OperationMode: operationMode}
-	}
-
+	// Every successful planning path above supplies and encodes a plan;
+	// failed fallback planning returns before media resolution.
 	// Step 2: Resolve media paths.
 	encoded := primaryPlan.EncodePaths(encodingInfo)
 	mediaPaths := o.resolveMediaPaths(movie, fileResults, primaryPlan, encoded, videoFiles, operationMode, skipNFO, skipDownload)
