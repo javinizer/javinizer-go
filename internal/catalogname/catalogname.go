@@ -119,6 +119,12 @@ func Load(ctx context.Context, path string) (*Snapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read catalog aliases: %w", err)
 	}
+	return finishSnapshot(tx, records, aliases)
+}
+
+// finishSnapshot publishes detached data only after its read transaction commits.
+// The caller retains responsibility for rolling back on failure.
+func finishSnapshot(tx *sql.Tx, records []record, aliases []alias) (*Snapshot, error) {
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("finish catalog snapshot: %w", err)
 	}
