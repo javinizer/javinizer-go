@@ -140,10 +140,9 @@ func TestResolveProfile_InheritsURLFromGlobal(t *testing.T) {
 // --- NewHTTPClient: direct client creation fails ---
 
 func TestNewHTTPClient_DirectClientCreationFails(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{
+	client := NewHTTPClient(HTTPClientConfig{
 		Timeout: 10 * time.Second,
 	})
-	require.NoError(t, err)
 	adaptive := client.(*adaptiveDownloaderHTTPClient)
 	assert.NotNil(t, adaptive.directClient)
 }

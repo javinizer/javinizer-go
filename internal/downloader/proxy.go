@@ -20,7 +20,9 @@ var newHTTPClientFunc = httpclient.NewHTTPClient
 
 // NewHTTPClient creates an HTTP client for the downloader using pre-resolved configuration.
 // The bridge function resolves all proxy profiles so this function never imports internal/config.
-func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
+// Construction always returns a usable client: invalid proxies fall back to direct
+// routing, and direct transport construction failures use the fallback client.
+func NewHTTPClient(cfg HTTPClientConfig) httpclient.HTTPClient {
 	logging.Debugf("Downloader: HTTP client idle/stall timeout=%s (client timeout disabled)", timeout.FromDuration(cfg.Timeout, "config:downloader.timeout"))
 	adaptiveClient := &adaptiveDownloaderHTTPClient{
 		timeout:        cfg.Timeout,
@@ -38,7 +40,7 @@ func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
 			setDownloadResponseHeaderTimeout(client, cfg.Timeout)
 			logging.Infof("Downloader: Using download proxy %s", httpclient.SanitizeProxyURL(cfg.DownloadProxy.URL))
 			adaptiveClient.forceClient = client
-			return adaptiveClient, nil
+			return adaptiveClient
 		}
 	}
 
@@ -54,7 +56,7 @@ func NewHTTPClient(cfg HTTPClientConfig) (httpclient.HTTPClient, error) {
 	}
 	adaptiveClient.directClient = directClient
 
-	return adaptiveClient, nil
+	return adaptiveClient
 }
 
 // adaptiveDownloaderHTTPClient routes media downloads through per-scraper proxies when needed.

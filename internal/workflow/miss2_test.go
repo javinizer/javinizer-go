@@ -2,7 +2,11 @@ package workflow
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/aggregator"
 	"github.com/javinizer/javinizer-go/internal/config"
@@ -520,7 +524,7 @@ func TestBuildMatcher_InvalidConfig(t *testing.T) {
 // factory.go: buildDownloader (75.0%)
 // ---------------------------------------------------------------------------
 
-func TestBuildDownloader_HTTPClientError(t *testing.T) {
+func TestBuildDownloader_InvalidProxyFallsBack(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
 	_, err := config.Prepare(cfg)
 	require.NoError(t, err)
@@ -528,14 +532,29 @@ func TestBuildDownloader_HTTPClientError(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	downloadCfg := downloader.ConfigFromAppConfig(cfg, nfo.NFONameConfigFromAppConfig(cfg))
 	httpCfg := downloader.HTTPClientConfig{
-		Timeout: 30,
+		Timeout: 5 * time.Second,
 		DownloadProxy: &models.ProxyProfile{
 			URL: "://invalid-proxy-url",
 		},
 	}
 
-	_, _, err = buildDownloader(httpCfg, fs, downloadCfg, template.NewEngine())
-	_ = err
+	mediaDownloader, httpClient := buildDownloader(httpCfg, fs, downloadCfg, template.NewEngine())
+	require.NotNil(t, mediaDownloader)
+	require.NotNil(t, httpClient)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "factory fallback fixture")
+	}))
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+	require.NoError(t, err)
+	req.Close = true
+	resp, err := httpClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "factory fallback fixture", string(body))
 }
 
 // ---------------------------------------------------------------------------

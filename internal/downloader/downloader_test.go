@@ -1169,12 +1169,9 @@ func TestDownloader_Download_Timeout(t *testing.T) {
 	}
 
 	// Create HTTP client — timeout=0 (stall watchdog governs body reads).
-	httpClient, err := NewHTTPClient(HTTPClientConfig{
+	httpClient := NewHTTPClient(HTTPClientConfig{
 		Timeout: time.Duration(cfg.DownloadTimeout) * time.Second,
 	})
-	if err != nil {
-		t.Fatalf("Failed to create HTTP client: %v", err)
-	}
 
 	downloader := NewDownloader(httpClient, afero.NewOsFs(), cfg, nil)
 
@@ -1241,10 +1238,7 @@ func TestDownloader_Download_WithUserAgent(t *testing.T) {
 }
 
 func TestDownloader_NewHTTPClient_DefaultTimeout(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
-	if err != nil {
-		t.Fatalf("NewHTTPClient failed: %v", err)
-	}
+	client := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
@@ -1257,10 +1251,7 @@ func TestDownloader_NewHTTPClient_DefaultTimeout(t *testing.T) {
 }
 
 func TestDownloader_NewHTTPClient_CustomTimeout(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 30 * time.Second})
-	if err != nil {
-		t.Fatalf("NewHTTPClient failed: %v", err)
-	}
+	client := NewHTTPClient(HTTPClientConfig{Timeout: 30 * time.Second})
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
@@ -1276,13 +1267,10 @@ func TestDownloader_NewHTTPClient_WithDownloadProxy(t *testing.T) {
 	// Simulate a pre-resolved download proxy (bridge function resolves this)
 	downloadProxy := &models.ProxyProfile{URL: "http://global-proxy.example.com:8080"}
 
-	client, err := NewHTTPClient(HTTPClientConfig{
+	client := NewHTTPClient(HTTPClientConfig{
 		Timeout:       60 * time.Second,
 		DownloadProxy: downloadProxy,
 	})
-	if err != nil {
-		t.Fatalf("NewHTTPClient failed: %v", err)
-	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
@@ -1294,10 +1282,7 @@ func TestDownloader_NewHTTPClient_WithDownloadProxy(t *testing.T) {
 }
 
 func TestDownloader_NewHTTPClient_WithoutDownloadProxy(t *testing.T) {
-	client, err := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
-	if err != nil {
-		t.Fatalf("NewHTTPClient failed: %v", err)
-	}
+	client := NewHTTPClient(HTTPClientConfig{Timeout: 60 * time.Second})
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
@@ -1312,13 +1297,10 @@ func TestDownloader_NewHTTPClient_GlobalProxyDoesNotForceAllDownloads(t *testing
 	// Global proxy is pre-resolved but should not force all downloads
 	globalProxy := &models.ProxyProfile{URL: "http://global-proxy.example.com:8080"}
 
-	client, err := NewHTTPClient(HTTPClientConfig{
+	client := NewHTTPClient(HTTPClientConfig{
 		Timeout:     60 * time.Second,
 		GlobalProxy: globalProxy,
 	})
-	if err != nil {
-		t.Fatalf("NewHTTPClient failed: %v", err)
-	}
 
 	adaptiveClient, ok := client.(*adaptiveDownloaderHTTPClient)
 	if !ok {
