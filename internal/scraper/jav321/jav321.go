@@ -500,9 +500,7 @@ func extractLabeledAnchorValues(htmlText string, labels []string) []string {
 		section := m[1]
 		matches := linkRegex.FindAllStringSubmatch(section, -1)
 		for _, match := range matches {
-			if len(match) <= 1 {
-				continue
-			}
+			// linkRegex has one capture, including for empty anchor text.
 			// Decode after stripping markup so escaped literal tags remain name text.
 			v := scraperutil.CleanString(html.UnescapeString(stripTags(match[1])))
 			if v == "" || seen[v] {

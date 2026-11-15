@@ -61,10 +61,8 @@ func (s *scraper) extractCoverURLNewSite(doc *goquery.Document, contentID string
 		if bgImageURL != "" {
 			return // Already found one
 		}
-		style, exists := sel.Attr("style")
-		if !exists {
-			return
-		}
+		// The attribute selector guarantees style is present.
+		style, _ := sel.Attr("style")
 		// Extract URL from background-image: url(...)
 		// Handle both url(...) and url("...") and url('...')
 		// Also handle protocol-relative URLs starting with //
@@ -126,10 +124,8 @@ func (s *scraper) extractScreenshotsNewSite(doc *goquery.Document) []string {
 
 	// Extract from img tags
 	doc.Find(`img[src*="awsimgsrc.dmm.co.jp"]`).Each(func(i int, sel *goquery.Selection) {
-		src, exists := sel.Attr("src")
-		if !exists {
-			return
-		}
+		// The attribute selector guarantees src is present.
+		src, _ := sel.Attr("src")
 
 		// Only process screenshot images (those with -1.jpg, -2.jpg, etc.)
 		if !strings.Contains(src, "-") || strings.HasSuffix(src, "pl.jpg") {
@@ -324,10 +320,8 @@ func (s *scraper) extractTrailerURLNewSite(doc *goquery.Document) string {
 			return
 		}
 
-		onclick, exists := sel.Attr("onclick")
-		if !exists {
-			return
-		}
+		// The attribute selector guarantees onclick is present.
+		onclick, _ := sel.Attr("onclick")
 
 		// Extract URL from onclick
 		if idx := strings.Index(onclick, "http"); idx != -1 {

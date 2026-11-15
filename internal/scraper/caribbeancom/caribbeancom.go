@@ -565,10 +565,8 @@ func parseReleaseDateFromID(id string) *time.Time {
 		return nil
 	}
 
+	// movieIDTokenRegex captures exactly six ASCII digits for the date.
 	dateToken := m[1]
-	if len(dateToken) != 6 {
-		return nil
-	}
 
 	month := atoiSafe(dateToken[0:2])
 	day := atoiSafe(dateToken[2:4])
