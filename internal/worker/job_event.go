@@ -106,13 +106,21 @@ func (b *jobEventBroadcaster) Send(event JobEvent) {
 		select {
 		case ch <- event:
 		default:
-			select {
-			case <-ch:
-			default:
-			}
-			ch <- event
+			replaceOldestJobEvent(ch, event)
 		}
 	}
+}
+
+// replaceOldestJobEvent completes a send after observing a full subscriber
+// buffer. The caller holds the broadcaster mutex, so no other producer or closer
+// can touch ch. A subscriber may drain any or all events before this call; the
+// non-blocking receive preserves progress even when there is nothing left to drop.
+func replaceOldestJobEvent(ch chan JobEvent, event JobEvent) {
+	select {
+	case <-ch:
+	default:
+	}
+	ch <- event
 }
 
 // Close closes all subscriber channels and clears the subscriber list.

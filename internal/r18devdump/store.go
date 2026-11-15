@@ -515,6 +515,10 @@ func (s *Store) lookupDirector(ctx context.Context, contentID string) (*models.D
 }
 
 func (s *Store) lookupActresses(ctx context.Context, contentID string) ([]models.DumpActress, error) {
+	return s.lookupActressesWithScan(ctx, contentID, (*sql.Rows).Scan)
+}
+
+func (s *Store) lookupActressesWithScan(ctx context.Context, contentID string, scan func(*sql.Rows, ...any) error) ([]models.DumpActress, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT a.id, a.name_romaji, a.image_url, a.name_kanji, a.name_kana
 		FROM video_actresses va JOIN actresses a ON va.actress_id = a.id
@@ -528,7 +532,7 @@ func (s *Store) lookupActresses(ctx context.Context, contentID string) ([]models
 	for rows.Next() {
 		var a models.DumpActress
 		var romaji, imageURL, kanji, kana sql.NullString
-		if err := rows.Scan(&a.ID, &romaji, &imageURL, &kanji, &kana); err != nil {
+		if err := scan(rows, &a.ID, &romaji, &imageURL, &kanji, &kana); err != nil {
 			return nil, fmt.Errorf("scan actress for %q: %w", contentID, err)
 		}
 		a.NameRomaji = romaji.String
@@ -544,6 +548,10 @@ func (s *Store) lookupActresses(ctx context.Context, contentID string) ([]models
 }
 
 func (s *Store) lookupCategories(ctx context.Context, contentID string) ([]models.DumpNamedEntity, error) {
+	return s.lookupCategoriesWithScan(ctx, contentID, (*sql.Rows).Scan)
+}
+
+func (s *Store) lookupCategoriesWithScan(ctx context.Context, contentID string, scan func(*sql.Rows, ...any) error) ([]models.DumpNamedEntity, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT c.name_en, c.name_ja
 		FROM video_categories vc JOIN categories c ON vc.category_id = c.id
@@ -557,7 +565,7 @@ func (s *Store) lookupCategories(ctx context.Context, contentID string) ([]model
 	for rows.Next() {
 		var c models.DumpNamedEntity
 		var nameEn, nameJa sql.NullString
-		if err := rows.Scan(&nameEn, &nameJa); err != nil {
+		if err := scan(rows, &nameEn, &nameJa); err != nil {
 			return nil, fmt.Errorf("scan category for %q: %w", contentID, err)
 		}
 		c.NameEn = nameEn.String
