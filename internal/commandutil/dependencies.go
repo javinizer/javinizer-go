@@ -262,19 +262,10 @@ func NewDependenciesWithOptions(cfg *config.Config, opts *DependenciesOptions) (
 			// diagnosable instead of looking like the dump was never downloaded.
 			logging.Warnf("%v", dumpErr)
 		}
-		registry, err := scraper.NewDefaultScraperRegistryFrom(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
-		if err != nil {
-			if r18DumpCloser != nil {
-				_ = r18DumpCloser.Close()
-			}
-			_ = reg.Close()
-			// Only close a DB we created here; never close an injected one
-			// (avoids leaking or double-closing injected handles).
-			if ownsDB {
-				_ = deps.DB.Close()
-			}
-			return nil, fmt.Errorf("failed to initialize scraper registry: %w", err)
-		}
+		// Population is total: individual scraper constructor failures are logged
+		// and skipped by InitInstances. Keep validation errors above fallible,
+		// and transfer the registry and dump lifetime to CoreDeps on success.
+		registry := scraper.PopulateScraperRegistry(reg, scraper.ScraperRegistryConfigFromApp(cfg, reg.Names(), reg.GetAllDefaults()), database.NewContentIDMappingRepository(deps.DB), r18DumpLookup)
 		deps.ScraperRegistry = registry
 		deps.r18DumpCloser = r18DumpCloser
 	}
