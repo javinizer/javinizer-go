@@ -456,15 +456,8 @@ func extractActresses(doc *goquery.Document) []models.ActressInfo {
 			if scraperutil.HasJapanese(name) {
 				info.JapaneseName = name
 			} else {
-				parts := strings.Fields(name)
-				switch len(parts) {
-				case 0:
-				case 1:
-					info.FirstName = parts[0]
-				default:
-					info.FirstName = parts[0]
-					info.LastName = strings.Join(parts[1:], " ")
-				}
+				// splitNames already separates every Unicode whitespace character.
+				info.FirstName = name
 			}
 			out = append(out, info)
 		}
