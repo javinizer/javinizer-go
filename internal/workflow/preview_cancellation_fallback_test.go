@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -110,4 +111,43 @@ func TestPreviewTransientPlanningFailureRetriesExactlyOneEncodedTarget(t *testin
 	require.Equal(t, `\\target-server\library\FALLBACK-001\movie.nfo`, got.NFOPath)
 	require.Equal(t, 1, merger.filenameCalls)
 	require.Zero(t, strategy.executions)
+}
+
+func TestPreviewSyntheticPlanReachesMediaResolution(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		name := "successful synthetic plan"
+		if fail {
+			name = "failed synthetic plan"
+		}
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			strategy := &callbackPreviewStrategy{plan: func(match models.FileMatchInfo, movie *models.Movie, dest string, force bool) (*organizer.OrganizePlan, error) {
+				calls++
+				require.Empty(t, match.Path)
+				require.Equal(t, "SYNTH-001.mp4", match.Name)
+				require.Equal(t, ".mp4", match.Extension)
+				require.Equal(t, movie.ID, match.MovieID)
+				require.False(t, force)
+				if fail {
+					return nil, errors.New("cannot plan synthetic target")
+				}
+				return &organizer.OrganizePlan{TargetDir: dest, TargetPath: dest + "/SYNTH-001.mp4", TargetFile: "SYNTH-001.mp4", BaseFileName: "SYNTH-001"}, nil
+			}}
+			merger := &countingPreviewNFO{mockNFOFieldMergerForPreview: mockNFOFieldMergerForPreview{nfoFilename: "movie.nfo"}}
+			orch := newPreviewOrchestrator(afero.NewMemMapFs(), nil, PreviewConfig{NFOEnabled: true, ResolveStrategy: func(operationmode.OperationMode) organizer.OperationStrategy { return strategy }}, nfo.NFONameConfig{}, nil, merger, nil)
+			got, err := orch.Execute(t.Context(), PreviewCmd{Movie: &models.Movie{ID: "SYNTH-001"}, Destination: "/output", OperationMode: operationmode.OperationModeOrganize, SkipDownload: true})
+			require.NoError(t, err)
+			require.Equal(t, 1, calls)
+			require.Zero(t, strategy.executions)
+			if fail {
+				require.Equal(t, &PreviewResult{OperationMode: operationmode.OperationModeOrganize}, got)
+				require.Zero(t, merger.filenameCalls)
+			} else {
+				require.Equal(t, []string{"/output/SYNTH-001.mp4"}, got.VideoFiles)
+				require.Equal(t, "/output/SYNTH-001.mp4", got.FullPath)
+				require.Equal(t, filepath.Join("/output", "movie.nfo"), got.NFOPath)
+				require.Equal(t, 1, merger.filenameCalls)
+			}
+		})
+	}
 }

@@ -146,7 +146,7 @@ func commitResultWithProvenanceAndRevisions(rm resultstore.ResultMapAccessor, fi
 	return familyRevisionSnapshotFromResultMap(rm, filePath), nil
 }
 
-func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, oldMovieID string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
+func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath string, result *resultstore.MovieResult, capturedRevision uint64, movieID string, _ string, prov *resultstore.ProvenanceData) (*RescrapeResult, error) {
 	if inputs.ResultMap.IsGone() {
 		return &RescrapeResult{Status: models.RescrapeStatusGone}, nil
 	}
@@ -173,35 +173,13 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 		return nil, commitErr
 	}
 
-	// Detect orphaned movie IDs. A movie ID is orphaned when this file no
-	// longer references it (the file now uses movieID) and no other file does
-	// either. currentMovieIDBeforeUpdate (read from the result map) and
-	// oldMovieID (passed by the caller) both describe prior IDs and may be
-	// equal — when they are, both branches would append the SAME id, so
-	// de-duplicate via orphanSeen before appending.
+	// Only the ID read immediately before the commit can become orphaned.
+	// The caller's old ID may be stale; if it agrees with that snapshot, it
+	// names the same candidate rather than an additional orphan.
 	var orphanedIDs []string
-	orphanSeen := make(map[string]struct{})
-	addOrphan := func(id string) {
-		if id == "" {
-			return
-		}
-		if _, ok := orphanSeen[id]; ok {
-			return
-		}
-		orphanSeen[id] = struct{}{}
-		if !inputs.ResultMap.OtherResultUsesMovieID(filePath, id) {
-			orphanedIDs = append(orphanedIDs, id)
-		}
-	}
-
-	if currentMovieIDBeforeUpdate != "" && currentMovieIDBeforeUpdate != movieID {
-		addOrphan(currentMovieIDBeforeUpdate)
-	}
-
-	if movieID != "" && oldMovieID != "" && movieID != oldMovieID {
-		if currentMovieIDBeforeUpdate == oldMovieID {
-			addOrphan(oldMovieID)
-		}
+	if currentMovieIDBeforeUpdate != "" && currentMovieIDBeforeUpdate != movieID &&
+		!inputs.ResultMap.OtherResultUsesMovieID(filePath, currentMovieIDBeforeUpdate) {
+		orphanedIDs = append(orphanedIDs, currentMovieIDBeforeUpdate)
 	}
 
 	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Revisions: revisions, Status: models.RescrapeStatusSuccess}
@@ -842,10 +820,8 @@ func mergeRescrapeMovie(existing, scraped *models.Movie, opts workflow.MergeOpti
 		establishScrapedBaseline(scraped, scraped)
 		return scraped
 	}
-	if merged == nil || merged.Merged == nil {
-		establishScrapedBaseline(scraped, scraped)
-		return scraped
-	}
+	// A successful metadata merge always contains a movie; invalid inputs
+	// and rejected credit links return an error handled above.
 	if merged.Merged.ID != scraped.ID {
 		// The rescrape deliberately corrects only the display ID. Rebase a
 		// currently valid cast projection before this assignment invalidates
