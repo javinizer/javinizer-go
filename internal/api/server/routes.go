@@ -53,6 +53,13 @@ func loadWebUIAssets() webUIAssets {
 		return assets
 	}
 
+	return loadWebUIAssetsFromFS(distFS)
+}
+
+// loadWebUIAssetsFromFS loads the UI entry point while retaining the filesystem
+// for static assets, even when index.html is unavailable.
+func loadWebUIAssetsFromFS(distFS fs.FS) webUIAssets {
+	assets := webUIAssets{}
 	assets.distFS = distFS
 	assets.staticFS = http.FS(distFS)
 
