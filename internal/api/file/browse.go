@@ -23,6 +23,12 @@ import (
 // @Failure 400 {object} contracts.ErrorResponse
 // @Router /api/v1/browse [post]
 func browseDirectory(rt *core.APIRuntime) gin.HandlerFunc {
+	return browseDirectoryWithReadDir(rt, (*os.File).ReadDir)
+}
+
+// browseDirectoryWithReadDir keeps directory enumeration tied to the validated
+// open handle. The per-handler operation also makes filesystem races testable.
+func browseDirectoryWithReadDir(rt *core.APIRuntime, readDir func(*os.File, int) ([]os.DirEntry, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req contracts.BrowseRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -61,7 +67,7 @@ func browseDirectory(rt *core.APIRuntime) gin.HandlerFunc {
 		defer func() { _ = dirFile.Close() }()
 
 		// Read directory contents using the open file handle (TOCTOU-safe)
-		entries, err := dirFile.ReadDir(-1)
+		entries, err := readDir(dirFile, -1)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
