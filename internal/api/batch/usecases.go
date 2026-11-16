@@ -200,6 +200,17 @@ func StartScrapeUseCase(
 	rt *core.APIRuntime,
 	input StartScrapeInput,
 ) (*StartScrapeOutput, error) {
+	return startScrapeUseCase(ctx, rt, input, rt.BeginOfflineScrapeEvidenceForFiles)
+}
+
+// startScrapeUseCase keeps generation admission request-local so lifecycle races
+// can be synchronized around the real admission operation.
+func startScrapeUseCase(
+	ctx context.Context,
+	rt *core.APIRuntime,
+	input StartScrapeInput,
+	beginEvidence func(context.Context, bool, int) (context.Context, func(), error),
+) (*StartScrapeOutput, error) {
 	// Admission precedes all dependency/DB work even for direct callers.
 	admitted, err := rt.AdmitOfflineEvidenceOperation(input.ShowOfflineEvidence)
 	if err != nil {
@@ -287,7 +298,7 @@ func StartScrapeUseCase(
 	if err := offlineEvidenceScrapeAdmissionErr(rt, input.ShowOfflineEvidence, ctx); err != nil {
 		return nil, err
 	}
-	batchCtx, releaseEvidence, err := rt.BeginOfflineScrapeEvidenceForFiles(rt.ServerCtx(), input.ShowOfflineEvidence, len(allFiles))
+	batchCtx, releaseEvidence, err := beginEvidence(rt.ServerCtx(), input.ShowOfflineEvidence, len(allFiles))
 	if err != nil {
 		return nil, err
 	}
