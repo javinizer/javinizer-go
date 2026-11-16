@@ -45,6 +45,13 @@ func (l *Limiter) Wait(ctx context.Context) error {
 	l.nextAllowedTime = l.nextAllowedTime.Add(l.delay)
 	l.mu.Unlock()
 
+	return l.waitForReservedSlot(ctx, mySlot, waitDuration)
+}
+
+// waitForReservedSlot waits using the duration captured at reservation time.
+// Scheduling can delay entry until after mySlot; cancellation must still avoid
+// rolling the schedule back into the past.
+func (l *Limiter) waitForReservedSlot(ctx context.Context, mySlot time.Time, waitDuration time.Duration) error {
 	select {
 	case <-time.After(waitDuration):
 		return nil
