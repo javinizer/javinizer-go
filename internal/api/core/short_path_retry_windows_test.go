@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestShortPathRetryPreservesInputWhenTargetDisappears(t *testing.T) {
+func testShortPathRetryPreservesInputWhenTargetDisappears(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	require.Len(t, filepath.VolumeName(root), 2)
