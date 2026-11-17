@@ -2,6 +2,7 @@ package javdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -29,6 +30,8 @@ const (
 )
 
 var (
+	errCountryRestricted = errors.New("JavDB restricts access from the country of this connection")
+
 	nonAlphaNumRegex = regexp.MustCompile(`[^A-Za-z0-9]+`)
 	runtimeRegex     = regexp.MustCompile(`(\d+)`)
 	ratingRegex      = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)`)
@@ -299,6 +302,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		logging.Debugf("JavDB: ID '%s' looks like video code, trying direct URL: %s", cleanID, directURL)
 
 		html, err := s.fetchPageCtx(ctx, directURL)
+		if errors.Is(err, errCountryRestricted) {
+			return nil, err
+		}
 		if err == nil {
 			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err == nil {
@@ -595,6 +601,9 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 	resp, err := s.client.R().SetContext(ctx).Get(targetURL)
 	if err == nil && resp != nil && resp.StatusCode() == 200 {
 		html := resp.String()
+		if isCountryRestrictionPage(html) {
+			return "", countryRestrictionError()
+		}
 		if !challengedetect.IsCloudflareChallengePage(html) {
 			return html, nil
 		}
@@ -607,6 +616,9 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, e
 		logging.Debugf("JavDB: Resolving via FlareSolverr: %s", targetURL)
 		html, cookies, fsErr := s.flaresolverr.ResolveURL(targetURL)
 		if fsErr == nil {
+			if isCountryRestrictionPage(html) {
+				return "", countryRestrictionError()
+			}
 			s.cookieMu.Lock()
 			for _, c := range cookies {
 				s.client.SetCookie(&c)
@@ -655,6 +667,9 @@ func (s *scraper) fetchPageDirectResponse(resp *resty.Response, err error) (stri
 	}
 
 	html := resp.String()
+	if isCountryRestrictionPage(html) {
+		return "", countryRestrictionError()
+	}
 	if challengedetect.IsCloudflareChallengePage(html) {
 		return "", models.NewScraperChallengeError(
 			"JavDB",
@@ -663,6 +678,29 @@ func (s *scraper) fetchPageDirectResponse(resp *resty.Response, err error) (stri
 	}
 
 	return html, nil
+}
+
+func countryRestrictionError() error {
+	return &models.ScraperError{
+		Scraper: "JavDB", Kind: models.ScraperErrorKindBlocked, StatusCode: 200,
+		Message: errCountryRestricted.Error(), Cause: errCountryRestricted,
+	}
+}
+
+// isCountryRestrictionPage recognizes JavDB's explicit copyright-region notice,
+// including HTML formatting/whitespace changes. Script and style text is not a
+// displayed restriction. Do not confuse this non-retryable denial with a
+// solvable anti-bot challenge or a missing movie.
+func isCountryRestrictionPage(page string) bool {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(page))
+	if err != nil {
+		return false
+	}
+	doc.Find("script, style, noscript").Remove()
+	doc.Find("br, hr").ReplaceWithHtml(" ")
+	doc.Find("p, div, section, article, header, footer, h1, h2, h3, h4, h5, h6, li, td, th").PrependHtml(" ").AppendHtml(" ")
+	text := strings.ToLower(strings.Join(strings.Fields(doc.Text()), " "))
+	return strings.Contains(text, "due to copyright restrictions, access to this site is prohibited in the country where your internet is located")
 }
 
 func hasDetailMetadata(result *models.ScraperResult, fallbackID string) bool {
