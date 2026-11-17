@@ -17,8 +17,14 @@ func TestImportCloseFailurePreservesPublishedDumpAndRetries(t *testing.T) {
 	path := seedDump(t, "old00001\tOLD-001")
 	original, err := os.ReadFile(path)
 	require.NoError(t, err)
-	originalInfo, err := os.Stat(path)
+	// File.Stat captures the Windows file ID immediately; path-based Stat
+	// would resolve it lazily after the import and could mask replacement.
+	originalFile, err := os.Open(path)
 	require.NoError(t, err)
+	originalInfo, statErr := originalFile.Stat()
+	closeErr := originalFile.Close()
+	require.NoError(t, statErr)
+	require.NoError(t, closeErr)
 	failure := errors.New("dump connection close failed")
 	calls := 0
 	beforeSwap, afterSwap := false, false
