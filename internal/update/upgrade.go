@@ -314,10 +314,17 @@ func resolveUpgradeDefaults(opts UpgradeOptions) UpgradeOptions {
 // symlinks so the replacement targets the real file (not a /usr/local/bin
 // symlink whose target lives elsewhere).
 func resolveExePath(override string) (string, error) {
+	return resolveExePathWithExecutable(override, os.Executable)
+}
+
+// resolveExePathWithExecutable isolates discovery of the running executable.
+// An explicit override bypasses discovery; a discovery failure must not become
+// a usable replacement target, even when the resolver also returns a path.
+func resolveExePathWithExecutable(override string, executable func() (string, error)) (string, error) {
 	p := override
 	if p == "" {
 		var err error
-		p, err = os.Executable()
+		p, err = executable()
 		if err != nil {
 			return "", err
 		}
