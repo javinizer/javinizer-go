@@ -524,7 +524,7 @@ jobs:
             blocks.append((source, int(match[1]), int(match[3]), int(count)))
         # Locate the platform fallback by source, so unrelated config edits do
         # not silently redirect this native-runtime coverage assertion.
-        storage = pathlib.Path("internal/config/storage.go").read_text().splitlines()
+        storage = pathlib.Path("internal/config/storage.go").read_text(encoding="utf-8").splitlines()
         windows_guards = [i for i, line in enumerate(storage) if 'if runtime.GOOS == "windows" {' in line]
         assert len(windows_guards) == 1, "Ambiguous config directory-sync Windows guard"
         target = windows_guards[0] + 2
