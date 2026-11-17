@@ -482,7 +482,7 @@ jobs:
             "-coverprofile=coverage-primary-undo-windows.out",
             "./internal/history", "./cmd/javinizer/commands/actress", "./internal/update",
             "./internal/config", "./internal/api/core", "./internal/fsutil",
-            "-run", '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts|TestNativeWindowsUNCAdmissionContracts|TestReplacementBusyExplicitReleaseSurvivesNativeReader|TestReplacementBusyReleaseSharingClassification|TestReplacementBusyFixedReleaseStatusVisibility|TestReplacementBusyFixedReleaseRefusesUnownedOrLegacyStatus|TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState)$',
+            "-run", '^(TestPrimaryUndoWindows.*|TestPrimaryUndoIdentityAdmissionRefusals|TestPrimaryUndoWeakMutationWitnessRefused|TestProvisionUnsupportedBeforeOpeningInput|TestUpgrade_FullReplace|TestNativeWindowsDirectorySyncCompatibility|TestShouldReapConfigLock_WindowsOwnPID_Partial|TestShouldReapConfigLock_WindowsOtherPID_Partial|TestPathValidation_SimWin_UNCAllowedButPathMissing|TestNativeWindowsFileIdentityContracts|TestNativeWindowsReparseFallbackContracts|TestNativeWindowsShortPathResolutionContracts|TestNativeWindowsUNCAdmissionContracts|TestReplacementBusyExplicitReleaseSurvivesNativeReader|TestReplacementBusyReleaseSharingClassification|TestReplacementBusyFixedReleaseStatusVisibility|TestReplacementBusyFixedReleaseRefusesUnownedOrLegacyStatus|TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState)$',
         ]
         pathlib.Path("busy-release-windows-command.json").write_text(json.dumps(command), encoding="utf-8")
         result = subprocess.run(command, capture_output=True, text=True)
@@ -504,6 +504,7 @@ jobs:
         required.update((package, root + "/" + leaf) for root, leaves in expected.items() for leaf in leaves)
         history = "github.com/javinizer/javinizer-go/internal/history"
         required.add((history, "TestReplacementPendingCovW9_ConcurrentSweepsSynchronizePendingState"))
+        required.add(("github.com/javinizer/javinizer-go/internal/config", "TestNativeWindowsDirectorySyncCompatibility"))
         terminals = [e for e in events if e["Action"] in ("pass", "fail", "skip")]
         assert all((e.get("Package"), e.get("Test")) in required for e in terminals if e.get("Package") == package and e.get("Test")), "Unexpected native fsutil terminal"
         observed = collections.Counter((e.get("Package"), e.get("Test")) for e in terminals if (e.get("Package"), e.get("Test")) in required)
@@ -521,6 +522,14 @@ jobs:
             match = re.fullmatch(r"(\d+)\.(\d+),(\d+)\.(\d+)", coordinates)
             assert match, "Invalid coverage block"
             blocks.append((source, int(match[1]), int(match[3]), int(count)))
+        # Locate the platform fallback by source, so unrelated config edits do
+        # not silently redirect this native-runtime coverage assertion.
+        storage = pathlib.Path("internal/config/storage.go").read_text(encoding="utf-8").splitlines()
+        windows_guards = [i for i, line in enumerate(storage) if 'if runtime.GOOS == "windows" {' in line]
+        assert len(windows_guards) == 1, "Ambiguous config directory-sync Windows guard"
+        target = windows_guards[0] + 2
+        assert storage[target - 1].strip() == "return nil", "Directory-sync fallback changed"
+        assert any(path.endswith("/internal/config/storage.go") and first <= target <= last and count > 0 for path, first, last, count in blocks), "Missing native Windows directory-sync fallback counter"
         # These are actual positive runtime counters, not inferred source mapping.
         for source, targets in (("internal/fsutil/replacement_busy.go", (574, 575, 578, 579)), ("internal/fsutil/replacement_busy_release_windows.go", (15,))):
             for target in targets:
