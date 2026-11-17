@@ -109,9 +109,8 @@ func streamAndHash(r io.Reader, h hash.Hash) (int64, error) {
 		n, readErr := r.Read(buf)
 		if n > 0 {
 			total += int64(n)
-			if _, writeErr := h.Write(buf[:n]); writeErr != nil {
-				return total, writeErr
-			}
+			// hash.Hash guarantees Write consumes all bytes and never returns an error.
+			_, _ = h.Write(buf[:n])
 		}
 		if readErr == io.EOF {
 			break
