@@ -125,6 +125,7 @@ func TestNativeWindowsReparseFallbackContracts(t *testing.T) {
 }
 
 func TestNativeWindowsShortPathResolutionContracts(t *testing.T) {
+	t.Run("target disappears before retry", testShortPathRetryPreservesInputWhenTargetDisappears)
 	t.Run("empty", func(t *testing.T) {
 		require.Empty(t, resolveShortPathName(""))
 	})

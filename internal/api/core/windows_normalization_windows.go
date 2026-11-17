@@ -7,6 +7,12 @@ import (
 )
 
 func resolveShortPathName(path string) string {
+	return resolveShortPathNameWith(path, windows.GetLongPathName)
+}
+
+// resolveShortPathNameWith keeps each native lookup local to one resolution.
+// The filesystem can change between the sizing call and its retry.
+func resolveShortPathNameWith(path string, getLongPathName func(*uint16, *uint16, uint32) (uint32, error)) string {
 	if path == "" {
 		return path
 	}
@@ -17,14 +23,14 @@ func resolveShortPathName(path string) string {
 	}
 
 	buf := make([]uint16, windows.MAX_PATH)
-	n, err := windows.GetLongPathName(ptr, &buf[0], uint32(len(buf)))
+	n, err := getLongPathName(ptr, &buf[0], uint32(len(buf)))
 	if err != nil {
 		return path
 	}
 
 	if n > uint32(len(buf)) {
 		buf = make([]uint16, n+1)
-		n, err = windows.GetLongPathName(ptr, &buf[0], uint32(len(buf)))
+		n, err = getLongPathName(ptr, &buf[0], uint32(len(buf)))
 		if err != nil {
 			return path
 		}

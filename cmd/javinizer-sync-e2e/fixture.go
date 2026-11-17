@@ -95,16 +95,8 @@ func provision(root string, db *database.DB) error {
 		if err != nil {
 			return err
 		}
-		result, err := store.Publish(ctx, bytes.NewReader(snapshot.Bytes()), receipt)
-		closeErr := store.Close()
-		if err != nil {
+		if err := publishFixtureArtifact(ctx, store, bytes.NewReader(snapshot.Bytes()), receipt); err != nil {
 			return err
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if !result.Published || !result.FilesSynced || !result.DirectorySynced {
-			return errors.New("fixture not durably published")
 		}
 		f.Digests[v.name] = snapshot.Digest()
 	}
@@ -125,6 +117,30 @@ func provision(root string, db *database.DB) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(root, "fixture.json"), b, 0600)
+}
+
+// fixturePublisher is the publication/close boundary owned by provision.
+type fixturePublisher interface {
+	Publish(context.Context, io.Reader, r18dump.Receipt) (artifactstore.Result, error)
+	Close() error
+}
+
+// publishFixtureArtifact always closes the store after publishing, and reports
+// publication failures before cleanup failures. A fixture must be fully durable
+// before its digest can be included in the description.
+func publishFixtureArtifact(ctx context.Context, store fixturePublisher, input io.Reader, receipt r18dump.Receipt) error {
+	result, err := store.Publish(ctx, input, receipt)
+	closeErr := store.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if !result.Published || !result.FilesSynced || !result.DirectorySynced {
+		return errors.New("fixture not durably published")
+	}
+	return nil
 }
 
 // inspect only reads fixed tables in an existing disposable DB. It never starts
