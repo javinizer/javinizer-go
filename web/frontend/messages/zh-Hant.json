@@ -2866,5 +2866,12 @@
   "candidates_dismissed_empty": "沒有已忽略的候選人。",
   "candidates_dismiss_description": "忽略只會將候選人從此審核佇列中隱藏，不會變更演員記錄或影片演員表。可在「已忽略」中還原並重新審核。",
   "candidates_queue_updating": "正在更新候選人審核狀態",
-  "candidates_queue_update_failed": "無法更新候選人審核狀態"
+  "candidates_queue_update_failed": "無法更新候選人審核狀態",
+  "filebrowser_entry_type": "顯示",
+  "filebrowser_entry_all": "資料夾和檔案",
+  "filebrowser_entry_files": "僅檔案",
+  "filebrowser_entry_folders": "僅資料夾",
+  "filebrowser_hidden_folders": "篩選器隱藏了 {count} 個已選資料夾，它們仍保持選取以供遞迴掃描。",
+  "filebrowser_clear_folders": "清除資料夾選取",
+  "filebrowser_no_type_match": "沒有符合所選類型的項目。"
 }

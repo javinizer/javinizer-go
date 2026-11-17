@@ -146,3 +146,70 @@ describe('FileBrowser obsolete requests', () => {
 		expect(onPathChange).not.toHaveBeenCalled();
 	});
 });
+
+describe('FileBrowser entry filters', () => {
+	const items = [
+		{ name: 'alpha', path: '/library/alpha', is_dir: true, size: 0, mod_time: '2024-01-01T00:00:00Z' },
+		{ name: 'alpha.mp4', path: '/library/alpha.mp4', is_dir: false, size: 1, mod_time: '2024-01-01T00:00:00Z' },
+		{ name: 'beta.txt', path: '/library/beta.txt', is_dir: false, size: 1, mod_time: '2024-01-01T00:00:00Z' },
+	];
+	const initialData = { current_path: '/library', parent_path: '/', items };
+
+	it('combines type and text filters and can reset an empty result', async () => {
+		const view = render(FileBrowser, { initialData, showEntryFilter: true });
+		await fireEvent.change(view.getByRole('combobox'), { target: { value: 'files' } });
+		expect(view.queryByText('alpha')).toBeNull();
+		expect(view.getByText('alpha.mp4')).toBeTruthy();
+		expect(view.getByText('beta.txt')).toBeTruthy();
+		const search = view.container.querySelector('input[placeholder*="Filter"]')!;
+		await fireEvent.input(search, { target: { value: 'beta' } });
+		expect(view.queryByText('alpha.mp4')).toBeNull();
+		await fireEvent.change(view.getByRole('combobox'), { target: { value: 'folders' } });
+		expect(view.queryByText('beta.txt')).toBeNull();
+		await fireEvent.click(view.getByText('Clear filter'));
+		expect(view.getByText('alpha')).toBeTruthy();
+		expect(view.getByText('alpha.mp4')).toBeTruthy();
+	});
+
+	it('keeps hidden folder selections explicit and lets users clear them', async () => {
+		const onScan = vi.fn();
+		const props = { initialData, showEntryFilter: true, selectedFolders: ['/library/alpha'], onScan };
+		const view = render(FileBrowser, props);
+		await fireEvent.change(view.getByRole('combobox'), { target: { value: 'files' } });
+		expect(view.getByRole('status').textContent).toContain('remain selected for recursive scanning');
+		await fireEvent.click(view.getByText('Clear folder selections'));
+		expect(view.queryByRole('status')).toBeNull();
+	});
+
+	it('retains the type filter across refresh and navigation', async () => {
+		vi.mocked(apiClient.browse).mockResolvedValue({ ...initialData, current_path: '/other' });
+		const view = render(FileBrowser, { initialData, showEntryFilter: true });
+		await fireEvent.change(view.getByRole('combobox'), { target: { value: 'files' } });
+		await fireEvent.click(view.getByTitle('Refresh'));
+		await tick();
+		expect((view.getByRole('combobox') as HTMLSelectElement).value).toBe('files');
+		expect(view.queryByText('alpha')).toBeNull();
+	});
+
+	it('does not add type controls to destination pickers', () => {
+		const view = render(FileBrowser, { initialData, showEntryFilter: true, folderOnly: true });
+		expect(view.queryByRole('combobox')).toBeNull();
+		expect(view.getByText('alpha')).toBeTruthy();
+	});
+});
+
+
+describe('FileBrowser filter pagination', () => {
+ it('returns to page one when changing type and selects only visible videos', async () => {
+  const items = Array.from({ length: 110 }, (_, i) => ({ name: `folder-${i}`, path: `/library/folder-${i}`, is_dir: true, size: 0, mod_time: '2024-01-01T00:00:00Z' }));
+  items.push({ name: 'video.mp4', path: '/library/video.mp4', is_dir: false, size: 1, mod_time: '2024-01-01T00:00:00Z' });
+  const onFileSelect = vi.fn();
+  const view = render(FileBrowser, { initialData: { current_path: '/library', parent_path: '/', items }, showEntryFilter: true, onFileSelect });
+  await fireEvent.click(view.getAllByRole('button', { name: '›' })[0]);
+  await fireEvent.change(view.getByRole('combobox'), { target: { value: 'files' } });
+  expect(view.getByText('video.mp4')).toBeTruthy();
+  expect(view.queryByText('folder-0')).toBeNull();
+  await fireEvent.click(view.getByText('Select All'));
+  expect(onFileSelect).toHaveBeenLastCalledWith(['/library/video.mp4']);
+ });
+});

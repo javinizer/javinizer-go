@@ -2866,5 +2866,12 @@
   "candidates_dismissed_empty": "非表示の候補はありません。",
   "candidates_dismiss_description": "非表示にすると、この確認リストからのみ候補が隠れます。出演者の記録や作品の出演者は変更されません。再確認するには「非表示済み」から復元してください。",
   "candidates_queue_updating": "候補の確認状態を更新中",
-  "candidates_queue_update_failed": "候補の確認状態を更新できませんでした"
+  "candidates_queue_update_failed": "候補の確認状態を更新できませんでした",
+  "filebrowser_entry_type": "表示",
+  "filebrowser_entry_all": "フォルダーとファイル",
+  "filebrowser_entry_files": "ファイルのみ",
+  "filebrowser_entry_folders": "フォルダーのみ",
+  "filebrowser_hidden_folders": "選択したフォルダー {count} 個がフィルターで非表示になっていますが、再帰スキャンの対象として選択されたままです。",
+  "filebrowser_clear_folders": "フォルダーの選択を解除",
+  "filebrowser_no_type_match": "選択した種類の項目はありません。"
 }
