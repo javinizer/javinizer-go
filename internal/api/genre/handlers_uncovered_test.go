@@ -123,3 +123,26 @@ func (e *errorGenreRepo) FindOrCreate(ctx context.Context, name string) (*models
 func (e *errorGenreRepo) List(ctx context.Context) ([]models.Genre, error) {
 	return nil, assert.AnError
 }
+
+func TestListGenresStillReturnsGenresWhenTranslationTableUnavailable(t *testing.T) {
+	deps, db := newFullGenreDeps(t)
+	genre, err := deps.GenreRepo.FindOrCreate(t.Context(), "Action")
+	require.NoError(t, err)
+	require.NoError(t, db.Migrator().DropTable(&models.GenreTranslation{}))
+	_, err = deps.GenreTranslationRepo.FindByGenreIDsAndLanguage(t.Context(), []uint{genre.ID}, "en")
+	require.Error(t, err, "the real translation query must fail in this fixture")
+
+	router := gin.New()
+	router.GET("/genres", listGenres(deps))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/genres?include_translations=en", nil))
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var body genreListResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, 1, body.Count)
+	require.Len(t, body.Genres, 1)
+	require.Equal(t, genre.ID, body.Genres[0].ID)
+	require.Equal(t, "Action", body.Genres[0].Name)
+	require.Empty(t, body.Genres[0].Translations)
+}
