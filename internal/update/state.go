@@ -114,27 +114,9 @@ func (s *stateStore) SaveState(state *updateState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Ensure data directory exists
-	dir := filepath.Dir(s.path)
-	if err := s.fs.MkdirAll(dir, config.DirPerm); err != nil {
-		return err
-	}
-
-	// Marshal to JSON
-	data, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-
-	// Write to temp file first, then rename (atomic on most systems)
-	tmpPath := s.path + ".tmp"
-	if err := afero.WriteFile(s.fs, tmpPath, data, config.FilePerm); err != nil {
-		return err
-	}
-
-	if err := s.fs.Rename(tmpPath, s.path); err != nil {
-		// Clean up temp file on error
-		_ = s.fs.Remove(tmpPath)
+	// Keep the store and file-only paths on the same persistence contract.
+	// Update the in-memory cache only after publication succeeds.
+	if err := saveStateToFile(s.fs, s.path, state); err != nil {
 		return err
 	}
 
