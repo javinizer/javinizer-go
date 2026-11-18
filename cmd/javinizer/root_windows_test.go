@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +38,7 @@ func TestCleanupStaleWindowsOldExe_RemovesStaleOld(t *testing.T) {
 	}
 
 	assertCleanupAfterExecutableRename(t, exe, resolved)
+	assertCleanupResolutionFailurePreservesOld(t)
 }
 
 // An updater can rename a running Windows executable while GetModuleFileName
@@ -109,4 +111,33 @@ func assertCleanupAfterExecutableRename(t *testing.T, exe, resolved string) {
 func TestCleanupStaleWindowsOldExe_NoOpWhenAbsent(t *testing.T) {
 	// No .old created; the function must not panic or error.
 	cleanupStaleWindowsOldExe()
+}
+
+// A failed resolver must not authorize deletion even if it returns a pathname
+// alongside its error. Keep this in the existing native cleanup contract so CI
+// executes the same security boundary alongside the real executable tests.
+func assertCleanupResolutionFailurePreservesOld(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "owned.exe")
+	old := exe + ".old"
+	for path, data := range map[string]string{exe: "current executable", old: "recoverable executable"} {
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	cleanupStaleWindowsOldExeWithResolver(func() (string, error) {
+		calls++
+		return exe, errors.New("executable location unavailable")
+	})
+	if calls != 1 {
+		t.Fatalf("resolver called %d times, want 1", calls)
+	}
+	for path, want := range map[string]string{exe: "current executable", old: "recoverable executable"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Errorf("resolution failure must preserve %s: got %q, err %v", path, got, err)
+		}
+	}
 }
