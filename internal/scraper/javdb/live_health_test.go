@@ -48,9 +48,8 @@ func runJavDBHealth(ctx context.Context, s *scraper, id string) string {
 	defer cancel()
 	outcome := ""
 	s.client.SetRetryCount(0)
-	s.client.OnError(func(_ *resty.Request, err error) {
-		var networkError net.Error
-		if outcome == "" && (errors.As(err, &networkError) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+	s.client.OnError(func(_ *resty.Request, _ error) {
+		if outcome == "" {
 			outcome = "transport_failure"
 		}
 	})
@@ -73,7 +72,7 @@ func runJavDBHealth(ctx context.Context, s *scraper, id string) string {
 		}
 		return "scrape_failure"
 	}
-	if result == nil || !detailIdentityMatchesQuery(result, id) || strings.TrimSpace(result.Title) == "" || result.Title == result.ID || (result.ReleaseDate == nil && result.Runtime == 0 && len(result.Actresses) == 0) {
+	if result == nil || normalizeIDForCompare(result.ID) != normalizeIDForCompare(id) || strings.TrimSpace(result.Title) == "" || result.Title == result.ID || (result.ReleaseDate == nil && result.Runtime == 0 && len(result.Actresses) == 0) {
 		return "incomplete_metadata"
 	}
 	return "healthy"
@@ -129,8 +128,12 @@ func TestJavDBHealthNoFalseGreen(t *testing.T) {
 		name, search, detail, want string
 		status                     int
 		transportError             bool
+		truncated                  bool
 	}{
 		{name: "metadata success", search: search, detail: detail, want: "healthy", status: 200},
+		{name: "different release", search: search, detail: strings.ReplaceAll(detail, "EYAN-172", "EYAN-173"), want: "incomplete_metadata", status: 200},
+		{name: "different variant", search: search, detail: strings.ReplaceAll(detail, "EYAN-172", "EYAN-172Z"), want: "incomplete_metadata", status: 200},
+		{name: "truncated response", want: "transport_failure", status: 200, truncated: true},
 		{name: "empty search", search: `<html></html>`, want: "scrape_failure", status: 200},
 		{name: "country search", search: `本站禁止了你的網路所在國家的訪問`, want: "country_blocked", status: 200},
 		{name: "country detail", search: search, detail: `本站禁止了你的網路所在國家的訪問`, want: "country_blocked", status: 200},
@@ -153,7 +156,11 @@ func TestJavDBHealthNoFalseGreen(t *testing.T) {
 				if strings.HasPrefix(r.URL.Path, "/v/") {
 					body = tc.detail
 				}
-				return &http.Response{StatusCode: tc.status, Status: fmt.Sprint(tc.status), Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+				var reader io.Reader = strings.NewReader(body)
+				if tc.truncated {
+					reader = javdbHealthBrokenBody{}
+				}
+				return &http.Response{StatusCode: tc.status, Status: fmt.Sprint(tc.status), Header: make(http.Header), Body: io.NopCloser(reader), Request: r}, nil
 			}))
 			require.Equal(t, tc.want, runJavDBHealth(context.Background(), s, "EYAN-172"))
 			if tc.want == "country_blocked" || tc.want == "challenge" || tc.want == "http_failure" || tc.want == "transport_failure" {
@@ -166,3 +173,7 @@ func TestJavDBHealthNoFalseGreen(t *testing.T) {
 		})
 	}
 }
+
+type javdbHealthBrokenBody struct{}
+
+func (javdbHealthBrokenBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
