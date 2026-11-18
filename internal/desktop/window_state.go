@@ -78,10 +78,9 @@ func SaveWindowState(s WindowState) error {
 	if err != nil {
 		return fmt.Errorf("desktop: cannot resolve window state path: %w", err)
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("desktop: cannot marshal window state: %w", err)
-	}
+	// WindowState contains only integers and a boolean, so JSON encoding
+	// cannot fail. Revisit this contract if its field types change.
+	data, _ := json.MarshalIndent(s, "", "  ")
 	return persistWindowState(path, data, func(dir, pattern string) (windowStateTempFile, error) {
 		return os.CreateTemp(dir, pattern)
 	})
