@@ -2901,5 +2901,12 @@
   "candidates_dismissed_empty": "No dismissed candidates.",
   "candidates_dismiss_description": "Dismiss hides a candidate from this review queue only. Actor records and movie casts are unchanged. Restore it from Dismissed to review it again.",
   "candidates_queue_updating": "Updating candidate review status",
-  "candidates_queue_update_failed": "Could not update candidate review status"
+  "candidates_queue_update_failed": "Could not update candidate review status",
+  "filebrowser_entry_type": "Show",
+  "filebrowser_entry_all": "Folders and files",
+  "filebrowser_entry_files": "Files only",
+  "filebrowser_entry_folders": "Folders only",
+  "filebrowser_hidden_folders": "{count} selected folders are hidden by the filters and remain selected for recursive scanning.",
+  "filebrowser_clear_folders": "Clear folder selections",
+  "filebrowser_no_type_match": "No entries match the selected type."
 }

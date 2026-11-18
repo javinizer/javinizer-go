@@ -35,6 +35,7 @@
 		onPathChange?: (path: string) => void;
 		multiSelect?: boolean;
 		folderOnly?: boolean;
+		showEntryFilter?: boolean;
 		onScan?: (path: string, recursive: boolean, visibleFiles: FileInfo[], filter: string, selectedFolders: string[]) => void;
 		recursiveScan?: boolean;
 		selectedFolders?: string[];
@@ -51,6 +52,7 @@
 		onPathChange,
 		multiSelect = true,
 		folderOnly = false,
+		showEntryFilter = false,
 		onScan,
 		recursiveScan = $bindable(false),
 		selectedFolders: selectedFolders = $bindable([]),
@@ -68,6 +70,7 @@
 	let loading = $state(untrack(() => initialData === undefined && initialPath !== ''));
 	let error = $state<string | null>(null);
 	let filterText = $state('');
+	let entryFilter = $state<'all' | 'files' | 'folders'>('all');
 	let pathParts = $derived(splitPath(currentPath));
 
 	// Editable path input state
@@ -136,10 +139,13 @@
 	// Filter and sort items
 	const sortedAndFilteredItems = $derived.by(() => {
 		// First filter
-		let result = items;
+		let result = items.filter((item) =>
+			!showEntryFilter || folderOnly || entryFilter === 'all' ||
+			(entryFilter === 'folders' ? item.is_dir : !item.is_dir)
+		);
 		if (filterText.trim()) {
 			const search = filterText.toLowerCase();
-			result = items.filter((item) => item.name.toLowerCase().includes(search));
+			result = result.filter((item) => item.name.toLowerCase().includes(search));
 		}
 
 		// Then sort: directories first, then by selected field/direction
@@ -175,6 +181,7 @@
 
 	$effect(() => {
 		filterText;
+		entryFilter;
 		currentPage = 1;
 	});
 
@@ -396,9 +403,12 @@
 		})()
 	);
 
-	// Clear filter when navigating to a new directory
+	const hiddenSelectedFolders = $derived(selectedFolders.filter((path) => !sortedAndFilteredItems.some((item) => item.is_dir && item.path === path)));
+
+	// Clear all display filters
 	function clearFilter() {
 		filterText = '';
+		entryFilter = 'all';
 		currentPage = 1;
 	}
 
@@ -458,6 +468,26 @@
 			/>
 		</div>
 	</div>
+
+	<!-- Entry type filter is opt-in so destination pickers retain their existing behavior. -->
+	{#if showEntryFilter && !folderOnly}
+		<label class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+			{m.filebrowser_entry_type()}
+			<select bind:value={entryFilter} class="rounded-md border bg-background px-3 py-2">
+				<option value="all">{m.filebrowser_entry_all()}</option>
+				<option value="files">{m.filebrowser_entry_files()}</option>
+				<option value="folders">{m.filebrowser_entry_folders()}</option>
+			</select>
+		</label>
+		{#if hiddenSelectedFolders.length > 0}
+			<div role="status" class="mb-3 text-sm text-muted-foreground">
+				{m.filebrowser_hidden_folders({ count: hiddenSelectedFolders.length })}
+				<button class="text-primary underline" onclick={() => { selectedFolders = []; anchorFolderPath = null; }}>
+					{m.filebrowser_clear_folders()}
+				</button>
+			</div>
+		{/if}
+	{/if}
 
 	<!-- Filter Input -->
 	{#if items.length > 0}
@@ -629,7 +659,7 @@
 			</div>
 		{:else if sortedAndFilteredItems.length === 0}
 			<div class="text-center py-8 text-muted-foreground">
-				<p>{m.filebrowser_no_match({ filter: filterText })}</p>
+				<p>{filterText ? m.filebrowser_no_match({ filter: filterText }) : m.filebrowser_no_type_match()}</p>
 				<button onclick={clearFilter} class="text-primary hover:underline text-sm mt-2">
 					{m.filebrowser_filter_clear()}
 				</button>

@@ -970,6 +970,7 @@
 		{#if pathInitialized || activeInitialBrowse}
 			{#key browserReset}
 				<FileBrowser
+					showEntryFilter={true}
 					{initialPath}
 					bind:selectedFiles={selectedFiles}
 					onFileSelect={handleFileSelect}
