@@ -430,10 +430,7 @@ func (s *Service) translateWithProvider(ctx context.Context, provider Translator
 		if attempt < maxTranslationRetries {
 			if isRetryableError(err, result) {
 				logging.Debugf("Translation: attempt %d/%d failed (%s), retrying...", attempt, maxTranslationRetries, safeErrorDetail(err))
-				expBackoff := float64(time.Millisecond) * 100 * math.Pow(2, float64(attempt-1))
-				if expBackoff > float64(2*time.Second) {
-					expBackoff = float64(2 * time.Second)
-				}
+				expBackoff := math.Min(float64(100*time.Millisecond)*math.Pow(2, float64(attempt-1)), float64(2*time.Second))
 				s.randMu.Lock()
 				sleep := time.Duration(s.rand.Float64() * expBackoff) //nolint:gosec // non-crypto rand is fine for retry jitter
 				s.randMu.Unlock()
