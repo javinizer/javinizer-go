@@ -24,16 +24,27 @@ func TestOrganizer_ForceRenameFileOverridesDisabledConfig(t *testing.T) {
 		OperationMode: operationmode.OperationModeOrganize,
 	}, nil, nil)
 
-	result, err := org.Organize(context.Background(), OrganizeCmd{
+	ctx := context.Background()
+	cmd := OrganizeCmd{
 		Match: models.FileMatchInfo{Path: sourceFile, Name: "old.mp4", Extension: ".mp4", MovieID: "ABC-123"},
 		Movie: &models.Movie{ID: "ABC-123"}, MoveFiles: true, ForceUpdate: true,
 		OperationMode:   operationmode.OperationModeInPlaceNoRenameFolder,
 		ForceRenameFile: true,
-	})
+	}
+	plan, err := org.PlanOrganize(ctx, cmd)
 	require.NoError(t, err)
-	assert.Equal(t, "/source/ABC-123.mp4", filepath.ToSlash(result.NewPath))
-	exists, statErr := afero.Exists(fs, "/source/ABC-123.mp4")
-	require.NoError(t, statErr)
-	assert.True(t, exists)
+	assert.Equal(t, "/source/ABC-123.mp4", filepath.ToSlash(plan.TargetPath))
+	exists, err := afero.Exists(fs, plan.TargetPath)
+	require.NoError(t, err)
+	assert.False(t, exists, "priming must not install the planned target")
+
+	result, err := org.Organize(ctx, cmd)
+	require.NoError(t, err)
+	assert.Equal(t, plan.TargetPath, result.NewPath)
+	assert.True(t, result.Moved)
+	got, err := afero.ReadFile(fs, result.NewPath)
+	require.NoError(t, err)
+	assert.Equal(t, "video", string(got))
 	assert.False(t, org.config.RenameFile)
+	assert.Equal(t, operationmode.OperationModeOrganize, org.config.OperationMode)
 }

@@ -447,22 +447,17 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		return runErr
 	}
 
-	// Process results
+	// Tally each file result once: movies are keyed by ID, but several files
+	// can share one movie ID.
 	movies := make(map[string]*models.Movie, len(uniqueIDs))
-	results := job.GetResults()
-	successCount := 0
-	for _, r := range results {
-		if r.Status == models.JobStatusCompleted && r.Movie != nil {
-			movies[r.FileMatchInfo.MovieID] = r.Movie
-			successCount++
+	successCount, failedCount := 0, 0
+	for _, r := range job.GetResults() {
+		if r.Status != models.JobStatusCompleted || r.Movie == nil {
+			failedCount++
+			continue
 		}
-	}
-	// Compute failures from the number of processed file results (not unique
-	// IDs): duplicate files sharing a MovieID would otherwise make the count
-	// inaccurate since SuccessCount is per-file.
-	failedCount := len(results) - successCount
-	if failedCount < 0 {
-		failedCount = 0
+		movies[r.FileMatchInfo.MovieID] = r.Movie
+		successCount++
 	}
 
 	terminalApplyFailures := int(applyFailureCount.Load())
