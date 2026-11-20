@@ -301,12 +301,12 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 }
 
-func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
-	return s.getURLCtx(ctx, id)
+func (s *scraper) GetURL(_ context.Context, id string) (string, error) {
+	return s.keywordSearchURL(id), nil
 }
 
-func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
-	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id)), nil
+func (s *scraper) keywordSearchURL(id string) string {
+	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id))
 }
 
 // Search searches for a movie by ID with context support.
@@ -332,11 +332,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
-	searchURL, err := s.getURLCtx(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
+	searchURL := s.keywordSearchURL(id)
 	// Fetch the search page
 	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
