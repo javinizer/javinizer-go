@@ -755,11 +755,7 @@ func extractScreenshotURLs(doc *goquery.Document, html, base string, scrapeBonus
 	seen := map[string]bool{}
 	out := make([]string, 0)
 	add := func(raw string) {
-		raw = scraperutil.CleanString(raw)
-		if raw == "" {
-			return
-		}
-		u := scraperutil.ResolveURL(base, raw)
+		u := scraperutil.ResolveURL(base, scraperutil.CleanString(raw))
 		if u == "" || seen[u] {
 			return
 		}
