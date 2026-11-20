@@ -186,32 +186,84 @@ func TestLLMHTTPCharacterization(t *testing.T) {
 }
 
 func TestLLMHTTPCompatibleFallbackCharacterization(t *testing.T) {
-	var bodies []*llmTrackedBody
-	var strategies []string
-	client := &mockHTTPClient{doFunc: func(req *http.Request) (*http.Response, error) {
-		for _, body := range bodies {
-			require.Equal(t, 1, body.closed, "close before the next attempt")
-		}
-		var payload map[string]any
-		require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
-		strategy := "none"
-		for _, key := range []string{"chat_template_kwargs", "reasoning_effort", "enable_thinking"} {
-			if _, exists := payload[key]; exists {
-				strategy = key
+	for _, tc := range []struct {
+		name       string
+		statuses   []int
+		strategies []string
+		wantStatus int
+		badPayload bool
+	}{
+		{
+			name:       "plain fallback succeeds",
+			statuses:   []int{400, 422, 400, 200},
+			strategies: []string{"chat_template_kwargs", "reasoning_effort", "enable_thinking", "none"},
+		},
+		{
+			name:       "plain fallback returns its own terminal rejection",
+			statuses:   []int{400, 422, 400, 422},
+			strategies: []string{"chat_template_kwargs", "reasoning_effort", "enable_thinking", "none"},
+			wantStatus: 422,
+		},
+		{
+			name:       "nonretryable response skips fallback",
+			statuses:   []int{503},
+			strategies: []string{"chat_template_kwargs"},
+			wantStatus: 503,
+		},
+		{
+			name:       "invalid translation returns no partial provider result",
+			statuses:   []int{200},
+			strategies: []string{"chat_template_kwargs"},
+			badPayload: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var bodies []*llmTrackedBody
+			var strategies []string
+			client := &mockHTTPClient{doFunc: func(req *http.Request) (*http.Response, error) {
+				for _, body := range bodies {
+					require.Equal(t, 1, body.closed, "close before the next attempt")
+				}
+				require.Less(t, len(strategies), len(tc.statuses), "unexpected retry")
+				status := tc.statuses[len(strategies)]
+				var payload map[string]any
+				require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
+				strategy := "none"
+				for _, key := range []string{"chat_template_kwargs", "reasoning_effort", "enable_thinking"} {
+					if _, exists := payload[key]; exists {
+						strategy = key
+					}
+				}
+				strategies = append(strategies, strategy)
+				content := "<<<JZ_0>>>\ntranslated"
+				if tc.badPayload {
+					content = "A response without translation formatting."
+				}
+				body := &llmTrackedBody{reader: strings.NewReader(llmCharacterizationResponse("openai-compatible", content))}
+				bodies = append(bodies, body)
+				return &http.Response{StatusCode: status, Body: body}, nil
+			}}
+			result, err := llmCharacterizationProvider("openai-compatible", client).Translate(context.Background(), "ja", "en", []string{"source"})
+			if tc.badPayload {
+				var failure *translationError
+				require.ErrorAs(t, err, &failure)
+				require.Equal(t, TranslationErrorParse, failure.Kind)
+				require.Nil(t, result)
+			} else if tc.wantStatus == 0 {
+				require.NoError(t, err)
+				require.Equal(t, []string{"translated"}, result.Texts)
+			} else {
+				var failure *translationError
+				require.ErrorAs(t, err, &failure)
+				require.Equal(t, TranslationErrorHTTPStatus, failure.Kind)
+				require.Equal(t, tc.wantStatus, failure.StatusCode)
+				require.Nil(t, result)
 			}
-		}
-		strategies = append(strategies, strategy)
-		status := []int{400, 422, 400, 200}[len(strategies)-1]
-		body := &llmTrackedBody{reader: strings.NewReader(llmCharacterizationResponse("openai-compatible", "<<<JZ_0>>>\ntranslated"))}
-		bodies = append(bodies, body)
-		return &http.Response{StatusCode: status, Body: body}, nil
-	}}
-	result, err := llmCharacterizationProvider("openai-compatible", client).Translate(context.Background(), "ja", "en", []string{"source"})
-	require.NoError(t, err)
-	assert.Equal(t, []string{"translated"}, result.Texts)
-	assert.Equal(t, []string{"chat_template_kwargs", "reasoning_effort", "enable_thinking", "none"}, strategies)
-	for _, body := range bodies {
-		assert.Equal(t, 1, body.closed)
+			require.Equal(t, tc.strategies, strategies)
+			for _, body := range bodies {
+				require.Equal(t, 1, body.closed)
+			}
+		})
 	}
 }
 
