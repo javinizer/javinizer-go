@@ -289,10 +289,9 @@ func (r *ScraperRegistry) CollectDownloadProxyResolvers(priority []string) []mod
 
 	resolvers := make([]models.DownloadProxyResolver, 0)
 	seen := make(map[string]struct{})
+	// Successful instance lookups cannot return a nil interface: the store
+	// rejects nil interfaces before registration.
 	add := func(scraper models.Scraper) {
-		if scraper == nil {
-			return
-		}
 		name := scraper.Name()
 		if _, ok := seen[name]; ok {
 			return
@@ -312,10 +311,8 @@ func (r *ScraperRegistry) CollectDownloadProxyResolvers(priority []string) []mod
 	}
 
 	remaining := make([]string, 0)
+	// GetAllInstances already excludes nil interfaces.
 	for _, scraper := range r.GetAllInstances() {
-		if scraper == nil {
-			continue
-		}
 		if _, ok := seen[scraper.Name()]; ok {
 			continue
 		}
