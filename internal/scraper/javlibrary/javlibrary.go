@@ -1034,14 +1034,12 @@ func (s *scraper) extractMovieURLFromHTML(html string, searchID string) string {
 	// Pattern 1: Current JavLibrary format uses relative HTML links
 	// e.g., <div class="video" id="vid_javliat76u"> with <div class="id">ONED-025</div>
 	matches := reVideoThumbDiv.FindAllStringSubmatch(html, -1)
+	normalizedSearch := strings.ToUpper(strings.ReplaceAll(searchID, "-", ""))
 
 	firstVidID := ""
 	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
+		// reVideoThumbDiv captures the displayed catalog ID in group 1.
 		displayID := strings.ToUpper(strings.ReplaceAll(m[1], "-", ""))
-		normalizedSearch := strings.ToUpper(strings.ReplaceAll(searchID, "-", ""))
 
 		// Extract vid_ ID from the full match (order-independent)
 		vidMatch := reVideoThumbID.FindStringSubmatch(m[0])

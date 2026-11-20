@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	versioncmd "github.com/javinizer/javinizer-go/cmd/javinizer/commands/version"
+	"github.com/javinizer/javinizer-go/internal/config"
 	appversion "github.com/javinizer/javinizer-go/internal/version"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,4 +88,32 @@ system:
 
 	assert.Contains(t, strings.TrimSpace(out.String()), "Update checks are disabled in configuration")
 	assert.Equal(t, "", strings.TrimSpace(errBuf.String()))
+}
+
+func TestVersionCommand_CheckRejectsInvalidRuntimeOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.System.VersionCheckEnabled = false
+	cfg.Metadata.Translation.Enabled = true
+	cfg.Metadata.Translation.Provider = "google"
+	require.NoError(t, config.Save(cfg, path))
+	original, err := os.ReadFile(path)
+	require.NoError(t, err)
+	t.Setenv("JAVINIZER_CONFIG", path)
+	t.Setenv("METADATA_TRANSLATION_PROVIDER", "unsupported-fixture-provider")
+
+	cmd := versioncmd.NewCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--check"})
+	err = cmd.Execute()
+	require.ErrorContains(t, err, "failed to load config:")
+	require.ErrorContains(t, err, "metadata.translation.provider")
+	require.Empty(t, out.String())
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, after)
 }

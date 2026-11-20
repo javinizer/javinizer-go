@@ -1584,12 +1584,8 @@ func extractActresses(sel *goquery.Selection) []models.ActressInfo {
 	// Once link candidates existed they were already gender-filtered, so using
 	// the unfiltered text list would re-introduce rows that were dropped as male.
 	if len(actresses) == 0 && len(candidates) == 0 {
-		names := extractStringList(sel)
-		for _, n := range names {
-			if seen[n] {
-				continue
-			}
-			seen[n] = true
+		// extractStringList already returns first occurrences in source order.
+		for _, n := range extractStringList(sel) {
 			actresses = append(actresses, models.ActressInfo{
 				DMMID:        0,
 				JapaneseName: n,
@@ -1852,9 +1848,6 @@ func nodeText(n *html.Node) string {
 	var b strings.Builder
 	var walk func(*html.Node)
 	walk = func(cur *html.Node) {
-		if cur == nil {
-			return
-		}
 		if cur.Type == html.TextNode {
 			b.WriteString(cur.Data)
 		}
