@@ -73,10 +73,9 @@ func newListCommand() *cobra.Command {
 	return cmd
 }
 
-// RunCreate creates a new API token and returns the result with the full token value.
-func RunCreate(cmd *cobra.Command, args []string, configFile string) (*tokenCreateResult, error) {
-	name, _ := cmd.Flags().GetString("name")
-
+// openTokenDependencies applies the same startup configuration and validation
+// for every token command. The caller owns the returned dependencies.
+func openTokenDependencies(configFile string) (*commandutil.CoreDeps, error) {
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -90,6 +89,17 @@ func RunCreate(cmd *cobra.Command, args []string, configFile string) (*tokenCrea
 	deps, err := commandutil.NewDependencies(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	return deps, nil
+}
+
+// RunCreate creates a new API token and returns the result with the full token value.
+func RunCreate(cmd *cobra.Command, args []string, configFile string) (*tokenCreateResult, error) {
+	name, _ := cmd.Flags().GetString("name")
+
+	deps, err := openTokenDependencies(configFile)
+	if err != nil {
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 
@@ -162,19 +172,9 @@ func runCreate(cmd *cobra.Command, configFile string) error {
 func RunRevoke(cmd *cobra.Command, args []string, configFile string) (*tokenRevokeResult, error) {
 	idOrPrefix := args[0]
 
-	cfg, err := config.LoadOrCreate(configFile)
+	deps, err := openTokenDependencies(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	deps, err := commandutil.NewDependencies(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 
@@ -249,19 +249,9 @@ func runRevoke(cmd *cobra.Command, configFile string, idOrPrefix string) error {
 
 // RunList returns all active (non-revoked) API tokens as list entries.
 func RunList(cmd *cobra.Command, args []string, configFile string) ([]tokenListEntry, error) {
-	cfg, err := config.LoadOrCreate(configFile)
+	deps, err := openTokenDependencies(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	deps, err := commandutil.NewDependencies(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 

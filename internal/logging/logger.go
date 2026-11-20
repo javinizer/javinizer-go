@@ -289,22 +289,7 @@ func L() Logger {
 
 // getLogger returns the current logrus.Logger instance, initializing with defaults if needed.
 func getLogger() *logrus.Logger {
-	v := globalInit.current.Load()
-	if v == nil {
-		_ = globalInit.Init(nil)
-		v = globalInit.current.Load()
-	}
-
-	if v == nil {
-		return logrus.StandardLogger()
-	}
-
-	state, ok := v.(*loggerState)
-	if !ok || state == nil {
-		return logrus.StandardLogger()
-	}
-
-	return state.logger
+	return globalInit.getLogrus()
 }
 
 // L returns the current Logger instance, initializing with defaults if needed.
@@ -321,10 +306,6 @@ func (li *loggerInit) getLogrus() *logrus.Logger {
 	if v == nil {
 		_ = li.Init(nil)
 		v = li.current.Load()
-	}
-
-	if v == nil {
-		return logrus.StandardLogger()
 	}
 
 	state, ok := v.(*loggerState)
@@ -358,24 +339,11 @@ func (a *logrusLoggerAdapter) Errorf(format string, args ...any) { a.logger().Er
 //
 //nolint:unused // used by same-package tests
 func closeLogger() {
-	v := globalInit.current.Load()
-	if v == nil {
+	// Preserve the zero value for callers that have never initialized logging.
+	if globalInit.current.Load() == nil {
 		return
 	}
-	prevValue := globalInit.current.Swap((*loggerState)(nil))
-	if prevValue == nil {
-		return
-	}
-	// Guard against typed nil pointer
-	prevState, ok := prevValue.(*loggerState)
-	if !ok || prevState == nil {
-		return
-	}
-	for _, c := range prevState.closers {
-		if err := c.Close(); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to close log file during shutdown: %v\n", err)
-		}
-	}
+	CloseLogger()
 }
 
 // Debug logs a debug message
