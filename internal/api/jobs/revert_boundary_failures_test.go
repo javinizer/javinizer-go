@@ -42,11 +42,6 @@ func TestRevertBackendErrorsDoNotMarkJobReverted(t *testing.T) {
 			{"no operations", history.ErrNoOperationsFound, http.StatusNotFound},
 			{"backend failure", errors.New("private reverter failure"), http.StatusInternalServerError},
 		} {
-			// The concrete RevertScrape implementation does not emit this sentinel.
-			// Do not manufacture that adapter-only combination as production coverage.
-			if single && errors.Is(tc.err, history.ErrBatchAlreadyReverted) {
-				continue
-			}
 			name := "batch " + tc.name
 			if single {
 				name = "operation " + tc.name

@@ -307,7 +307,7 @@ func TestRevertOperation_AlreadyReverted(t *testing.T) {
 	deps, db, fs := setupJobsTestDepsWithReverter(t)
 	defer func() { _ = db.Close() }()
 
-	jobID := seedRevertableJob(t, deps, fs, []string{"ABC-001"})
+	jobID := seedRevertableJob(t, deps, fs, []string{"ABC-001", "ABC-002"})
 
 	svc := newTestJobDeps(deps)
 	router := gin.New()
@@ -319,14 +319,83 @@ func TestRevertOperation_AlreadyReverted(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Second revert — the operation is already reverted, so RevertScrape returns an error
+	// Only the requested movie was reverted. Repeating it must not touch the
+	// restored file, the sibling's pending operation, or the organized job.
+	ctx := t.Context()
+	rows, err := deps.Repos.BatchFileOpRepo.FindByBatchJobID(ctx, jobID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	statuses := map[string]models.RevertStatusEnum{}
+	for _, row := range rows {
+		statuses[row.MovieID] = row.RevertStatus
+	}
+	require.Equal(t, models.RevertStatusReverted, statuses["ABC-001"])
+	require.Equal(t, models.RevertStatusApplied, statuses["ABC-002"])
+	jobBeforeRetry, err := deps.Repos.JobRepo.FindByID(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusOrganized, jobBeforeRetry.Status)
+
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/operations/ABC-001/revert", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 
-	// May return 409 (already reverted) or 500 depending on whether ErrBatchAlreadyReverted is returned
-	assert.True(t, w2.Code == http.StatusConflict || w2.Code == http.StatusInternalServerError,
-		"Expected 409 or 500 for already-reverted operation, got %d", w2.Code)
+	require.Equal(t, http.StatusConflict, w2.Code, w2.Body.String())
+	require.JSONEq(t, `{"error":"Operation already reverted"}`, w2.Body.String())
+	after, err := deps.Repos.BatchFileOpRepo.FindByBatchJobID(ctx, jobID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, rows, after)
+	jobAfterRetry, err := deps.Repos.JobRepo.FindByID(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, jobBeforeRetry, jobAfterRetry)
+	restored, err := afero.ReadFile(fs, "/src/ABC-001.mp4")
+	require.NoError(t, err)
+	require.Equal(t, "test-content-ABC-001", string(restored))
+	pending, err := afero.ReadFile(fs, "/dest/ABC-002/ABC-002.mp4")
+	require.NoError(t, err)
+	require.Equal(t, "test-content-ABC-002", string(pending))
+}
+
+func TestRevertOperation_NoOpRemainsSuccessful(t *testing.T) {
+	for _, withPriorRevert := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no-op only", true: "no-op plus reverted"}[withPriorRevert], func(t *testing.T) {
+			deps, db, fs := setupJobsTestDepsWithReverter(t)
+			t.Cleanup(func() { _ = db.Close() })
+			jobID := seedRevertableJob(t, deps, fs, []string{"ABC-002"})
+			ctx := t.Context()
+			const sharedPath = "/dest/ABC-002/ABC-002.mp4"
+			ops := deps.Repos.BatchFileOpRepo
+			require.NoError(t, ops.Create(ctx, &models.BatchFileOperation{
+				BatchJobID: jobID, MovieID: "ABC-001", OriginalPath: "/src/ABC-001.mp4",
+				NewPath: sharedPath, OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusNoOp,
+			}))
+			if withPriorRevert {
+				require.NoError(t, ops.Create(ctx, &models.BatchFileOperation{
+					BatchJobID: jobID, MovieID: "ABC-001", OriginalPath: "/src/older-ABC-001.mp4",
+					OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusReverted,
+				}))
+			}
+			before, err := ops.FindByBatchJobID(ctx, jobID)
+			require.NoError(t, err)
+			router := gin.New()
+			router.POST("/jobs/:id/operations/:movieId/revert", revertOperation(newTestJobDeps(deps)))
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/jobs/"+jobID+"/operations/ABC-001/revert", nil))
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var result contracts.RevertResultResponse
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+			require.Equal(t, models.JobStatusOrganized, result.Status)
+			require.Zero(t, result.Total)
+			require.Zero(t, result.Succeeded)
+			require.Zero(t, result.Failed)
+			require.Empty(t, result.Errors)
+			after, err := ops.FindByBatchJobID(ctx, jobID)
+			require.NoError(t, err)
+			require.ElementsMatch(t, before, after)
+			pending, err := afero.ReadFile(fs, sharedPath)
+			require.NoError(t, err)
+			require.Equal(t, "test-content-ABC-002", string(pending))
+		})
+	}
 }
 
 func TestRevertOperation_NoOperationsForMovie(t *testing.T) {
