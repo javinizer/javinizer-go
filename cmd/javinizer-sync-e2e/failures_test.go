@@ -195,12 +195,16 @@ func TestGateFilesystemFailures(t *testing.T) {
 	})
 	t.Run("cancel-while-waiting", func(t *testing.T) {
 		root := testRoot(t)
-		gate := &gatedRepository{root: root, pauseAfter: 0}
+		gate := &gatedRepository{root: root, pauseAfter: 2, applied: 7}
 		ctx, cancel := context.WithTimeout(t.Context(), 65*time.Millisecond)
 		defer cancel()
-		lease, err := gate.ClaimOfflineNameSync(ctx, "job", "worker", time.Now(), time.Minute)
+		lease, err := gate.ClaimOfflineNameSync(ctx, `local "画" <>&`, "worker", time.Now(), time.Minute)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.Nil(t, lease)
+		marker, err := os.ReadFile(filepath.Join(root, "worker.paused"))
+		require.NoError(t, err)
+		require.True(t, json.Valid(marker))
+		require.Equal(t, `{"applied":7,"job_id":"local \"画\" \u003c\u003e\u0026"}`, string(marker))
 	})
 }
 func TestRunStartupFailures(t *testing.T) {
