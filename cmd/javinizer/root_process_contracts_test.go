@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,9 +24,9 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		os.Exit(0)
+		return
 	}
-	for _, name := range []string{"malformed config", "invalid environment", "blocked log parent", "valid initialization", "relocated log", "stdout log directory"} {
+	for _, name := range []string{"malformed config", "invalid environment", "blocked log parent", "valid initialization", "relocated log", "normalized default log relocated", "stdout log directory"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "config.yaml")
@@ -38,7 +39,7 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 			cfg.Metadata.Translation.Provider = "google"
 			cfg.Metadata.Translation.Google.Mode = "free"
 			wantCode := 1
-			var want, blocker, relocated string
+			var want, blocker, relocated, originalLogPath string
 			var overrides []string
 			switch name {
 			case "malformed config":
@@ -60,14 +61,27 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 			case "relocated log":
 				wantCode = 0
 				cfg.Logging.Output = filepath.Join(dir, "original", "app.log")
+				originalLogPath = cfg.Logging.Output
 				logDir := filepath.Join(dir, "relocated")
 				relocated = filepath.Join(logDir, "app.log")
 				overrides = append(overrides, "JAVINIZER_LOG_DIR="+logDir)
+			case "normalized default log relocated":
+				wantCode = 0
+				logDir := filepath.Join(dir, "relocated")
+				relocated = filepath.Join(logDir, "javinizer.log")
+				originalLogPath = filepath.Join(dir, "data", "logs", "javinizer.log")
+				want = "Log file outputs relocated by JAVINIZER_LOG_DIR="
+				overrides = append(overrides, "LOG_LEVEL=debug", "JAVINIZER_LOG_DIR="+logDir)
 			}
 			// Start with a canonical current config: ordinary load normalization is
 			// allowed to rewrite noncanonical fixtures before command execution.
 			_, err := config.Prepare(cfg)
 			require.NoError(t, err)
+			if name == "normalized default log relocated" {
+				// The loader's first environment pass sees no file target. Its
+				// normalization supplies the default that root must relocate.
+				cfg.Logging.Output = ""
+			}
 			require.NoError(t, config.Save(cfg, path))
 			if name == "malformed config" {
 				require.NoError(t, os.WriteFile(path, []byte("[malformed yaml"), 0600))
@@ -78,7 +92,11 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 			require.NoError(t, err)
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
-			child := exec.CommandContext(ctx, executable, "-test.run=^TestRootConfigurationProcessContract$")
+			args := []string{"-test.run=^TestRootConfigurationProcessContract$"}
+			if coverDir := flag.Lookup("test.gocoverdir"); coverDir != nil && coverDir.Value.String() != "" {
+				args = append(args, "-test.gocoverdir="+coverDir.Value.String())
+			}
+			child := exec.CommandContext(ctx, executable, args...)
 			child.Dir = dir
 			for _, entry := range os.Environ() {
 				key, _, _ := strings.Cut(entry, "=")
@@ -104,7 +122,14 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 			}
 			after, err := os.ReadFile(path)
 			require.NoError(t, err)
-			require.Equal(t, before, after, "initialization must not rewrite the current config")
+			if name == "normalized default log relocated" {
+				onDisk, loadErr := config.Load(path)
+				require.NoError(t, loadErr)
+				require.Equal(t, config.DefaultConfig(nil, nil).Logging.Output, onDisk.Logging.Output)
+				require.NotContains(t, string(after), filepath.Dir(relocated), "runtime log override must not be persisted")
+			} else {
+				require.Equal(t, before, after, "initialization must not rewrite the current config")
+			}
 			if blocker != "" {
 				kept, err := os.ReadFile(blocker)
 				require.NoError(t, err)
@@ -118,7 +143,7 @@ func TestRootConfigurationProcessContract(t *testing.T) {
 				log, err := os.ReadFile(relocated)
 				require.NoError(t, err)
 				require.Contains(t, string(log), "Config is already at current version")
-				_, err = os.Stat(cfg.Logging.Output)
+				_, err = os.Stat(originalLogPath)
 				require.ErrorIs(t, err, os.ErrNotExist)
 			}
 			_, err = os.Stat(cfg.Database.DSN)

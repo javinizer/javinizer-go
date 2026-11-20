@@ -160,14 +160,6 @@ func loadConfigForCheck(configFile string) (*config.Config, error) {
 		configFile = envConfig
 	}
 
-	cfg, err := config.LoadOrCreate(configFile)
-	if err != nil {
-		return nil, err
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+	// LoadOrCreate already applies and validates environment overrides.
+	return config.LoadOrCreate(configFile)
 }

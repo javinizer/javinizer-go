@@ -603,10 +603,7 @@ func normalizeMovieID(v string) string {
 		}
 		return m[1] + "-" + suffix
 	}
-	if m := movieIDFromPageRe.FindStringSubmatch(v); len(m) > 1 {
-		return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(m[1])), "_", "-")
-	}
-	return strings.ReplaceAll(strings.ToLower(v), "_", "-")
+	return strings.ReplaceAll(v, "_", "-")
 }
 
 func stripSiteSuffix(v string) string {
