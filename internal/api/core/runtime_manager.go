@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -488,24 +487,15 @@ func (r *APIRuntime) buildWorkflowFactoryLocked() any {
 // (RuntimeSnapshot.WorkflowFactory), which builds from its captured cfg/registry when
 // a reload has invalidated the shared cache mid-request.
 func buildWorkflowFactoryFrom(cfg *config.Config, registry *scraperutil.ScraperRegistry, repos database.Repositories) any {
-	fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, registry, repos)
-	if fcErr != nil {
-		// Per S-10: ScraperConstructionError is a known partial-construction failure.
-		// We still create the factory so that scan-only workflows work (they don't
-		// need a scraper). Full-workflow requests will fail with a clear error.
-		var sce *workflow.ScraperConstructionError
-		if !errors.As(fcErr, &sce) {
-			logging.Errorf("Failed to create workflow factory config: %v", fcErr)
+	factory, err := workflow.NewWorkflowFactoryFromRepos(cfg, registry, repos)
+	if err != nil {
+		if factory == nil {
+			logging.Errorf("Failed to create workflow factory config: %v", err)
 			return nil
 		}
-		logging.Warnf("Workflow factory created with nil scraper — full workflows unavailable: %v", fcErr)
+		logging.Warnf("Workflow factory created with nil scraper — full workflows unavailable: %v", err)
 	}
-	newFactory, err := workflow.NewWorkflowFactory(fc)
-	if err != nil {
-		logging.Errorf("Failed to create workflow factory: %v", err)
-		return nil
-	}
-	return newFactory
+	return factory
 }
 
 // getWorkflowFactory returns the cached WorkflowFactory, constructing it on first access.

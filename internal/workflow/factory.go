@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -394,6 +395,20 @@ func NewFactoryConfigFromRepos(cfg *config.Config, registry ScraperResolver, rep
 	baseFC.Scraper = scraperObj
 	baseFC.Aggregator = agg
 	return baseFC, nil
+}
+
+// NewWorkflowFactoryFromRepos builds the shared factory from application
+// settings. A scraper-only construction failure is returned alongside a
+// usable factory so callers can diagnose it and still offer scan-only work.
+// Other failures leave no factory.
+func NewWorkflowFactoryFromRepos(cfg *config.Config, registry ScraperResolver, repos database.Repositories) (*WorkflowFactory, error) {
+	fc, configErr := NewFactoryConfigFromRepos(cfg, registry, repos)
+	var scraperErr *ScraperConstructionError
+	if configErr != nil && !errors.As(configErr, &scraperErr) {
+		return nil, configErr
+	}
+	factory, factoryErr := NewWorkflowFactory(fc)
+	return factory, errors.Join(configErr, factoryErr)
 }
 
 // WorkflowFactory caches the shared dependency sub-graph and produces per-call Workflow
