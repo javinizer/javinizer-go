@@ -214,11 +214,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s does not match FC2 ID format", id))
 	}
 
-	detailURL, err := s.getURLCtx(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
+	detailURL := s.buildArticleURL(expectedArticleID)
 	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch FC2 detail page: %w", err)

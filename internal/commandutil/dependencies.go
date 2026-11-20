@@ -507,12 +507,7 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 	if err != nil {
 		return nil, err
 	}
-	fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
-	if fcErr != nil {
-		_ = deps.Close()
-		return nil, fcErr
-	}
-	factory, err := workflow.NewWorkflowFactory(fc)
+	factory, err := workflow.NewStrictWorkflowFactoryFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
 	if err != nil {
 		_ = deps.Close()
 		return nil, err
