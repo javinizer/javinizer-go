@@ -101,6 +101,11 @@ func TestStallReader_StalledBodyTriggersError(t *testing.T) {
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("stall took too long: %v", elapsed)
 	}
+	// Once the watchdog marks the reader stalled, the next read should
+	// consistently report the same condition without restarting the read.
+	if n, retryErr := r.Read(buf); n != 0 || !IsDownloadStalled(retryErr) {
+		t.Errorf("read after stall = (%d, %v), want (0, errDownloadStalled)", n, retryErr)
+	}
 	_ = r.Close()
 }
 
