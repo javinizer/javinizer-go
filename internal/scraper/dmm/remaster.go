@@ -50,6 +50,9 @@ var (
 // (dv00899ai is DV-818AI), so the marker-based identity is the strongest
 // check available.
 func cachedRemasterIdentityMatches(id, cid, marker, series, suffix string, raw bool) bool {
+	if strings.TrimSpace(cid) == "" {
+		return false
+	}
 	if marker == "" {
 		return true
 	}
