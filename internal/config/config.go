@@ -237,11 +237,7 @@ func (c *Config) MarshalYAML() (interface{}, error) {
 		"webui":          c.WebUI,
 	}
 
-	scrapersYAML, err := c.Scrapers.MarshalYAML()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal scrapers: %w", err)
-	}
-	m["scrapers"] = scrapersYAML
+	m["scrapers"] = c.Scrapers.marshalScrapersMap(false)
 
 	return m, nil
 }
