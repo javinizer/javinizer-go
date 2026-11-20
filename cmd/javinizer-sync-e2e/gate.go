@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+type pausedMarker struct {
+	Applied int    `json:"applied"`
+	JobID   string `json:"job_id"`
+}
+
 // One service-owned serial worker calls both methods. No lease is held at gate.
 type gatedRepository struct {
 	*database.ActressRepository
@@ -21,10 +26,8 @@ type gatedRepository struct {
 
 func (r *gatedRepository) ClaimOfflineNameSync(ctx context.Context, id, owner string, now time.Time, ttl time.Duration) (*database.ActressSyncLease, error) {
 	if r.pauseAfter >= 0 && r.applied >= r.pauseAfter {
-		b, err := json.Marshal(map[string]any{"job_id": id, "applied": r.applied})
-		if err != nil {
-			return nil, err
-		}
+		// The fixed integer/string marker has no fallible JSON encodings.
+		b, _ := json.Marshal(pausedMarker{Applied: r.applied, JobID: id})
 		if err := os.WriteFile(filepath.Join(r.root, "worker.paused"), b, 0600); err != nil {
 			return nil, err
 		}
