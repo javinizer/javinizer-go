@@ -719,19 +719,19 @@ func (u *MovieUpserter) ensureGenresExistTx(tx *gorm.DB, genres []models.Genre) 
 			continue
 		}
 
-		if err := raceRetryCreate(tx, &genres[i], func(tx *gorm.DB) error {
-			var found models.Genre
-			if err := tx.Where("name = ?", name).First(&found).Error; err != nil {
-				return err
-			}
-			genres[i] = found
-			return nil
+		resolved := &genres[i]
+		if err := raceRetryCreate(tx, resolved, func(tx *gorm.DB) error {
+			// Reload into a fresh destination so GORM does not also query the
+			// incoming primary key, which may be the conflicting value.
+			resolved = new(models.Genre)
+			return tx.Where("name = ?", name).First(resolved).Error
 		}); err != nil {
 			return err
 		}
 
+		genres[i] = *resolved
 		// Later entries can resolve to the same genre name after metadata replacement.
-		existingByName[name] = genres[i]
+		existingByName[name] = *resolved
 	}
 
 	return nil
