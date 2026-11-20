@@ -411,6 +411,17 @@ func NewWorkflowFactoryFromRepos(cfg *config.Config, registry ScraperResolver, r
 	return factory, errors.Join(configErr, factoryErr)
 }
 
+// NewStrictWorkflowFactoryFromRepos builds a factory only if configuration
+// and factory construction both succeed. Unlike NewWorkflowFactoryFromRepos,
+// it rejects partial configuration and returns the first error unchanged.
+func NewStrictWorkflowFactoryFromRepos(cfg *config.Config, registry ScraperResolver, repos database.Repositories) (*WorkflowFactory, error) {
+	fc, err := NewFactoryConfigFromRepos(cfg, registry, repos)
+	if err != nil {
+		return nil, err
+	}
+	return NewWorkflowFactory(fc)
+}
+
 // WorkflowFactory caches the shared dependency sub-graph and produces per-call Workflow
 // instances. the shared sub-graph (scraper, matcher, organizer, downloader,
 // NFO generator, template engine, scanner, poster generator) is read-only after construction.
