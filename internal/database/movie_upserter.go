@@ -713,14 +713,15 @@ func (u *MovieUpserter) ensureGenresExistTx(tx *gorm.DB, genres []models.Genre) 
 	}
 
 	for i := range genres {
-		if found, ok := existingByName[genres[i].Name]; ok {
+		name := genres[i].Name
+		if found, ok := existingByName[name]; ok {
 			genres[i] = found
 			continue
 		}
 
 		if err := raceRetryCreate(tx, &genres[i], func(tx *gorm.DB) error {
 			var found models.Genre
-			if err := tx.Where("name = ?", genres[i].Name).First(&found).Error; err != nil {
+			if err := tx.Where("name = ?", name).First(&found).Error; err != nil {
 				return err
 			}
 			genres[i] = found
@@ -728,6 +729,9 @@ func (u *MovieUpserter) ensureGenresExistTx(tx *gorm.DB, genres []models.Genre) 
 		}); err != nil {
 			return err
 		}
+
+		// Later entries can resolve to the same genre name after metadata replacement.
+		existingByName[name] = genres[i]
 	}
 
 	return nil
