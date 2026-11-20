@@ -187,10 +187,8 @@ func (s *scraper) extractCandidateURLs(doc *goquery.Document, contentID string) 
 	// Examples: "4sone860" -> "sone860", "61mdb087" -> "mdb087", "h_1472smkcx003" -> "smkcx003"
 	// Keep lowercase for URL matching consistency
 	contentIDLower := strings.ToLower(contentID)
+	// Nonmatching IDs are unchanged by ReplaceAllString.
 	baseID := cleanPrefixRegex.ReplaceAllString(contentIDLower, "$1")
-	if baseID == "" {
-		baseID = contentIDLower // No prefix, use as-is
-	}
 
 	logging.Debugf("DMM: extractCandidateURLs looking for contentID=%s, baseID=%s", contentIDLower, baseID)
 	logging.Debugf("DMM: Browser mode enabled=%v, excludePatterns=%v", s.useBrowser, excludePatterns)
