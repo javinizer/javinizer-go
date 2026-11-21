@@ -675,10 +675,6 @@ func (s *scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *m
 	}
 
 	cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
-	if !cfg.Enabled {
-		return
-	}
-
 	filtered, count := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
 	if count > 0 {
 		logging.Debugf("libredmm: Filtered %d placeholder screenshots", count)

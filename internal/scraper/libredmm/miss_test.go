@@ -367,7 +367,7 @@ func TestFilterPlaceholderScreenshotsCtx_WithScreenshots(t *testing.T) {
 			switch r.URL.Path {
 			case "/placeholder.png":
 				w.Header().Set("Content-Length", fmt.Sprint(len(placeholder)))
-			case "/large.png":
+			case "/large-z.png", "/large-a.png":
 				w.Header().Set("Content-Length", "16384")
 			default:
 				t.Errorf("unexpected HEAD fixture: %s", r.URL.Path)
@@ -390,11 +390,20 @@ func TestFilterPlaceholderScreenshotsCtx_WithScreenshots(t *testing.T) {
 	s := newScraper(&settings, nil, models.FlareSolverrConfig{})
 	s.client.SetTransport(fixtureTransport(t, server))
 	result := &models.ScraperResult{
-		ScreenshotURL: []string{server.URL + "/placeholder.png", server.URL + "/large.png"},
+		ScreenshotURL: []string{
+			server.URL + "/large-z.png",
+			server.URL + "/placeholder.png",
+			server.URL + "/large-a.png",
+			server.URL + "/large-z.png",
+		},
 	}
 	s.filterPlaceholderScreenshotsCtx(context.Background(), result)
-	assert.Equal(t, []string{server.URL + "/large.png"}, result.ScreenshotURL)
-	assert.Equal(t, int32(2), headRequests.Load())
+	assert.Equal(t, []string{
+		server.URL + "/large-z.png",
+		server.URL + "/large-a.png",
+		server.URL + "/large-z.png",
+	}, result.ScreenshotURL)
+	assert.Equal(t, int32(4), headRequests.Load())
 	assert.Equal(t, int32(1), getRequests.Load())
 }
 
