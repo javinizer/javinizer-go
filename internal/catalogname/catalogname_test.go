@@ -130,16 +130,23 @@ func TestLoadReadOnlyDetachedSnapshot(t *testing.T) {
 func TestLoadHonorsWAL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalog.db")
 	db := fixture(t, path)
-	_, err := db.Exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; UPDATE actresses SET first_name='Committed'")
+	_, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;
+		UPDATE actresses SET first_name='Committed';
+		INSERT INTO actress_aliases VALUES ('Committed alias', 'Committed Hatano')`)
 	require.NoError(t, err)
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	_, err = tx.Exec("UPDATE actresses SET first_name='Uncommitted'")
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.Exec(`UPDATE actresses SET first_name='Uncommitted';
+		DELETE FROM actress_aliases WHERE alias_name='Committed alias';
+		INSERT INTO actress_aliases VALUES ('Uncommitted alias', 'Uncommitted Hatano')`)
 	require.NoError(t, err)
 	s, err := Load(context.Background(), path)
 	require.NoError(t, err)
 	require.True(t, s.Resolve("Committed Hatano").Resolved)
 	require.False(t, s.Resolve("Uncommitted Hatano").Resolved)
+	require.Equal(t, "alias_name_mismatch", s.Resolve("Committed alias").Reason)
+	require.Equal(t, "unknown", s.Resolve("Uncommitted alias").Reason)
 	require.NoError(t, tx.Rollback())
 }
 
