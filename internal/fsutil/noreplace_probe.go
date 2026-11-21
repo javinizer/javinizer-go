@@ -22,7 +22,7 @@ var (
 	publishNoClobberProbe  = PublishNoReplace
 	noClobberProbePlatform = runtime.GOOS
 	noClobberProbeAbs      = filepath.Abs
-	createNoClobberProbe   = CreateExclusiveStagingFile
+	createNoClobberProbe   = CreateExclusiveStagingFileModeBestEffort
 	noClobberProbeOps      = caseProbeOps{
 		openFile: osCaseProbeOps.openFile,
 		stat:     os.Lstat,

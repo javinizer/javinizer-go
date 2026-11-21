@@ -202,7 +202,7 @@ func copyFileDataFsDestReplaced(fs afero.Fs, src, dst string) (bool, error) {
 	// staged name is never published nor unbound-removed (#224). Publish keeps
 	// REPLACE semantics (authorized overwrite); no-clobber uses the separate
 	// NoReplace composites.
-	staged, handle, sErr := CreateExclusiveStagingFile(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), stagingFileMode())
+	staged, handle, sErr := CreateExclusiveStagingFileModeBestEffort(fs, dst, ".mvstg", noreplaceOrdinal.Add(1), stagingFileMode())
 	if sErr != nil {
 		return false, fmt.Errorf("failed to create destination: %w", sErr)
 	}
