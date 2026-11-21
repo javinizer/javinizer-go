@@ -171,8 +171,7 @@ func TestFetchPageCtxV2_Success(t *testing.T) {
 	assert.Contains(t, html, "hello")
 }
 
-// TestGetURLCtxV2 tests getURLCtx
-func TestGetURLCtxV2(t *testing.T) {
+func TestGetKeywordSearchURLV2(t *testing.T) {
 	scraper := &scraper{
 		client:      resty.New(),
 		enabled:     true,
@@ -182,7 +181,7 @@ func TestGetURLCtxV2(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	url, err := scraper.getURLCtx(context.Background(), "IPX-123")
+	url, err := scraper.GetURL(context.Background(), "IPX-123")
 	require.NoError(t, err)
 	assert.Contains(t, url, "IPX-123")
 	assert.Contains(t, url, "vl_searchbyid.php")
