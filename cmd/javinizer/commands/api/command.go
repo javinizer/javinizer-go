@@ -120,15 +120,7 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 		return fmt.Errorf("failed to initialize API dependencies: %w", err)
 	}
 	drained := false
-	defer func() {
-		if drained {
-			if err := rt.CloseAfterHTTPDrain(10 * time.Second); err != nil {
-				logging.Warnf("API cleanup failed: %v", err)
-			}
-		} else {
-			rt.Shutdown()
-		}
-	}()
+	defer func() { closeServerRuntime(rt, drained) }()
 
 	router := apiserver.NewServer(rt)
 
@@ -170,4 +162,17 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 	}
 	drained = true
 	return serveErr
+}
+
+// closeServerRuntime is the CLI's final teardown step. Only a drained HTTP
+// server permits dependency closure; otherwise shutdown only signals and joins
+// server-owned work, leaving resources available to still-running handlers.
+func closeServerRuntime(rt *apicore.APIRuntime, drained bool) {
+	if !drained {
+		rt.Shutdown()
+		return
+	}
+	if err := rt.CloseAfterHTTPDrain(10 * time.Second); err != nil {
+		logging.Warnf("API cleanup failed: %v", err)
+	}
 }

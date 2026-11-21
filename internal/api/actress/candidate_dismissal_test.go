@@ -95,16 +95,22 @@ func TestCandidateDismissalRouteValidation(t *testing.T) {
 	verified := models.Actress{FirstName: "Verified", Verified: true}
 	require.NoError(t, db.Create(&verified).Error)
 	for _, action := range []string{"dismiss", "restore"} {
+		const invalidID = `{"error":"invalid candidate id"}`
 		for _, tc := range []struct {
 			id   string
 			code int
+			body string
 		}{
-			{"0", http.StatusBadRequest}, {"-1", http.StatusBadRequest}, {"abc", http.StatusBadRequest},
-			{"18446744073709551616", http.StatusBadRequest}, {"99999", http.StatusNotFound},
-			{itoa(verified.ID), http.StatusConflict},
+			{"0", http.StatusBadRequest, invalidID},
+			{"-1", http.StatusBadRequest, invalidID},
+			{"abc", http.StatusBadRequest, invalidID},
+			{"18446744073709551616", http.StatusBadRequest, invalidID},
+			{"99999", http.StatusNotFound, `{"error":"candidate not found"}`},
+			{itoa(verified.ID), http.StatusConflict, `{"error":"identity is already verified"}`},
 		} {
 			response := candidateRequest(router, http.MethodPost, "candidates/"+tc.id+"/"+action)
 			require.Equal(t, tc.code, response.Code, response.Body.String())
+			require.JSONEq(t, tc.body, response.Body.String())
 		}
 	}
 	for _, query := range []string{"?dismissed=oops", "?dismissed="} {
@@ -152,7 +158,7 @@ func TestCandidateDismissalWinsAfterPromotionHandlerPrecheck(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1"), NewActressDeps(content, repos.TranslationRepos))
 	response := candidateRequest(router, http.MethodPost, "candidates/"+itoa(candidate.ID)+"/promote")
 	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), "dismiss")
+	require.JSONEq(t, `{"error":"candidate is dismissed; restore it before promotion"}`, response.Body.String())
 	var stored models.Actress
 	require.NoError(t, db.First(&stored, candidate.ID).Error)
 	require.False(t, stored.Verified)

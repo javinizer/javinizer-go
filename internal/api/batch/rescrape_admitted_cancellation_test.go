@@ -68,10 +68,14 @@ func TestRescrapeRejectsPendingJobCancelledAfterAdmission(t *testing.T) {
 	t.Cleanup(rt.Shutdown)
 	router := gin.New()
 	router.POST("/batch/:id/results/:resultId/rescrape", rescrapeBatchMovie(rt))
-	request := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/stable/rescrape", strings.NewReader(`{"selected_scrapers":["stub-no-poster"],"show_offline_evidence":true}`))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
+	rescrape := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/batch/"+job.GetID()+"/results/stable/rescrape", strings.NewReader(`{"selected_scrapers":["stub-no-poster"],"show_offline_evidence":true}`))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	response := rescrape()
 	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
 	require.JSONEq(t, `{"error":"Cannot rescrape cancelled job"}`, response.Body.String())
 	require.Equal(t, 1, store.admissions)
@@ -89,4 +93,12 @@ func TestRescrapeRejectsPendingJobCancelledAfterAdmission(t *testing.T) {
 	require.Equal(t, "original source", string(contents))
 	require.True(t, rt.WaitBackgroundTasks(time.Second), "evidence admission must be released")
 	require.NoError(t, deps.JobStore.DeleteJob(job.GetID()), "shared lease must be released")
+
+	response = rescrape()
+	require.Equal(t, http.StatusGone, response.Code, response.Body.String())
+	require.JSONEq(t, `{"error":"Job has been deleted","skipped":true}`, response.Body.String())
+	require.Equal(t, 1, store.admissions, "tombstoned job must not acquire a new lease")
+	require.Equal(t, 1, store.releases)
+	require.Zero(t, source.calls.Load(), "tombstoned job must not scrape")
+	require.True(t, rt.WaitBackgroundTasks(time.Second), "evidence admission must be released")
 }
