@@ -1,7 +1,6 @@
 package actress
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 
@@ -57,16 +56,14 @@ func setCandidateDismissed(deps ActressDeps, dismissed bool) gin.HandlerFunc {
 			return
 		}
 		if err := database.NewActressRepository(deps.DB).SetCandidateDismissed(c.Request.Context(), uint(id), dismissed); err != nil {
-			switch {
-			case database.IsNotFound(err):
+			if database.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "candidate not found"})
-			case errors.Is(err, database.ErrCandidateAlreadyVerified):
-				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
-			case errors.Is(err, database.ErrInvalidLookup):
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-			default:
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+				return
 			}
+			writeCandidateMutationError(c, err,
+				candidateMutationErrorRule{database.ErrCandidateAlreadyVerified, http.StatusConflict},
+				candidateMutationErrorRule{database.ErrInvalidLookup, http.StatusBadRequest},
+			)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})

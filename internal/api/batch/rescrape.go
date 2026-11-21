@@ -53,16 +53,14 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		// Atomic admission FIRST (codex P5-B): tombstone-aware 410 must precede
-		// the legacy lookup, or a known-deleted job would 404 via
-		// prepareBatchRequest before the gate can answer 410. The admission
-		// gate (409 on busy phases) is live here too, so the later
-		// rescrapeNotAllowed check is a defense-in-depth duplicate that can go.
+		// Admit before the legacy lookup so a known-deleted job returns 410,
+		// not 404. The lease excludes deletion and phase starts, but a pending
+		// job can still be cancelled before the later status check.
 		_, lease, aErr := rt.Deps().GetJobStore().AcquireRescrapeAccess(c.Param("id"))
 		if aErr != nil {
 			switch {
 			case errors.Is(aErr, worker.ErrJobGone):
-				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
+				writeRescrapeUnavailable(c, "", true)
 			case errors.Is(aErr, worker.ErrJobNotFound):
 				writeErrorResponse(c, http.StatusNotFound, true, jobNotFoundMessage)
 			default:
@@ -71,7 +69,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 				if errors.As(aErr, &busy) {
 					status = busy.Status
 				}
-				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", status))
+				writeRescrapeUnavailable(c, status, false)
 			}
 			return
 		}
@@ -110,11 +108,7 @@ func rescrapeBatchMovie(rt *core.APIRuntime) gin.HandlerFunc {
 		// Additional status check for rescrape-specific allowed states.
 		statusSnap := job.GetStatus()
 		if rescrapeNotAllowed(statusSnap) {
-			if statusSnap.IsDeleted {
-				writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
-			} else {
-				writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", statusSnap.Status))
-			}
+			writeRescrapeUnavailable(c, statusSnap.Status, statusSnap.IsDeleted)
 			return
 		}
 
@@ -195,4 +189,14 @@ func writeRescrapeOpError(c *gin.Context, err error) {
 		return
 	}
 	c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Rescrape failed: %v", err)})
+}
+
+// writeRescrapeUnavailable keeps admission and the later status check on the
+// same response contract for deleted and conflicting jobs.
+func writeRescrapeUnavailable(c *gin.Context, status models.JobStatus, deleted bool) {
+	if deleted {
+		writeErrorResponse(c, http.StatusGone, true, "Job has been deleted")
+		return
+	}
+	writeErrorResponse(c, http.StatusConflict, false, fmt.Sprintf("Cannot rescrape %s job", status))
 }
