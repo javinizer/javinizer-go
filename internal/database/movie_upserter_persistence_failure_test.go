@@ -204,18 +204,22 @@ func TestMovieUpserterPersistenceFailureRollback(t *testing.T) {
 	}
 }
 
-// A repeated incoming name creates a real uniqueness failure under the normal
-// SQLite configuration. Even though the first genre was already inserted, the
-// failed upsert must not retain that row or alter the existing movie.
+// A new name claiming an existing genre's ID violates the real primary-key
+// constraint. The earlier successful genre insert must be rolled back.
 func TestMovieUpserterGenreConstraintRollback(t *testing.T) {
 	db, existing, actress := moviePersistenceFixture(t)
 	before := moviePersistenceRows(t, db.DB)
 	input := moviePersistenceInput(existing, actress)
-	input.Genres = []models.Genre{{Name: "Repeated new genre"}, {Name: "Repeated new genre"}}
+	require.Len(t, existing.Genres, 1)
+	require.NotZero(t, existing.Genres[0].ID)
+	input.Genres = []models.Genre{
+		{Name: "First new genre"},
+		{ID: existing.Genres[0].ID, Name: "Second new genre"},
+	}
 	result, err := creditCoverageUpserter(db).Upsert(t.Context(), input)
 	var constraint sqlite3.Error
 	require.ErrorAs(t, err, &constraint)
-	require.Equal(t, sqlite3.ErrConstraintUnique, constraint.ExtendedCode)
+	require.Equal(t, sqlite3.ErrConstraintPrimaryKey, constraint.ExtendedCode)
 	require.ErrorContains(t, err, "ensure genres for movie persistence-target")
 	require.Nil(t, result)
 	require.NotZero(t, input.Genres[0].ID, "first insert must succeed before the second violates uniqueness")

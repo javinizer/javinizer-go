@@ -11,9 +11,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// This exercises caller-configured repository composition, not the application's
-// default TranslateError setting or a concurrent insertion. Repeated new names
-// in one request cause a real SQLite uniqueness conflict followed by reload.
+// This exercises caller-configured TranslateError and verifies that repeated
+// names reuse a durable genre identity without forcing a duplicate-key error.
+// The default application database configuration is exercised separately.
 func TestMovieRepeatedNewGenreResolvesOneDurableIdentity(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "catalog.db"), LogLevel: "silent"})
 	require.NoError(t, err)
@@ -87,4 +87,38 @@ func TestMovieRepeatedNewGenreResolvesOneDurableIdentity(t *testing.T) {
 	require.Equal(t, movie.Genres, replay.Genres)
 	assertDurable()
 	require.NoError(t, pool.PingContext(t.Context()))
+}
+
+func TestMovieRepeatedNewGenreWithDefaultSQLite(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: filepath.Join(t.TempDir(), "catalog.db"), LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	require.False(t, db.Config.TranslateError)
+	repo := database.NewMovieRepository(db)
+	request := func() *models.Movie {
+		return &models.Movie{
+			ContentID: "default-sqlite-genre-example", ID: "GENRE-002", Title: "Repeated genres",
+			Genres: []models.Genre{{Name: "Adventure"}, {Name: "Documentary"}, {Name: "Adventure"}},
+		}
+	}
+
+	movie := request()
+	saved, err := repo.UpsertWithTranslations(t.Context(), movie, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, movie.Genres[0], movie.Genres[2], "positions retain the same canonical genre")
+	require.NotZero(t, movie.Genres[0].ID)
+	require.NotZero(t, movie.Genres[1].ID)
+	require.NotEqual(t, movie.Genres[0].ID, movie.Genres[1].ID)
+	want := []models.Genre{movie.Genres[0], movie.Genres[1]}
+	require.ElementsMatch(t, want, saved.Genres)
+
+	replay := request()
+	savedAgain, err := repo.UpsertWithTranslations(t.Context(), replay, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, movie.Genres, replay.Genres)
+	require.ElementsMatch(t, want, savedAgain.Genres)
+	all, err := db.Repositories().GenreRepo.List(t.Context())
+	require.NoError(t, err)
+	require.ElementsMatch(t, want, all)
 }
