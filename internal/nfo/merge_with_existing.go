@@ -1,7 +1,6 @@
 package nfo
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -90,14 +89,9 @@ func (n nfoImplementor) MergeWithExistingNFO(movie *models.Movie, opts MergeWith
 		scalarStrategy = PreserveExisting
 	}
 	useCreditedName := opts.UseCreditedName || (nfoConfig != nil && nfoConfig.UseCreditedName)
-	mergeResult, mergeErr := mergeMovieMetadataWithRenderPolicy(movie, parseResult.Movie, scalarStrategy, mergeArrays, useCreditedName)
-	if mergeErr != nil {
-		var ambiguity *CastAmbiguityError
-		if errors.As(mergeErr, &ambiguity) {
-			result.Err = fmt.Errorf("existing NFO %s: %w", foundPath, mergeErr)
-			return result
-		}
-		logging.Warnf("[workflow] Failed to merge NFO data for %s: %v (using scraped data only)", movie.ID, mergeErr)
+	mergeResult, ambiguity := mergeAvailableMovieMetadata(movie, parseResult.Movie, scalarStrategy, mergeArrays, useCreditedName)
+	if ambiguity != nil {
+		result.Err = fmt.Errorf("existing NFO %s: %w", foundPath, ambiguity)
 		return result
 	}
 	result.Movie = mergeResult.Merged
