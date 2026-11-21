@@ -299,7 +299,7 @@ func TestFetchPage(t *testing.T) {
 func TestDecodeBody(t *testing.T) {
 	// Test with empty body (http.NoBody)
 	resp := &resty.Response{RawResponse: &http.Response{Body: http.NoBody}}
-	result := decodeBody(resp)
+	result := scraperutil.DecodeHTMLResponse(resp)
 	assert.Empty(t, result)
 }
 

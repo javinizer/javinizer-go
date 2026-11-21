@@ -79,47 +79,53 @@ func Load(ctx context.Context, path string) (*Snapshot, error) {
 		return nil, fmt.Errorf("read catalog: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var records []record
-	var aliases []alias
 	rows, err := tx.QueryContext(ctx, `SELECT id, COALESCE(first_name,''), COALESCE(last_name,''), COALESCE(japanese_name,''), COALESCE(origin,''), COALESCE(verified,0), COALESCE(ambiguity_quarantined,0) FROM actresses`)
 	if err != nil {
 		return nil, fmt.Errorf("read catalog actresses (current schema required): %w", err)
 	}
-	for rows.Next() {
-		var r record
-		if err := rows.Scan(&r.id, &r.first, &r.last, &r.japanese, &r.origin, &r.verified, &r.quarantined); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("read catalog actress: %w", err)
-		}
-		records = append(records, r)
-	}
-	err = rows.Err()
-	if closeErr := rows.Close(); err == nil {
-		err = closeErr
-	}
+	records, err := readCatalogRows(rows, "actress", "actresses", (*record).scan)
 	if err != nil {
-		return nil, fmt.Errorf("read catalog actresses: %w", err)
+		return nil, err
 	}
 	rows, err = tx.QueryContext(ctx, `SELECT COALESCE(alias_name,''), COALESCE(canonical_name,'') FROM actress_aliases`)
 	if err != nil {
 		return nil, fmt.Errorf("read curated catalog aliases (current schema required): %w", err)
 	}
-	for rows.Next() {
-		var a alias
-		if err := rows.Scan(&a.name, &a.canonical); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("read catalog alias: %w", err)
-		}
-		aliases = append(aliases, a)
+	aliases, err := readCatalogRows(rows, "alias", "aliases", (*alias).scan)
+	if err != nil {
+		return nil, err
 	}
-	err = rows.Err()
+	return finishSnapshot(tx, records, aliases)
+}
+
+func (r *record) scan(rows *sql.Rows) error {
+	return rows.Scan(&r.id, &r.first, &r.last, &r.japanese, &r.origin, &r.verified, &r.quarantined)
+}
+
+func (a *alias) scan(rows *sql.Rows) error {
+	return rows.Scan(&a.name, &a.canonical)
+}
+
+// readCatalogRows owns the cursor through Close and never returns partial rows.
+// A scan or iteration failure takes precedence over a subsequent close failure.
+func readCatalogRows[T any](rows *sql.Rows, rowLabel, setLabel string, scan func(*T, *sql.Rows) error) ([]T, error) {
+	var result []T
+	for rows.Next() {
+		var row T
+		if err := scan(&row, rows); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("read catalog %s: %w", rowLabel, err)
+		}
+		result = append(result, row)
+	}
+	err := rows.Err()
 	if closeErr := rows.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read catalog aliases: %w", err)
+		return nil, fmt.Errorf("read catalog %s: %w", setLabel, err)
 	}
-	return finishSnapshot(tx, records, aliases)
+	return result, nil
 }
 
 // finishSnapshot publishes detached data only after its read transaction commits.
