@@ -35,20 +35,23 @@ func selectedRevertEntryPoints() []selectedRevertEntryPoint {
 func TestSelectedRevert_EmptySelectionContracts(t *testing.T) {
 	fetchErr := errors.New("selection unavailable")
 	for _, tc := range []struct {
-		name      string
-		statuses  []models.RevertStatusEnum
-		movie     string
-		fetchErr  error
-		batchErr  error
-		scrapeErr string
+		name              string
+		statuses          []models.RevertStatusEnum
+		movie             string
+		fetchErr          error
+		batchErr          error
+		scrapeErr         string
+		scrapeTerminalErr error
 	}{
 		{name: "fetch failure", fetchErr: fetchErr, batchErr: fetchErr, scrapeErr: "failed to fetch batch operations: selection unavailable"},
 		{name: "no rows", batchErr: ErrNoOperationsFound, scrapeErr: ErrNoOperationsFound.Error()},
 		{name: "noop", statuses: []models.RevertStatusEnum{models.RevertStatusNoOp}},
-		{name: "reverted", statuses: []models.RevertStatusEnum{models.RevertStatusReverted}, batchErr: ErrBatchAlreadyReverted, scrapeErr: "no processable operations found for movie MOVIE in batch requested-batch"},
+		{name: "reverted", statuses: []models.RevertStatusEnum{models.RevertStatusReverted}, batchErr: ErrBatchAlreadyReverted, scrapeTerminalErr: ErrBatchAlreadyReverted},
 		{name: "noop and reverted", statuses: []models.RevertStatusEnum{models.RevertStatusNoOp, models.RevertStatusReverted}, batchErr: ErrBatchAlreadyReverted},
 		{name: "unknown status", statuses: []models.RevertStatusEnum{"unexpected"}, batchErr: ErrNoOperationsFound, scrapeErr: "no processable operations found for movie MOVIE in batch requested-batch"},
 		{name: "unrelated noop", statuses: []models.RevertStatusEnum{models.RevertStatusNoOp}, movie: "OTHER", scrapeErr: "no processable operations found for movie MOVIE in batch requested-batch"},
+		{name: "unrelated revert", statuses: []models.RevertStatusEnum{models.RevertStatusReverted}, movie: "OTHER", batchErr: ErrBatchAlreadyReverted, scrapeErr: "no processable operations found for movie MOVIE in batch requested-batch"},
+		{name: "reverted and unknown status", statuses: []models.RevertStatusEnum{models.RevertStatusReverted, "unexpected"}, batchErr: ErrBatchAlreadyReverted, scrapeErr: "no processable operations found for movie MOVIE in batch requested-batch"},
 	} {
 		for _, entry := range selectedRevertEntryPoints() {
 			t.Run(tc.name+"/"+entry.name, func(t *testing.T) {
@@ -67,6 +70,9 @@ func TestSelectedRevert_EmptySelectionContracts(t *testing.T) {
 				switch {
 				case entry.name == "batch" && tc.batchErr != nil:
 					require.ErrorIs(t, err, tc.batchErr)
+					require.Nil(t, result)
+				case entry.name == "scrape" && tc.scrapeTerminalErr != nil:
+					require.ErrorIs(t, err, tc.scrapeTerminalErr)
 					require.Nil(t, result)
 				case entry.name == "scrape" && tc.scrapeErr != "":
 					require.EqualError(t, err, tc.scrapeErr)

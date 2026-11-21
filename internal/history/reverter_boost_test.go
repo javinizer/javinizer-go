@@ -1554,8 +1554,7 @@ func TestRevertScrape_MovieAlreadyReverted(t *testing.T) {
 
 	result, err := r.RevertScrape(context.Background(), "batch-1", "ABC-123")
 	assert.Nil(t, result)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no processable operations found")
+	assert.ErrorIs(t, err, ErrBatchAlreadyReverted)
 	mockRepo.AssertExpectations(t)
 }
 
