@@ -507,18 +507,7 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 	if err != nil {
 		return nil, err
 	}
-	factory, err := workflow.NewStrictWorkflowFactoryFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
-	if err != nil {
-		_ = deps.Close()
-		return nil, err
-	}
-
-	var wf workflow.WorkflowInterface
-	if mode == bootstrapModeScrapeOnly {
-		wf, err = factory.NewScrapeOnlyWorkflow()
-	} else {
-		wf, err = factory.NewWorkflow("")
-	}
+	factory, wf, err := buildBootstrapWorkflow(cfg, deps, mode)
 	if err != nil {
 		_ = deps.Close()
 		return nil, err
@@ -534,6 +523,22 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 		},
 		workflowFactory: factory,
 	}, nil
+}
+
+// buildBootstrapWorkflow selects the requested mode without taking ownership
+// of deps. The caller closes deps if any workflow construction step fails.
+func buildBootstrapWorkflow(cfg *config.Config, deps *CoreDeps, mode bootstrapMode) (*workflow.WorkflowFactory, workflow.WorkflowInterface, error) {
+	factory, err := workflow.NewStrictWorkflowFactoryFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if mode == bootstrapModeScrapeOnly {
+		wf, err := factory.NewScrapeOnlyWorkflow()
+		return factory, wf, err
+	}
+	wf, err := factory.NewWorkflow("")
+	return factory, wf, err
 }
 
 // Bootstrap initializes the full dependency stack from a config:
