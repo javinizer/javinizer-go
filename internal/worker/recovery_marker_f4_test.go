@@ -12,11 +12,18 @@ import (
 
 type recordingPersistence struct {
 	noopJobPersistence
-	persisted []*BatchJob
+	persisted     []*BatchJob
+	doneAtPersist []bool
 }
 
 func (r *recordingPersistence) PersistJob(j *BatchJob) error {
 	r.persisted = append(r.persisted, j)
+	select {
+	case <-j.lifecycle.Done():
+		r.doneAtPersist = append(r.doneAtPersist, true)
+	default:
+		r.doneAtPersist = append(r.doneAtPersist, false)
+	}
 	return nil
 }
 
@@ -36,6 +43,12 @@ func TestReconstructBatchJobClearsTerminalPhaseMarker(t *testing.T) {
 	require.NotNil(t, job)
 	assert.Equal(t, "", job.lifecycle.CurrentPhase(), "stale marker cleared on reconstruct")
 	require.Len(t, rec.persisted, 1, "cleared row re-persisted once")
+	require.Equal(t, []bool{false}, rec.doneAtPersist, "restored completion stays unannounced during marker persistence")
+	select {
+	case <-job.lifecycle.Done():
+	default:
+		t.Fatal("reconstructed lifecycle must report completion before return")
+	}
 	assert.Equal(t, models.JobStatusCancelled, job.lifecycle.GetJobStatus())
 }
 

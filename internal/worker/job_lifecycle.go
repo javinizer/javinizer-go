@@ -100,7 +100,7 @@ func (lc *JobLifecycle) cancelAndMarkCancelled() {
 	// clearing it here would admit edits mid-drain and let late scrape
 	// writes overwrite them. The phase goroutine's final persist clears it.
 	lc.CompletedAt = nowTimePtr()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 	lc.mu.Unlock()
 
 	if cancelFunc != nil {
@@ -121,7 +121,9 @@ func (lc *JobLifecycle) Done() <-chan struct{} {
 	return lc.done
 }
 
-func (lc *JobLifecycle) closeDoneLocked() {
+// closeDoneIfOpen preserves an already-closed completion channel.
+// Callers must hold lc.mu or have exclusive access during reconstruction.
+func (lc *JobLifecycle) closeDoneIfOpen() {
 	select {
 	case <-lc.done:
 	default:
@@ -144,7 +146,7 @@ func (lc *JobLifecycle) MarkFailed() {
 	lc.Status = models.JobStatusFailed
 	lc.CompletedAt = nowTimePtr()
 	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 }
 
 // MarkCancelled transitions the job to cancelled unless it has already reached a terminal state.
@@ -158,7 +160,7 @@ func (lc *JobLifecycle) MarkCancelled() {
 	lc.Status = models.JobStatusCancelled
 	lc.CompletedAt = nowTimePtr()
 	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 }
 
 // MarkOrganized transitions the job to organized unless it has reached a terminal non-success state.
@@ -175,7 +177,7 @@ func (lc *JobLifecycle) MarkOrganized() {
 	lc.Status = models.JobStatusOrganized
 	lc.OrganizedAt = nowTimePtr()
 	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 }
 
 // MarkReverted transitions the job to reverted, idempotent when already reverted.
@@ -188,7 +190,7 @@ func (lc *JobLifecycle) MarkReverted() {
 	lc.Status = models.JobStatusReverted
 	lc.RevertedAt = nowTimePtr()
 	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 }
 
 // GetJobStatus returns the current job status.
@@ -222,7 +224,7 @@ func (lc *JobLifecycle) MarkCompleted() {
 	lc.Status = models.JobStatusCompleted
 	lc.CompletedAt = nowTimePtr()
 	lc.clearCurrentPhaseLocked()
-	lc.closeDoneLocked()
+	lc.closeDoneIfOpen()
 	if lc.markCompletedFn != nil {
 		lc.markCompletedFn()
 	}

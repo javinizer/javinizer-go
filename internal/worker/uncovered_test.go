@@ -301,8 +301,8 @@ func TestJobLifecycle_MarkDeletedUncovered(t *testing.T) {
 
 func TestJobLifecycle_CloseDoneLocked_DoubleCloseSafeUncovered(t *testing.T) {
 	lc := &JobLifecycle{Status: models.JobStatusPending, done: make(chan struct{})}
-	lc.closeDoneLocked()
-	assert.NotPanics(t, func() { lc.closeDoneLocked() })
+	lc.closeDoneIfOpen()
+	assert.NotPanics(t, func() { lc.closeDoneIfOpen() })
 }
 
 // --- mock job repo for uncovered tests ---

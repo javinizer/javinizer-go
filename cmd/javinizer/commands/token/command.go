@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -293,32 +294,32 @@ func runList(cmd *cobra.Command, configFile string) error {
 		return err
 	}
 
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tPREFIX\tNAME\tCREATED\tLAST USED"); err != nil {
-		return err
-	}
+	return writeTokenListTable(cmd.OutOrStdout(), result)
+}
 
-	for _, t := range result {
-		name := t.Name
-		if name == "" {
-			name = "(unnamed)"
-		}
-		if len(name) > 30 {
-			name = name[:27] + "..."
+func writeTokenListTable(output io.Writer, entries []tokenListEntry) error {
+	w := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
+	// Format the header and each entry through the same checked write.
+	for i := 0; i <= len(entries); i++ {
+		row := [5]string{"ID", "PREFIX", "NAME", "CREATED", "LAST USED"}
+		if i > 0 {
+			t := entries[i-1]
+			name := t.Name
+			if name == "" {
+				name = "(unnamed)"
+			}
+			if len(name) > 30 {
+				name = name[:27] + "..."
+			}
+
+			lastUsed := "never"
+			if t.LastUsedAt != nil {
+				lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
+			}
+			row = [5]string{shortID(t.ID), "jv_" + t.TokenPrefix, name, t.CreatedAt.Format("2006-01-02 15:04"), lastUsed}
 		}
 
-		lastUsed := "never"
-		if t.LastUsedAt != nil {
-			lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
-		}
-
-		if _, err := fmt.Fprintf(w, "%s\tjv_%s\t%s\t%s\t%s\n",
-			shortID(t.ID),
-			t.TokenPrefix,
-			name,
-			t.CreatedAt.Format("2006-01-02 15:04"),
-			lastUsed,
-		); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", row[0], row[1], row[2], row[3], row[4]); err != nil {
 			return err
 		}
 	}
