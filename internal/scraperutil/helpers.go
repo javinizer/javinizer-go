@@ -74,11 +74,17 @@ func HasJapanese(v string) bool {
 
 // IsHTTPURL reports whether v parses as an http or https URL with a host.
 func IsHTTPURL(v string) bool {
+	return ParseHTTPURL(v) != nil
+}
+
+// ParseHTTPURL parses a trimmed HTTP(S) URL with a nonempty Host field.
+// It checks URL syntax only; callers must apply their own origin policy.
+func ParseHTTPURL(v string) *url.URL {
 	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil {
-		return false
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil
 	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+	return u
 }
 
 // ResolveURL resolves raw against base into an absolute URL, handling protocol-relative and absolute inputs.

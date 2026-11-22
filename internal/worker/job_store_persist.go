@@ -166,11 +166,7 @@ func (s *JobStore) reconstructBatchJob(dbJob *models.Job) *BatchJob {
 	// run post-op PersistJobByID.
 	s.attachEditDeps(batchJob)
 
-	select {
-	case <-batchJob.lifecycle.done:
-	default:
-		close(batchJob.lifecycle.done)
-	}
+	batchJob.lifecycle.closeDoneIfOpen()
 
 	return batchJob
 }
