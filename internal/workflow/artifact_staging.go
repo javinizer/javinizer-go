@@ -1321,16 +1321,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// its result before source cleanup and inverse persistence so both use the
 	// actual published paths rather than ephemeral staging names.
 	if finalResult != nil && s.inPlace {
-		if finalResult.NewPath != "" {
-			finalResult.NewPath, err = s.finalPath(finalResult.NewPath)
-			if err != nil {
-				return err
-			}
-		}
-		if finalResult.FolderPath != "" {
-			finalResult.FolderPath, err = s.finalPath(finalResult.FolderPath)
-			if err != nil {
-				return err
+		for _, path := range [...]*string{&finalResult.NewPath, &finalResult.FolderPath} {
+			if *path != "" {
+				*path, err = s.finalPath(*path)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
