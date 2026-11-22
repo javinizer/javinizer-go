@@ -429,15 +429,12 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		)
 	}
 
-	html := string(resp.Body())
-	if challengedetect.IsCloudflareChallengePage(html) {
-		return "", models.NewScraperChallengeError(
-			"JavLibrary",
-			"JavLibrary returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
-		)
-	}
-
-	return html, nil
+	// The earlier direct-success path returns every non-challenge HTTP 200.
+	// The solver did not succeed, so the original direct challenge remains.
+	return "", models.NewScraperChallengeError(
+		"JavLibrary",
+		"JavLibrary returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
+	)
 }
 
 // parseDetailPage parses a JavLibrary detail page HTML
