@@ -140,10 +140,8 @@ func TestMiss2_DownloadFromURL_CustomHeaders(t *testing.T) {
 	assert.Equal(t, "https://referer.example.com/", receivedReferer)
 }
 
-// --- DownloadFromURL: validatePathWithinDir for tempFullPath (lines 160-162) ---
-// This path requires a posterID that creates a path escaping the temp poster dir.
-// Since posterID is validated for path separators, this is very hard to trigger.
-// We test the validation indirectly.
+// DownloadFromURL rejects invalid poster IDs before computing or validating
+// the two preview paths.
 
 func TestMiss2_DownloadFromURL_PathTraversalPosterID(t *testing.T) {
 	fs := afero.NewMemMapFs()

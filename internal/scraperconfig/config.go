@@ -325,8 +325,6 @@ func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *Prox
 	mode := ResolveScraperProxyMode(global, scraperOverride)
 
 	switch mode {
-	case ScraperProxyModeDirect:
-		return &ProxyProfile{} // Empty = no proxy
 	case ScraperProxyModeInherit:
 		return ResolveGlobalProxy(global)
 	case ScraperProxyModeSpecific:
@@ -350,8 +348,10 @@ func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *Prox
 		}
 		// Profile not found → fallback to inherit
 		return ResolveGlobalProxy(global)
+	default:
+		// Direct and unrecognized modes must not select any proxy.
+		return &ProxyProfile{}
 	}
-	return &ProxyProfile{}
 }
 
 // ResolveGlobalProxy returns the effective global proxy profile, including the

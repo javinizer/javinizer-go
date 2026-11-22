@@ -105,7 +105,7 @@ func TestValidateJobID(t *testing.T) {
 	}
 }
 
-// ---- validatePathWithinDir ----
+// ---- validatePathsWithinDir ----
 
 func TestValidatePathWithinDir(t *testing.T) {
 	dir := "/tmp/posters/job1"
@@ -122,7 +122,7 @@ func TestValidatePathWithinDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePathWithinDir(tt.path, tt.dir)
+			err := validatePathsWithinDir(tt.dir, tt.path)
 			if tt.wantError {
 				assert.Error(t, err)
 			} else {
@@ -130,6 +130,18 @@ func TestValidatePathWithinDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePathsWithinDirChecksInOrder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "original")
+	valid := filepath.Join(dir, "preview.jpg")
+	outside := filepath.Join(filepath.Dir(dir), "other")
+	first := filepath.Join(outside, "first.jpg")
+	second := filepath.Join(outside, "second.jpg")
+
+	require.NoError(t, validatePathsWithinDir(dir, valid, valid))
+	require.EqualError(t, validatePathsWithinDir(dir, first, second), fmt.Sprintf("path %q escapes directory %q", first, dir))
+	require.EqualError(t, validatePathsWithinDir(dir, valid, second), fmt.Sprintf("path %q escapes directory %q", second, dir))
 }
 
 // ---- CropWithBounds ----
@@ -496,7 +508,7 @@ func TestCropWithBounds_PathTraversal(t *testing.T) {
 	require.NoError(t, err)
 
 	// Direct validation of the defense helper.
-	err = validatePathWithinDir("/tmp/posters/job1/../../etc/passwd", "/tmp/posters/job1")
+	err = validatePathsWithinDir("/tmp/posters/job1", "/tmp/posters/job1/../../etc/passwd")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes")
 }
