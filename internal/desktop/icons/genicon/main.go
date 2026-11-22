@@ -36,23 +36,14 @@ func main() {
 	}
 
 	f, err := os.Open(*icoPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "genicon: open ico: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnError("open ico", err)
 	defer func() { _ = f.Close() }() // genicon exits on any read error; close result is immaterial
 
 	icon, err := winres.LoadICO(f)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "genicon: load ico: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnError("load ico", err)
 
 	rs := &winres.ResourceSet{}
-	if err := rs.SetIcon(winres.RT_ICON, icon); err != nil {
-		fmt.Fprintf(os.Stderr, "genicon: set icon: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnError("set icon", rs.SetIcon(winres.RT_ICON, icon))
 
 	archs := map[string]winres.Arch{
 		"386":   winres.ArchI386,
@@ -66,14 +57,15 @@ func main() {
 	}
 
 	out, err := os.Create(*outPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "genicon: create output: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnError("create output", err)
 	defer func() { _ = out.Close() }() // best-effort: WriteObject already flushed
 
-	if err := rs.WriteObject(out, targetArch); err != nil {
-		fmt.Fprintf(os.Stderr, "genicon: write syso: %v\n", err)
+	exitOnError("write syso", rs.WriteObject(out, targetArch))
+}
+
+func exitOnError(operation string, err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "genicon: %s: %v\n", operation, err)
 		os.Exit(1)
 	}
 }

@@ -32,10 +32,14 @@ type scraper struct {
 	settings    models.ScraperSettings
 }
 
-type graphQLRequest struct {
-	Query         string         `json:"query"`
-	Variables     map[string]any `json:"variables,omitempty"`
-	OperationName string         `json:"operationName,omitempty"`
+type searchSceneRequest struct {
+	Query     string           `json:"query"`
+	Variables searchSceneInput `json:"variables"`
+}
+
+type searchSceneInput struct {
+	Limit int    `json:"limit"`
+	Term  string `json:"term"`
 }
 
 type graphQLResponse struct {
@@ -210,23 +214,15 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		}
 	}`
 
-	req := graphQLRequest{
-		Query: query,
-		Variables: map[string]any{
-			"term":  searchTerm,
-			"limit": 5,
-		},
-	}
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("javstash: failed to marshal request: %w", err)
+	req := searchSceneRequest{
+		Query:     query,
+		Variables: searchSceneInput{Limit: 5, Term: searchTerm},
 	}
 
 	resp, err := s.client.R().
 		SetHeader("Content-Type", "application/json").
 		SetHeader("ApiKey", s.apiKey).
-		SetBody(body).
+		SetBody(req).
 		Post(s.baseURL)
 
 	if err != nil {
