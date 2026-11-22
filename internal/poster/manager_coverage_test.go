@@ -122,7 +122,7 @@ func TestDownloadFromURL_HttpClientError_WithBypassSSRF(t *testing.T) {
 }
 
 func TestDownloadFromURL_PathValidationEscapes(t *testing.T) {
-	err := validatePathWithinDir("/etc/passwd", "/tmp/posters/job1")
+	err := validatePathsWithinDir("/tmp/posters/job1", "/etc/passwd")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes")
 }

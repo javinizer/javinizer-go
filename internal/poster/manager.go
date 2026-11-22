@@ -143,10 +143,7 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 	croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
 
 	// Defense in depth: ensure both paths are inside tempPosterDir.
-	if err := validatePathWithinDir(sourcePath, tempPosterDir); err != nil {
-		return nil, err
-	}
-	if err := validatePathWithinDir(croppedPath, tempPosterDir); err != nil {
+	if err := validatePathsWithinDir(tempPosterDir, sourcePath, croppedPath); err != nil {
 		return nil, err
 	}
 
@@ -214,10 +211,7 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	tempCroppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
 
 	// Defense in depth: ensure paths are inside tempPosterDir.
-	if err := validatePathWithinDir(tempFullPath, tempPosterDir); err != nil {
-		return nil, err
-	}
-	if err := validatePathWithinDir(tempCroppedPath, tempPosterDir); err != nil {
+	if err := validatePathsWithinDir(tempPosterDir, tempFullPath, tempCroppedPath); err != nil {
 		return nil, err
 	}
 
@@ -402,13 +396,15 @@ func ValidateJobID(jobID string) error {
 	return err
 }
 
-// validatePathWithinDir checks that the cleaned path starts with the
-// cleaned directory plus a path separator, preventing path traversal.
-func validatePathWithinDir(path, dir string) error {
+// validatePathsWithinDir checks that each cleaned path starts with the
+// cleaned directory plus a path separator. It reports the first path outside
+// the directory.
+func validatePathsWithinDir(dir string, paths ...string) error {
 	cleanDir := filepath.Clean(dir) + string(os.PathSeparator)
-	cleanPath := filepath.Clean(path)
-	if !strings.HasPrefix(cleanPath, cleanDir) {
-		return fmt.Errorf("path %q escapes directory %q", path, dir)
+	for _, path := range paths {
+		if !strings.HasPrefix(filepath.Clean(path), cleanDir) {
+			return fmt.Errorf("path %q escapes directory %q", path, dir)
+		}
 	}
 	return nil
 }
