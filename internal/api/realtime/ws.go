@@ -32,6 +32,24 @@ func handleWebSocket(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 
 		upgrader := runtime.WebSocketUpgrader()
+		if upgrader.Error == nil {
+			// Keep the route's previous error response without changing Gorilla's validation.
+			const upgradeHeader = "Upgrade"
+			previousUpgrade, hadUpgrade := c.Writer.Header()[upgradeHeader]
+			upgrader.Error = func(w http.ResponseWriter, _ *http.Request, status int, _ error) {
+				if status == http.StatusUpgradeRequired {
+					// Gorilla adds this header for a missing WebSocket Upgrade token.
+					if hadUpgrade {
+						w.Header()[upgradeHeader] = previousUpgrade
+					} else {
+						w.Header().Del(upgradeHeader)
+					}
+					status = http.StatusBadRequest
+				}
+				w.Header().Set("Sec-WebSocket-Version", "13")
+				http.Error(w, http.StatusText(status), status)
+			}
+		}
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			logging.Errorf("Failed to upgrade to websocket: %v", err)
