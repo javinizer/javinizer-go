@@ -118,14 +118,18 @@ func parseConfigLockMetadata(content string) (pid int, createdUnixNano int64, ok
 }
 
 func isProcessAlive(pid int) bool {
-	if pid <= 0 {
+	var process *os.Process
+	var err error
+	if pid > 0 {
+		process, err = os.FindProcess(pid)
+	}
+	if err != nil || process == nil {
 		return false
 	}
 
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
+	// FindProcess may own a native handle (a pidfd on Linux). A probe never
+	// waits for the process, so release the handle before returning.
+	defer func() { _ = process.Release() }()
 
 	// Signal(0) probes process existence without sending a signal.
 	err = process.Signal(syscall.Signal(0))

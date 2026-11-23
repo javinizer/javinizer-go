@@ -23,27 +23,18 @@ func NewTokenService(repo database.ApiTokenRepositoryInterface) *TokenService {
 // Create issues a new API token for the given name, persists its hash and
 // prefix, and returns the token record plus the plaintext value.
 func (s *TokenService) Create(ctx context.Context, name string) (*models.ApiToken, string, error) {
-	fullToken, prefix, err := GenerateToken()
-	if err != nil {
-		return nil, "", err
-	}
-
-	hash := HashToken(fullToken)
-
-	id := generateUUID()
-
-	token := &models.ApiToken{
-		ID:          id,
-		Name:        name,
-		TokenHash:   hash,
-		TokenPrefix: prefix,
-	}
-
-	if err := s.repo.Create(ctx, token); err != nil {
-		return nil, "", err
-	}
-
-	return token, fullToken, nil
+	return issueToken(func(hash, prefix string) (*models.ApiToken, error) {
+		token := &models.ApiToken{
+			ID:          generateUUID(),
+			Name:        name,
+			TokenHash:   hash,
+			TokenPrefix: prefix,
+		}
+		if err := s.repo.Create(ctx, token); err != nil {
+			return nil, err
+		}
+		return token, nil
+	})
 }
 
 // Revoke marks the token with the given id as revoked.
@@ -59,18 +50,23 @@ func (s *TokenService) List(ctx context.Context) ([]models.ApiToken, error) {
 // Regenerate issues a new plaintext value for the token with the given id and
 // returns the updated record.
 func (s *TokenService) Regenerate(ctx context.Context, id string) (*models.ApiToken, string, error) {
+	return issueToken(func(hash, prefix string) (*models.ApiToken, error) {
+		return s.repo.Regenerate(ctx, id, hash, prefix)
+	})
+}
+
+// issueToken sends only the hash and display prefix to storage and returns
+// the plaintext token only after storage succeeds.
+func issueToken(persist func(hash, prefix string) (*models.ApiToken, error)) (*models.ApiToken, string, error) {
 	fullToken, prefix, err := GenerateToken()
 	if err != nil {
 		return nil, "", err
 	}
 
-	newHash := HashToken(fullToken)
-
-	token, err := s.repo.Regenerate(ctx, id, newHash, prefix)
+	token, err := persist(HashToken(fullToken), prefix)
 	if err != nil {
 		return nil, "", err
 	}
-
 	return token, fullToken, nil
 }
 

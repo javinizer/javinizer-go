@@ -144,6 +144,7 @@ func TestTokenService_Create(t *testing.T) {
 		require.NoError(t, err)
 		expectedHash := HashToken(fullToken)
 		assert.Equal(t, expectedHash, apiToken.TokenHash)
+		assert.Equal(t, strings.TrimPrefix(fullToken, TokenPrefix)[:8], apiToken.TokenPrefix)
 		found, err := repo.FindByTokenHash(context.Background(), expectedHash)
 		require.NoError(t, err)
 		assert.Equal(t, apiToken.ID, found.ID)
@@ -153,15 +154,19 @@ func TestTokenService_Create(t *testing.T) {
 		errRepo := newMockRepo()
 		errRepo.createErr = errors.New("db error")
 		errSvc := NewTokenService(errRepo)
-		_, _, err := errSvc.Create(context.Background(), "fail-token")
-		assert.Error(t, err)
+		record, plaintext, err := errSvc.Create(context.Background(), "fail-token")
+		require.ErrorIs(t, err, errRepo.createErr)
+		assert.Nil(t, record)
+		assert.Empty(t, plaintext)
 	})
 
 	t.Run("regenerate error from repo", func(t *testing.T) {
 		repo := newMockRepo()
 		svc := NewTokenService(repo)
-		_, _, err := svc.Regenerate(context.Background(), "nonexistent-id")
-		assert.Error(t, err)
+		record, plaintext, err := svc.Regenerate(context.Background(), "nonexistent-id")
+		require.Error(t, err)
+		assert.Nil(t, record)
+		assert.Empty(t, plaintext)
 	})
 }
 
@@ -220,6 +225,7 @@ func TestTokenService_Regenerate(t *testing.T) {
 		assert.Equal(t, apiToken.ID, regenToken.ID)
 		assert.NotEqual(t, oldFullToken, newFullToken)
 		assert.True(t, strings.HasPrefix(newFullToken, TokenPrefix))
+		assert.Equal(t, strings.TrimPrefix(newFullToken, TokenPrefix)[:8], regenToken.TokenPrefix)
 
 		// Old token hash should no longer match
 		_, err = repo.FindByTokenHash(context.Background(), HashToken(oldFullToken))
