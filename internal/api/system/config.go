@@ -182,24 +182,8 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 		!proxyProfilesEqual(oldProxy.Profiles, normalizedProxy.Profiles)
 
 	if globalChanged {
-		// Hash the proxy config only when a change is detected. A hashing
-		// failure means we cannot safely verify the token against the new
-		// settings, so fail closed immediately instead of risking validation
-		// against an empty/incorrect hash.
-		newGlobalHash, err := core.HashProxyConfig(normalizedProxy)
-		if err != nil {
-			return fmt.Errorf("failed to hash proxy settings: %w", err)
-		}
-
-		// If no token provided for global scope, reject
-		token, ok := tokens["global"]
-		if !ok || token == "" {
-			return fmt.Errorf("proxy settings changed but no test verification token provided - please test proxy before saving")
-		}
-
-		// Validate token
-		if !deps.TokenStore.Validate(token, "global", newGlobalHash) {
-			return fmt.Errorf("proxy verification token is invalid or expired - please test proxy again")
+		if err := verifyChangedProxySettings(deps.TokenStore, tokens, "global", "proxy", normalizedProxy); err != nil {
+			return err
 		}
 	}
 
@@ -209,26 +193,26 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 		oldCfg.Scrapers.FlareSolverr.Timeout != newCfg.Scrapers.FlareSolverr.Timeout
 
 	if flareSolverrChanged {
-		// Hash the FlareSolverr config only when a change is detected; fail
-		// closed on hashing errors so no token is validated against an
-		// incorrect hash.
-		newFlareSolverrHash, err := core.HashProxyConfig(newCfg.Scrapers.FlareSolverr)
-		if err != nil {
-			return fmt.Errorf("failed to hash flaresolverr settings: %w", err)
-		}
-
-		// If no token provided for flaresolverr scope, reject
-		token, ok := tokens["flaresolverr"]
-		if !ok || token == "" {
-			return fmt.Errorf("flaresolverr settings changed but no test verification token provided - please test flaresolverr before saving")
-		}
-
-		// Validate token
-		if !deps.TokenStore.Validate(token, "flaresolverr", newFlareSolverrHash) {
-			return fmt.Errorf("flaresolverr verification token is invalid or expired - please test flaresolverr again")
-		}
+		return verifyChangedProxySettings(deps.TokenStore, tokens, "flaresolverr", "flaresolverr", newCfg.Scrapers.FlareSolverr)
 	}
 
+	return nil
+}
+
+// verifyChangedProxySettings requires a token bound to both the scope and the
+// current settings. A hash failure must fail closed before token validation.
+func verifyChangedProxySettings(store core.TokenStoreInterface, tokens map[string]string, scope, settingName string, settings any) error {
+	hash, err := core.HashProxyConfig(settings)
+	if err != nil {
+		return fmt.Errorf("failed to hash %s settings: %w", settingName, err)
+	}
+	token := tokens[scope]
+	if token == "" {
+		return fmt.Errorf("%s settings changed but no test verification token provided - please test %s before saving", settingName, settingName)
+	}
+	if !store.Validate(token, scope, hash) {
+		return fmt.Errorf("%s verification token is invalid or expired - please test %s again", settingName, settingName)
+	}
 	return nil
 }
 

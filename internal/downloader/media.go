@@ -608,21 +608,18 @@ func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movi
 
 	extrafanartDir := filepath.Join(destDir, d.config.ScreenshotFolder)
 	tmplCtx := d.buildTemplateContext(movie, multipart)
-	screenshotNames := d.pathResolver.ResolveScreenshotNames(movie, true, tmplCtx)
-	results := make([]DownloadResult, 0, len(movie.Screenshots))
+	downloads := d.pathResolver.planScreenshotDownloads(movie, tmplCtx)
+	results := make([]DownloadResult, 0, len(downloads))
 
-	for i, url := range movie.Screenshots {
+	for _, screenshot := range downloads {
 		select {
 		case <-ctx.Done():
 			return results, ctx.Err()
 		default:
 		}
 
-		if i >= len(screenshotNames) {
-			break
-		}
-		destPath := filepath.Join(extrafanartDir, screenshotNames[i])
-		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup, resolveDownloadLedger(options))
+		destPath := filepath.Join(extrafanartDir, screenshot.filename)
+		result, err := d.download(ctx, screenshot.url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup, resolveDownloadLedger(options))
 		if err != nil {
 			result.Error = err
 		}

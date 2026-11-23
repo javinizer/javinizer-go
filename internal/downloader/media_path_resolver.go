@@ -138,25 +138,43 @@ func (r *MediaPathResolver) ResolveScreenshotNames(movie *models.Movie, download
 	}
 
 	for i := range movie.Screenshots {
-		shotCtx := ctx.Clone()
-		shotCtx.Index = i + 1
-		screenshotName, err := r.engine.Execute(r.cfg.ScreenshotFormat, shotCtx)
-		if err != nil || screenshotName == "" {
-			if r.cfg.ScreenshotPadding > 0 {
-				screenshotName = fmt.Sprintf("fanart%0*d.jpg", r.cfg.ScreenshotPadding, i+1)
-			} else {
-				screenshotName = fmt.Sprintf("fanart%d.jpg", i+1)
-			}
-		}
-		screenshotName = template.SanitizeFilename(screenshotName)
-		if screenshotName == "" {
-			if r.cfg.ScreenshotPadding > 0 {
-				screenshotName = fmt.Sprintf("fanart%0*d.jpg", r.cfg.ScreenshotPadding, i+1)
-			} else {
-				screenshotName = fmt.Sprintf("fanart%d.jpg", i+1)
-			}
-		}
-		screenshots = append(screenshots, screenshotName)
+		screenshots = append(screenshots, r.resolveScreenshotName(ctx, i+1))
 	}
 	return screenshots
+}
+
+func (r *MediaPathResolver) resolveScreenshotName(ctx *template.Context, index int) string {
+	shotCtx := ctx.Clone()
+	shotCtx.Index = index
+	name, err := r.engine.Execute(r.cfg.ScreenshotFormat, shotCtx)
+	if err != nil || name == "" {
+		name = r.screenshotFallbackName(index)
+	}
+	name = template.SanitizeFilename(name)
+	if name == "" {
+		name = r.screenshotFallbackName(index)
+	}
+	return name
+}
+
+func (r *MediaPathResolver) screenshotFallbackName(index int) string {
+	if r.cfg.ScreenshotPadding > 0 {
+		return fmt.Sprintf("fanart%0*d.jpg", r.cfg.ScreenshotPadding, index)
+	}
+	return fmt.Sprintf("fanart%d.jpg", index)
+}
+
+type screenshotDownload struct {
+	url, filename string
+}
+
+// planScreenshotDownloads resolves each destination beside its source before
+// any download starts. The preview resolves names with the same naming rule
+// without allocating the pairing it does not need.
+func (r *MediaPathResolver) planScreenshotDownloads(movie *models.Movie, ctx *template.Context) []screenshotDownload {
+	downloads := make([]screenshotDownload, len(movie.Screenshots))
+	for i, url := range movie.Screenshots {
+		downloads[i] = screenshotDownload{url: url, filename: r.resolveScreenshotName(ctx, i+1)}
+	}
+	return downloads
 }

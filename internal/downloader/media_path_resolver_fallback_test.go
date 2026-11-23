@@ -84,13 +84,18 @@ func TestMediaPathResolverScreenshotSanitizedFallbackNames(t *testing.T) {
 		{"unpadded", 0, []string{"fanart1.jpg", "fanart2.jpg", "fanart3.jpg"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			movie := &models.Movie{ID: "SAMPLE-003", Screenshots: []string{"one", "two", "three"}}
+			movie := &models.Movie{ID: "SAMPLE-003", Screenshots: []string{"one", "two", "one"}}
 			ctx := template.NewContextFromMovie(movie)
 			ctx.Index = 42
 			resolver := NewMediaPathResolver(organizer.MediaFormatConfig{
 				ScreenshotFormat: " . *?\x00 ", ScreenshotPadding: tc.padding,
 			}, nil)
 			require.Equal(t, tc.want, resolver.ResolveScreenshotNames(movie, true, ctx))
+			require.Equal(t, []screenshotDownload{
+				{url: "one", filename: tc.want[0]},
+				{url: "two", filename: tc.want[1]},
+				{url: "one", filename: tc.want[2]},
+			}, resolver.planScreenshotDownloads(movie, ctx), "every occurrence must keep its preview filename")
 			require.Equal(t, 42, ctx.Index, "per-screenshot indices must not mutate the caller's context")
 			require.Empty(t, resolver.ResolveScreenshotNames(movie, false, ctx))
 		})
