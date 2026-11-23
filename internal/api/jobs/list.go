@@ -48,13 +48,11 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 
 		items := make([]contracts.JobListItem, 0)
 
-		for _, result := range results {
+		// Reapply the same status filter defensively at the response boundary.
+		visitMatchingJobStatus(results, models.JobStatus(statusFilter), func(result *JobWithStats) models.JobStatus {
+			return result.Job.Status
+		}, func(result *JobWithStats) {
 			job := result.Job
-
-			// Apply status filter if provided
-			if statusFilter != "" && job.Status != models.JobStatus(statusFilter) {
-				continue
-			}
 
 			item := contracts.JobListItem{
 				ID:             job.ID,
@@ -94,7 +92,7 @@ func listJobs(deps JobDeps) gin.HandlerFunc {
 			}
 
 			items = append(items, item)
-		}
+		})
 
 		c.JSON(http.StatusOK, contracts.JobListResponse{Jobs: items})
 	}
