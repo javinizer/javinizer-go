@@ -87,18 +87,11 @@ func provision(root string, db *database.DB) error {
 		name   string
 		offset time.Duration
 	}{{"ready", 0}, {"stale", -48 * time.Hour}, {"future", 24 * time.Hour}} {
-		snapshot, receipt, err := r18dump.Convert(ctx, strings.NewReader(dump.String()), actresscache.Provenance{SourceURL: "https://fixtures.invalid/offline-name-sync.sql", ParserRevision: "sync-browser-fixture-v1", ObservedAt: observed.Add(v.offset)}, limits.Source)
+		digest, err := publishFixtureGeneration(ctx, strings.NewReader(dump.String()), filepath.Join(root, "artifacts", v.name), observed.Add(v.offset), limits)
 		if err != nil {
 			return err
 		}
-		store, err := artifactstore.Open(filepath.Join(root, "artifacts", v.name), limits.Store)
-		if err != nil {
-			return err
-		}
-		if err := publishFixtureArtifact(ctx, store, bytes.NewReader(snapshot.Bytes()), receipt); err != nil {
-			return err
-		}
-		f.Digests[v.name] = snapshot.Digest()
+		f.Digests[v.name] = digest
 	}
 	movie := models.Movie{ContentID: f.MovieID, ID: f.MovieID, Title: "Offline sync fixture", RenderGeneration: 9}
 	if err := db.Create(&movie).Error; err != nil {
@@ -112,11 +105,37 @@ func provision(root string, db *database.DB) error {
 	if err := db.Create(&models.ActressTranslation{ActressID: id, Language: "en", DisplayName: "Stale translation"}).Error; err != nil {
 		return err
 	}
+	// The description is the completion marker and must not be written with
+	// incomplete encoding, after an earlier generation or metadata failure.
 	b, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
+	if err == nil {
+		err = os.WriteFile(filepath.Join(root, "fixture.json"), b, 0600)
 	}
-	return os.WriteFile(filepath.Join(root, "fixture.json"), b, 0600)
+	return err
+}
+
+// publishFixtureGeneration owns conversion and durable publication for one
+// artifact directory. A failed conversion never opens the store, and an
+// incomplete publication never contributes a digest to the description.
+func publishFixtureGeneration(ctx context.Context, input io.Reader, dir string, observed time.Time, limits offline.Limits) (string, error) {
+	snapshot, receipt, err := r18dump.Convert(ctx, input, actresscache.Provenance{
+		SourceURL:      "https://fixtures.invalid/offline-name-sync.sql",
+		ParserRevision: "sync-browser-fixture-v1",
+		ObservedAt:     observed,
+	}, limits.Source)
+	if err != nil {
+		return "", err
+	}
+
+	store, err := artifactstore.Open(dir, limits.Store)
+	if err != nil {
+		return "", err
+	}
+
+	if err := publishFixtureArtifact(ctx, store, bytes.NewReader(snapshot.Bytes()), receipt); err != nil {
+		return "", err
+	}
+	return snapshot.Digest(), nil
 }
 
 // fixturePublisher is the publication/close boundary owned by provision.
