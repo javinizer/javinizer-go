@@ -247,13 +247,26 @@ func Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResult, error) {
 		return result, nil
 	}
 
-	asset, err := AssetName(runtime.GOOS, runtime.GOARCH)
+	return installUpgrade(ctx, opts, result, latest, upgradeTarget{goos: runtime.GOOS, goarch: runtime.GOARCH, locateExecutable: resolveExePath})
+}
+
+// upgradeTarget describes the local runtime used for release asset selection
+// and installed executable discovery.
+type upgradeTarget struct {
+	goos, goarch     string
+	locateExecutable func(override string) (string, error)
+}
+
+// installUpgrade handles the on-disk install after Upgrade has established
+// that the release is eligible and no environment-level handoff applies.
+func installUpgrade(ctx context.Context, opts UpgradeOptions, result *UpgradeResult, latest *versionInfo, target upgradeTarget) (*UpgradeResult, error) {
+	asset, err := AssetName(target.goos, target.goarch)
 	if err != nil {
 		return nil, err
 	}
 	result.AssetName = asset
 
-	exePath, err := resolveExePath(opts.ExePath)
+	exePath, err := target.locateExecutable(opts.ExePath)
 	if err != nil {
 		return nil, fmt.Errorf("locate running binary: %w", err)
 	}
@@ -262,23 +275,23 @@ func Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResult, error) {
 	switch method {
 	case InstallMethodHomebrew:
 		result.Handoff = true
-		_, _ = fmt.Fprintf(out, "Javinizer was installed with Homebrew.\n")
-		_, _ = fmt.Fprintf(out, "Run `brew upgrade javinizer` to update (self-upgrade would break brew's bookkeeping).\n")
+		_, _ = fmt.Fprintf(opts.Out, "Javinizer was installed with Homebrew.\n")
+		_, _ = fmt.Fprintf(opts.Out, "Run `brew upgrade javinizer` to update (self-upgrade would break brew's bookkeeping).\n")
 		return result, nil
 	case InstallMethodScoop:
 		result.Handoff = true
-		_, _ = fmt.Fprintf(out, "Javinizer was installed with Scoop.\n")
-		_, _ = fmt.Fprintf(out, "Run `scoop update javinizer` to update (self-upgrade would break scoop's manifest).\n")
+		_, _ = fmt.Fprintf(opts.Out, "Javinizer was installed with Scoop.\n")
+		_, _ = fmt.Fprintf(opts.Out, "Run `scoop update javinizer` to update (self-upgrade would break scoop's manifest).\n")
 		return result, nil
 	}
 
 	if result.UpToDate && opts.Force {
-		_, _ = fmt.Fprintf(out, "Reinstalling %s (forced)...\n", latest.Version)
+		_, _ = fmt.Fprintf(opts.Out, "Reinstalling %s (forced)...\n", latest.Version)
 	} else {
-		_, _ = fmt.Fprintf(out, "Upgrading %s -> %s\n", opts.CurrentVersion, latest.Version)
+		_, _ = fmt.Fprintf(opts.Out, "Upgrading %s -> %s\n", opts.CurrentVersion, latest.Version)
 	}
 	if latest.Prerelease || IsPrerelease(latest.Version) {
-		_, _ = fmt.Fprintf(out, "Note: %s is a prerelease.\n", latest.Version)
+		_, _ = fmt.Fprintf(opts.Out, "Note: %s is a prerelease.\n", latest.Version)
 	}
 
 	if err := downloadAndReplace(ctx, opts, exePath, result.TagName, asset); err != nil {
@@ -286,7 +299,7 @@ func Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeResult, error) {
 	}
 
 	result.Upgraded = true
-	_, _ = fmt.Fprintf(out, "Upgraded to %s. Restart any running javinizer processes to use the new version.\n", latest.Version)
+	_, _ = fmt.Fprintf(opts.Out, "Upgraded to %s. Restart any running javinizer processes to use the new version.\n", latest.Version)
 	return result, nil
 }
 
