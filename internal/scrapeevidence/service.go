@@ -20,7 +20,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-const r18Source = "r18dev"
+const r18Source = actressmetadata.R18DevSource
 
 const (
 	// MaxOperations bounds simultaneous pinned immutable generations.
@@ -216,9 +216,7 @@ func (s *Service) BeginBatch(ctx context.Context, requested bool, count int) (co
 	if err != nil || view.Snapshot == nil {
 		return resultCtx, release
 	}
-	// This constructor validates only the fixed namespace, not mutable input.
-	provider, _ := actressmetadata.NewSnapshotProvider(view.Snapshot, r18Source)
-	state.provider = provider
+	state.provider = actressmetadata.NewR18DevSnapshotProvider(view.Snapshot)
 	state.maxAge = s.opts.MaxAge
 	state.base.Outcome = NoSourceReference
 	state.base.SnapshotDigest = view.Snapshot.Digest()

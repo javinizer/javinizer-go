@@ -109,6 +109,15 @@ func NewSnapshotProvider(snapshot *actresscache.Snapshot, source string) (*Snaps
 	return &SnapshotProvider{snapshot: snapshot, source: source}, nil
 }
 
+// R18DevSource is the fixed namespace shared by the R18Dev snapshot consumers.
+const R18DevSource = "r18dev"
+
+// NewR18DevSnapshotProvider pins a snapshot to the fixed R18Dev source.
+// Use NewSnapshotProvider instead when the source is supplied at runtime.
+func NewR18DevSnapshotProvider(snapshot *actresscache.Snapshot) *SnapshotProvider {
+	return &SnapshotProvider{snapshot: snapshot, source: R18DevSource}
+}
+
 // LookupEvidence returns owned exact-match evidence from the pinned snapshot.
 func (p *SnapshotProvider) LookupEvidence(ctx context.Context, q Query) (Result, error) {
 	if err := ctx.Err(); err != nil {

@@ -64,10 +64,7 @@ func (s *Service) loadGeneration(ctx context.Context) (*generation, error) {
 		c := sourceChoice(e)
 		index = append(index, indexedSource{choice: c, search: strings.ToLower(c.SourceID + "\x00" + c.JapaneseName + "\x00" + strings.Join(c.Aliases, "\x00"))})
 	}
-	provider, err := actressmetadata.NewSnapshotProvider(view.Snapshot, "r18dev")
-	if err != nil {
-		return nil, err
-	}
+	provider := actressmetadata.NewR18DevSnapshotProvider(view.Snapshot)
 	return &generation{options: s.opts, snapshot: view.Snapshot, sources: index, provider: provider, info: SourceInfo{Enabled: true, Available: true, ArtifactDigest: view.Snapshot.Digest(), RecordCount: len(index), Recovered: view.Recovered, MaxAgeSeconds: int64(s.opts.MaxAge / time.Second), RestartRequiredForConfigChanges: true}}, nil
 }
 
