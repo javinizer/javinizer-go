@@ -24,19 +24,12 @@ func resolveShortPathNameWith(path string, getLongPathName func(*uint16, *uint16
 
 	buf := make([]uint16, windows.MAX_PATH)
 	n, err := getLongPathName(ptr, &buf[0], uint32(len(buf)))
-	if err != nil {
-		return path
-	}
-
-	if n > uint32(len(buf)) {
+	if err == nil && n > uint32(len(buf)) {
 		buf = make([]uint16, n+1)
 		n, err = getLongPathName(ptr, &buf[0], uint32(len(buf)))
-		if err != nil {
-			return path
-		}
 	}
 
-	if n == 0 {
+	if err != nil || n == 0 {
 		return path
 	}
 

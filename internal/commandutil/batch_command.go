@@ -245,21 +245,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		presenter = &defaultBatchCommandPresenter{}
 	}
 
-	// Load configuration
-	cfg, err := config.LoadOrCreate(opts.ConfigFile)
+	cfg, err := LoadCLIConfig(opts.ConfigFile, "invalid configuration", func(cfg *config.Config) {
+		// Override config with flag if extrafanart is explicitly enabled.
+		if opts.DownloadExtrafanart {
+			cfg.Output.Download.DownloadExtrafanart = true
+		}
+	})
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-
-	// Override config with flag if extrafanart is explicitly enabled
-	if opts.DownloadExtrafanart {
-		cfg.Output.Download.DownloadExtrafanart = true
-	}
-
-	if _, err := config.Prepare(cfg); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
+		return err
 	}
 
 	// Pre-generate the batch job ID up front (mirrors the API organize

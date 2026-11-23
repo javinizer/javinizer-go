@@ -140,10 +140,9 @@ func run() error {
 		return err
 	}
 	if errors.Is(fixtureErr, os.ErrNotExist) {
-		if err := provision(root, db); err != nil {
-			return err
-		}
-	} else if fixtureErr != nil {
+		fixtureErr = provision(root, db)
+	}
+	if fixtureErr != nil {
 		return fixtureErr
 	}
 	cfg := config.DefaultConfig(nil, nil)

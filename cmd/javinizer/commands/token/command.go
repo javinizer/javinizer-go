@@ -11,7 +11,6 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/api/token"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/spf13/cobra"
 )
@@ -77,14 +76,9 @@ func newListCommand() *cobra.Command {
 // openTokenDependencies applies the same startup configuration and validation
 // for every token command. The caller owns the returned dependencies.
 func openTokenDependencies(configFile string) (*commandutil.CoreDeps, error) {
-	cfg, err := config.LoadOrCreate(configFile)
+	cfg, err := commandutil.LoadCLIConfig(configFile, "invalid configuration", nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, err
 	}
 
 	deps, err := commandutil.NewDependencies(cfg)
