@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
 const intentHeader = "X-Requested-With"
@@ -82,7 +83,7 @@ func (h *handler) allowedOrigin(origin string, r *http.Request) bool {
 		scheme = "https"
 	}
 	target, err := url.Parse(scheme + "://" + r.Host)
-	if err == nil && strings.EqualFold(parsed.Scheme, scheme) && strings.EqualFold(parsed.Hostname(), target.Hostname()) && originPort(parsed) == originPort(target) {
+	if err == nil && strings.EqualFold(parsed.Scheme, scheme) && strings.EqualFold(parsed.Hostname(), target.Hostname()) && core.EffectiveOriginPort(parsed) == core.EffectiveOriginPort(target) {
 		return true
 	}
 	if h.origins != nil {
@@ -93,17 +94,4 @@ func (h *handler) allowedOrigin(origin string, r *http.Request) bool {
 		}
 	}
 	return false
-}
-
-func originPort(u *url.URL) string {
-	if port := u.Port(); port != "" {
-		return port
-	}
-	if u.Scheme == "http" {
-		return "80"
-	}
-	if u.Scheme == "https" {
-		return "443"
-	}
-	return ""
 }
