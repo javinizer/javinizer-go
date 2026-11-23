@@ -23,12 +23,7 @@ func parseCIDRList(raw string) []*net.IPNet {
 		if s == "" {
 			continue
 		}
-		_, n, err := net.ParseCIDR(s)
-		if err != nil {
-			logging.Warnf("Ignoring invalid CIDR in JAVINIZER_SETUP_TRUSTED_CIDRS: %s", s)
-			continue
-		}
-		cidrs = append(cidrs, n)
+		cidrs = appendTrustedCIDR(cidrs, s, true)
 	}
 	return cidrs
 }
@@ -42,16 +37,25 @@ func computeTrustedCIDRs(envLookup func(key string) string) []*net.IPNet {
 	}
 	var cidrs []*net.IPNet
 	for _, s := range defaultTrustedCIDRs {
-		_, n, err := net.ParseCIDR(s)
-		if err != nil {
-			continue
-		}
-		cidrs = append(cidrs, n)
+		cidrs = appendTrustedCIDR(cidrs, s, false)
 	}
 	if extra := envLookup("JAVINIZER_SETUP_TRUSTED_CIDRS"); extra != "" {
 		cidrs = append(cidrs, parseCIDRList(extra)...)
 	}
 	return cidrs
+}
+
+// appendTrustedCIDR admits only valid networks. Configured input reports
+// invalid entries; invalid built-in entries are skipped silently.
+func appendTrustedCIDR(cidrs []*net.IPNet, value string, warnIfInvalid bool) []*net.IPNet {
+	_, network, err := net.ParseCIDR(value)
+	if err != nil {
+		if warnIfInvalid {
+			logging.Warnf("Ignoring invalid CIDR in JAVINIZER_SETUP_TRUSTED_CIDRS: %s", value)
+		}
+		return cidrs
+	}
+	return append(cidrs, network)
 }
 
 // isTrustedClient checks whether ipStr belongs to a trusted CIDR.

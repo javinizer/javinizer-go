@@ -30,15 +30,7 @@ func isSameOrigin(origin string, r *http.Request) bool {
 		reqScheme = "https"
 	}
 
-	originPort := u.Port()
-	if originPort == "" {
-		switch u.Scheme {
-		case "http":
-			originPort = "80"
-		case "https":
-			originPort = "443"
-		}
-	}
+	originPort := core.EffectiveOriginPort(u)
 
 	reqHost := r.Host
 	reqPort := ""
