@@ -5,7 +5,6 @@ package actresssync
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/actresscache"
@@ -127,10 +126,7 @@ func Preview(ctx context.Context, targets []Target, snapshot *actresscache.Snaps
 		case snapshot == nil:
 			item.Outcome = NoSnapshot
 		default:
-			match, err := snapshot.LookupUnique("dmm", strconv.Itoa(target.DMMID))
-			if err != nil {
-				return nil, err
-			}
+			match := snapshot.LookupDMMID(target.DMMID)
 			switch {
 			case match.Ambiguous:
 				item.Outcome = Ambiguous
