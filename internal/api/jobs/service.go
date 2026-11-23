@@ -102,6 +102,17 @@ type jobStatusLister interface {
 	ListByStatus(ctx context.Context, status string, limit int) ([]models.Job, error)
 }
 
+// visitMatchingJobStatus applies the same exact, stable-order status filter
+// to repository rows and handler rows with stats. Callers only read rows.
+func visitMatchingJobStatus[T any](rows []T, status models.JobStatus, statusOf func(*T) models.JobStatus, visit func(*T)) {
+	for i := range rows {
+		row := &rows[i]
+		if status == "" || statusOf(row) == status {
+			visit(row)
+		}
+	}
+}
+
 // ListJobsWithStatsByStatus is ListJobsWithStats filtered by job status in SQL
 // when a non-empty filter is provided. Callers asking for status=running (e.g.
 // the web layout's reload-restore probe that fires on every authenticated page
@@ -122,11 +133,11 @@ func (d JobDeps) ListJobsWithStatsByStatus(ctx context.Context, status string, l
 				return nil, listErr
 			}
 			jobs = make([]models.Job, 0, len(all))
-			for _, job := range all {
-				if string(job.Status) == status {
-					jobs = append(jobs, job)
-				}
-			}
+			visitMatchingJobStatus(all, models.JobStatus(status), func(job *models.Job) models.JobStatus {
+				return job.Status
+			}, func(job *models.Job) {
+				jobs = append(jobs, *job)
+			})
 		}
 	} else if limit > 0 {
 		// ?limit without a status: bound the SQL query itself as well — the
