@@ -10,6 +10,15 @@ import (
 //go:embed *.sql
 var sqlMigrations embed.FS
 
+//go:embed 000001_baseline.sql
+var baselineSQL string
+
+// BaselineSQL returns the immutable SQL bytes shared with Filesystem. Naming
+// this migration in the embed directive makes its presence a build invariant.
+func BaselineSQL() string {
+	return baselineSQL
+}
+
 // Filesystem returns embedded SQL migration files.
 func Filesystem() fs.FS {
 	return sqlMigrations

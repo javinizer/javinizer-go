@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -94,11 +93,7 @@ func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrat
 		}
 	}
 
-	baselineContent, err := fs.ReadFile(dbmigrations.Filesystem(), "000001_baseline.sql")
-	if err != nil {
-		return fmt.Errorf("read baseline migration: %w", err)
-	}
-	baselineHash := computeMigrationHash(baselineContent)
+	baselineHash := computeMigrationHash([]byte(dbmigrations.BaselineSQL()))
 
 	storedHash, err := GetStoredHash(sqlDB, "000001_baseline.sql")
 	if err != nil {
