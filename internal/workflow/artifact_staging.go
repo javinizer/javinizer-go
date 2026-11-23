@@ -1475,9 +1475,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.inPlace && finalResult.FolderPath != "" {
 			oldDir := filepath.Dir(s.sourcePath)
 			if filepath.Clean(oldDir) != filepath.Clean(finalResult.FolderPath) {
-				if entries, readErr := afero.ReadDir(s.fs, oldDir); readErr == nil && len(entries) == 0 {
-					_ = s.fs.Remove(oldDir)
-				}
+				fsutil.TryRemoveEmptyDir(s.fs, oldDir)
 			}
 		}
 	}
