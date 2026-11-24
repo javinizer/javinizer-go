@@ -152,9 +152,6 @@ func validateProxySaveConfig(deps *core.APIDeps, newCfg *config.Config, tokens m
 	}
 
 	oldCfg := deps.CoreDeps.GetConfig()
-	if oldCfg == nil {
-		return nil
-	}
 
 	// Check if global proxy settings changed
 	// Normalize Profile → DefaultProfile to match the normalization applied by
