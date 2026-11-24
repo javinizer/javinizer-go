@@ -202,17 +202,9 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		wf = bs.Workflow
 		ownDeps = true
 	} else {
-		fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
-		if fcErr != nil {
-			return nil, nil, fmt.Errorf("failed to create factory config: %w", fcErr)
-		}
-		factory, factoryErr := workflow.NewWorkflowFactory(fc)
-		if factoryErr != nil {
-			return nil, nil, fmt.Errorf("failed to create workflow factory: %w", factoryErr)
-		}
-		wf, err = factory.NewScrapeOnlyWorkflow()
+		_, wf, err = workflow.NewScrapeOnlyWorkflowFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create scraper: %w", err)
+			return nil, nil, fmt.Errorf("failed to create factory config: %w", err)
 		}
 	}
 	if ownDeps {
