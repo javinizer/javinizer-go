@@ -39,6 +39,29 @@ func TestStrictWorkflowFactoryRejectsPartialConfig(t *testing.T) {
 	require.Same(t, syntaxErr, errors.Unwrap(err))
 }
 
+func TestRepoBackedScrapeOnlyWorkflowPreservesConstructionErrors(t *testing.T) {
+	cfg := config.DefaultConfig(nil, nil)
+	registry := scraperutil.NewScraperRegistry()
+	repos := database.Repositories{}
+
+	factory, wf, err := NewScrapeOnlyWorkflowFromRepos(cfg, registry, repos)
+	require.Nil(t, factory)
+	require.Nil(t, wf)
+	var scraperErr *ScraperConstructionError
+	require.ErrorAs(t, err, &scraperErr)
+	require.Same(t, scraperErr, err, "preserve the original stage error")
+
+	// A real invalid persisted regex fails before incomplete scraper wiring.
+	cfg.Matching.RegexEnabled = true
+	cfg.Matching.RegexPattern = "[invalid"
+	factory, wf, err = NewScrapeOnlyWorkflowFromRepos(cfg, registry, repos)
+	require.Nil(t, factory)
+	require.Nil(t, wf)
+	var syntaxErr *syntax.Error
+	require.ErrorAs(t, err, &syntaxErr)
+	require.Same(t, syntaxErr, errors.Unwrap(err))
+}
+
 func TestStrictWorkflowFactoryProducesFullWorkflow(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
 	registry := scraperutil.NewScraperRegistry()
