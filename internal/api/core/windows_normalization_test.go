@@ -54,6 +54,31 @@ func TestIsUNCPath_NormalizationEdgeCases(t *testing.T) {
 	assert.True(t, isUNCPath(`\??\UNC`)) // exactly 7 chars
 }
 
+// Classification recognizes path families; normalization and server admission
+// remain separate. No host filesystem or network is needed here.
+func TestIsUNCPath_FamilyContract(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		unc  bool
+	}{
+		{"network share", `\\Archive\Films`, true},
+		{"extended network share", `\\?\UnC\Archive\Films`, true},
+		{"device network share", `\\.\uNc\Archive\Films`, true},
+		{"NT network share", `\??\UnC\Archive\Films`, true},
+		{"empty", "", false},
+		{"drive root", `D:\`, false},
+		{"rooted local path", `\Films`, false},
+		{"extended drive path", `\\?\D:\Films`, true},
+		{"device drive path", `\\.\D:\Films`, true},
+		{"NT drive path", `\??\D:\Films`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.unc, isUNCPath(tc.path), "%q", tc.path)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // isReservedDeviceName — has runtime.GOOS guard; on non-Windows returns false
 // ---------------------------------------------------------------------------

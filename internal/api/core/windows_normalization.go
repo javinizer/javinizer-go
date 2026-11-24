@@ -69,31 +69,14 @@ func stripTrailingChars(path string) string {
 }
 
 func isUNCPath(path string) bool {
-	if len(path) < 2 {
-		return false
-	}
-
-	// Standard UNC path: \\server\share
-	if path[0] == '\\' && path[1] == '\\' {
+	// A double backslash covers standard UNC paths and the Win32 and
+	// device namespace forms, regardless of the rest of the path.
+	if strings.HasPrefix(path, `\\`) {
 		return true
 	}
 
-	// Extended-length UNC: \\?\UNC\server\share
-	if len(path) >= 7 && strings.ToLower(path[:7]) == `\\?\unc` {
-		return true
-	}
-
-	// NT namespace UNC: \??\UNC\server\share
-	if len(path) >= 7 && strings.ToLower(path[:7]) == `\??\unc` {
-		return true
-	}
-
-	// Device namespace UNC: \\.\UNC\server\share
-	if len(path) >= 7 && strings.ToLower(path[:7]) == `\\.\unc` {
-		return true
-	}
-
-	return false
+	// The NT namespace UNC form begins with one backslash instead.
+	return len(path) >= 7 && strings.ToLower(path[:7]) == `\??\unc`
 }
 
 func normalizeUNCPath(path string, allowUNC bool, allowedUNCServers []string) (string, error) {

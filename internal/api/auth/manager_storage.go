@@ -88,44 +88,7 @@ func (m *AuthManager) writeCredentialsToDisk(creds *storedCredentials) error {
 		CreatedAt: m.nowFn().UTC().Format(time.RFC3339),
 	}
 
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal auth credential file: %w", err)
-	}
-
-	dir := filepath.Dir(m.credentialPath)
-	if err := m.fs.MkdirAll(dir, config.DirPermTemp); err != nil {
-		return fmt.Errorf("failed to create auth credential directory: %w", err)
-	}
-
-	tmpFile, err := afero.TempFile(m.fs, dir, credentialFilename+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp auth credential file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() { _ = m.fs.Remove(tmpPath) }()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("failed to write temp auth credential file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp auth credential file: %w", err)
-	}
-
-	if err := enforceCredentialFilePermissions(m.fs, tmpPath); err != nil {
-		return fmt.Errorf("failed to enforce temp auth credential permissions: %w", err)
-	}
-
-	if err := m.fs.Rename(tmpPath, m.credentialPath); err != nil {
-		return fmt.Errorf("failed to persist auth credential file: %w", err)
-	}
-
-	if err := enforceCredentialFilePermissions(m.fs, m.credentialPath); err != nil {
-		return fmt.Errorf("failed to enforce auth credential permissions: %w", err)
-	}
-
-	return nil
+	return writeAuthFile(m.fs, m.credentialPath, credentialFilename, "credential", payload)
 }
 
 func (m *AuthManager) loadSessionsFromDisk() {
@@ -215,41 +178,48 @@ func (m *AuthManager) writePersistentSessionsLocked() error {
 		Sessions: items,
 	}
 
+	return writeAuthFile(m.fs, m.sessionPath, sessionFilename, "session", payload)
+}
+
+// writeAuthFile keeps credential and session persistence on the same path:
+// marshal before touching disk, check both temporary and destination file
+// permissions, and always clean up the temporary file. Payloads stay typed.
+func writeAuthFile[T credentialFile | sessionFile](fs afero.Fs, path, filename, kind string, payload T) error {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal auth session file: %w", err)
+		return fmt.Errorf("failed to marshal auth %s file: %w", kind, err)
 	}
 
-	dir := filepath.Dir(m.sessionPath)
-	if err := m.fs.MkdirAll(dir, config.DirPermTemp); err != nil {
-		return fmt.Errorf("failed to create auth session directory: %w", err)
+	dir := filepath.Dir(path)
+	if err := fs.MkdirAll(dir, config.DirPermTemp); err != nil {
+		return fmt.Errorf("failed to create auth %s directory: %w", kind, err)
 	}
 
-	tmpFile, err := afero.TempFile(m.fs, dir, sessionFilename+".tmp-*")
+	tmpFile, err := afero.TempFile(fs, dir, filename+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temp auth session file: %w", err)
+		return fmt.Errorf("failed to create temp auth %s file: %w", kind, err)
 	}
 	tmpPath := tmpFile.Name()
-	defer func() { _ = m.fs.Remove(tmpPath) }()
+	defer func() { _ = fs.Remove(tmpPath) }()
 
 	if _, err := tmpFile.Write(data); err != nil {
 		_ = tmpFile.Close()
-		return fmt.Errorf("failed to write temp auth session file: %w", err)
+		return fmt.Errorf("failed to write temp auth %s file: %w", kind, err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp auth session file: %w", err)
+		return fmt.Errorf("failed to close temp auth %s file: %w", kind, err)
 	}
 
-	if err := enforceCredentialFilePermissions(m.fs, tmpPath); err != nil {
-		return fmt.Errorf("failed to enforce temp auth session permissions: %w", err)
+	if err := enforceCredentialFilePermissions(fs, tmpPath); err != nil {
+		return fmt.Errorf("failed to enforce temp auth %s permissions: %w", kind, err)
 	}
 
-	if err := m.fs.Rename(tmpPath, m.sessionPath); err != nil {
-		return fmt.Errorf("failed to persist auth session file: %w", err)
+	if err := fs.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("failed to persist auth %s file: %w", kind, err)
 	}
 
-	if err := enforceCredentialFilePermissions(m.fs, m.sessionPath); err != nil {
-		return fmt.Errorf("failed to enforce auth session permissions: %w", err)
+	if err := enforceCredentialFilePermissions(fs, path); err != nil {
+		return fmt.Errorf("failed to enforce auth %s permissions: %w", kind, err)
 	}
 
 	return nil

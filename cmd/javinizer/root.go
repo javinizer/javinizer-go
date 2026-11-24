@@ -197,6 +197,14 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// exitOnStartupError reports a failed CLI initialization stage before exiting.
+func exitOnStartupError(stage string, err error) {
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Failed to %s: %v\n", stage, err)
+		os.Exit(1)
+	}
+}
+
 // initConfig reads in config file and ENV variables
 func initConfig() {
 	// Check for JAVINIZER_CONFIG environment variable (Docker override)
@@ -205,18 +213,13 @@ func initConfig() {
 	}
 
 	cfg, err := config.LoadOrCreate(cfgFile)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnStartupError("load config", err)
 	originalLogOutput = cfg.Logging.Output
 
 	// Apply environment variable overrides FIRST (UMASK, JAVINIZER_LOG_DIR, etc.)
 	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to apply environment overrides: %v\n", err)
-		os.Exit(1)
-	}
+	_, err = config.Prepare(cfg)
+	exitOnStartupError("apply environment overrides", err)
 
 	// Apply umask AFTER env overrides, BEFORE creating log files
 	if cfg.System.Umask != "" {
@@ -267,10 +270,7 @@ func initConfig() {
 	}
 	actualLogOutput := logCfg.Output
 
-	if err := logging.InitLogger(logCfg); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
-		os.Exit(1)
-	}
+	exitOnStartupError("initialize logger", logging.InitLogger(logCfg))
 
 	// Log file output location (INFO level for visibility). Use the actual logger
 	// output (which for the TUI is the stripped/relocated file-only path) rather than

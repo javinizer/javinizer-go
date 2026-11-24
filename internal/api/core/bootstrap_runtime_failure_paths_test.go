@@ -1,6 +1,8 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -8,6 +10,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/poster"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
+	"github.com/javinizer/javinizer-go/internal/workflow"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,12 +86,26 @@ func TestRuntimeWorkflowConstructionFailureIsReported(t *testing.T) {
 }
 func TestRuntimePartialWiringKeepsScanAvailable(t *testing.T) {
 	cfg := config.DefaultConfig(nil, nil)
+	cfg.Matching.Extensions = []string{".mp4"}
+	cfg.Matching.MinSizeMB = 0
 	rt := NewAPIRuntime(&APIDeps{})
 	rt.ReplaceReloadable(cfg, scraperutil.NewScraperRegistry())
 	require.Nil(t, rt.GetWorkflow(), "missing movie repository must prevent scrape-only workflow construction")
+	batch, err := rt.GetBatchWorkflow("fixture-job")
+	require.Nil(t, batch)
+	require.ErrorContains(t, err, "scraper must not be nil for full workflow")
 	scan, err := rt.GetScanOnlyWorkflow()
 	require.NoError(t, err)
 	require.NotNil(t, scan, "scan-only remains available without the movie repository")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ABC-123.mp4")
+	require.NoError(t, os.WriteFile(path, []byte("local scanner fixture"), 0o600))
+	result, err := scan.ScanAndMatch(t.Context(), workflow.ScanAndMatchCmd{Directory: dir})
+	require.NoError(t, err)
+	require.Len(t, result.Files, 1)
+	require.Equal(t, path, result.Files[0].Path)
+	require.Equal(t, "ABC-123", result.Files[0].MovieID)
 }
 func TestRuntimePosterManagerConstructionFailureIsNotCached(t *testing.T) {
 	state := NewRuntimeState()

@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -97,9 +96,8 @@ type DownloaderInterface interface {
 // orchestrator treats this sentinel as non-fatal: it logs the failure,
 // preserves any non-critical artifacts that did download (for revert
 // cleanup), and proceeds to NFO generation — the project guarantee is that a
-// correct NFO is produced regardless of artwork availability. Total download
-// failure (a non-partial error) returns a nil outcome alongside the error;
-// callers must nil-check the outcome.
+// correct NFO is produced regardless of artwork availability. Callers of
+// DownloaderInterface must nil-check the outcome.
 type DownloadPartialError struct {
 	Attempted int // number of critical media types attempted (cover + poster)
 	Succeeded int // number of critical media types that downloaded successfully
@@ -222,8 +220,8 @@ func (d *Downloader) generateActressFilename(movie *models.Movie, actressName st
 }
 
 // Download is the single-method seam that downloads all enabled media types.
-// Per Phase 48: the Workflow-facing interface calls this one method instead
-// of the multi-method protocol. Delegates to DownloadAll internally.
+// The concrete downloader preserves the aggregate results on both partial
+// download and poster-recrop errors, including any successful earlier writes.
 func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOutcome, error) {
 	// Resolve extrafanart override: command-level override wins over config
 	extrafanartEnabled := d.config.DownloadExtrafanart
@@ -242,20 +240,9 @@ func (d *Downloader) Download(ctx context.Context, cmd DownloadCmd) (*DownloadOu
 			}
 		}
 	}
-	if err != nil {
-		if _, partial := err.(*DownloadPartialError); partial || errors.Is(err, ErrPosterRecropRequired) {
-			return &DownloadOutcome{
-				Results:         results,
-				DownloadedPaths: downloadedPaths,
-				CreatedPaths:    createdPaths,
-			}, err
-		}
-		return nil, err
-	}
-
 	return &DownloadOutcome{
 		Results:         results,
 		DownloadedPaths: downloadedPaths,
 		CreatedPaths:    createdPaths,
-	}, nil
+	}, err
 }

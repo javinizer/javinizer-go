@@ -75,7 +75,7 @@ func TestRevertBatch_Miss_BatchAlreadyReverted(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w2.Code)
 }
 
-// --- revertBatch: RevertBatch returns ErrNoOperationsFound ---
+// --- both handlers: empty batch returns ErrNoOperationsFound ---
 
 func TestRevertBatch_Miss_NoOperationsFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -102,16 +102,22 @@ func TestRevertBatch_Miss_NoOperationsFound(t *testing.T) {
 	svc := newTestJobDeps(deps)
 	router := gin.New()
 	router.POST("/api/v1/jobs/:id/revert", revertBatch(svc))
+	router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(svc))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/revert", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code)
-
-	var resp contracts.ErrorResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Contains(t, resp.Error, "No operations found")
+	for _, tc := range []struct {
+		name, suffix, want string
+	}{
+		{"batch", "/revert", "No operations found for batch"},
+		{"operation", "/operations/ABC-001/revert", "No operations found for the specified movie"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+tc.suffix, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusNotFound, w.Code)
+			require.JSONEq(t, `{"error":"`+tc.want+`"}`, w.Body.String())
+		})
+	}
 }
 
 // --- revertBatch: partial revert (some failed, some succeeded) keeps organized status ---

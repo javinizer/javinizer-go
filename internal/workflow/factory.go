@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -396,6 +397,43 @@ func NewFactoryConfigFromRepos(cfg *config.Config, registry ScraperResolver, rep
 	return baseFC, nil
 }
 
+// NewWorkflowFactoryFromRepos builds the shared factory from application
+// settings. A scraper-only construction failure is returned alongside a
+// usable factory so callers can diagnose it and still offer scan-only work.
+// Other failures leave no factory.
+func NewWorkflowFactoryFromRepos(cfg *config.Config, registry ScraperResolver, repos database.Repositories) (*WorkflowFactory, error) {
+	fc, configErr := NewFactoryConfigFromRepos(cfg, registry, repos)
+	var scraperErr *ScraperConstructionError
+	if configErr != nil && !errors.As(configErr, &scraperErr) {
+		return nil, configErr
+	}
+	factory, factoryErr := NewWorkflowFactory(fc)
+	return factory, errors.Join(configErr, factoryErr)
+}
+
+// NewStrictWorkflowFactoryFromRepos builds a factory only if configuration
+// and factory construction both succeed. Unlike NewWorkflowFactoryFromRepos,
+// it rejects partial configuration and returns the first error unchanged.
+func NewStrictWorkflowFactoryFromRepos(cfg *config.Config, registry ScraperResolver, repos database.Repositories) (*WorkflowFactory, error) {
+	fc, err := NewFactoryConfigFromRepos(cfg, registry, repos)
+	if err != nil {
+		return nil, err
+	}
+	return NewWorkflowFactory(fc)
+}
+
+// NewScrapeOnlyWorkflowFromRepos builds a strict repo-backed factory and its
+// scrape-only workflow. The successful config producer supplies both the
+// matcher and scraper; generic factories still validate their inputs.
+func NewScrapeOnlyWorkflowFromRepos(cfg *config.Config, registry ScraperResolver, repos database.Repositories) (*WorkflowFactory, WorkflowInterface, error) {
+	fc, err := NewFactoryConfigFromRepos(cfg, registry, repos)
+	if err != nil {
+		return nil, nil, err
+	}
+	factory := buildWorkflowFactory(fc)
+	return factory, factory.buildScrapeOnlyWorkflow(), nil
+}
+
 // WorkflowFactory caches the shared dependency sub-graph and produces per-call Workflow
 // instances. the shared sub-graph (scraper, matcher, organizer, downloader,
 // NFO generator, template engine, scanner, poster generator) is read-only after construction.
@@ -434,7 +472,11 @@ func NewWorkflowFactory(fc workflowFactoryConfig) (*WorkflowFactory, error) {
 	if fc.Matcher == nil {
 		return nil, fmt.Errorf("dependencies: matcher must not be nil")
 	}
+	return buildWorkflowFactory(fc), nil
+}
 
+// buildWorkflowFactory requires an already-constructed matcher.
+func buildWorkflowFactory(fc workflowFactoryConfig) *WorkflowFactory {
 	// Default Logger to GlobalLogger if not injected — must run BEFORE cached
 	// sub-orchestrator construction so all sub-orchs receive a non-nil logger.
 	if fc.Logger == nil {
@@ -474,7 +516,7 @@ func NewWorkflowFactory(fc workflowFactoryConfig) (*WorkflowFactory, error) {
 		cachedCompare:   cachedCompare,
 		cachedPreview:   cachedPreview,
 		cachedScanMatch: cachedScanMatch,
-	}, nil
+	}
 }
 
 // NewWorkflow produces a full Workflow with a fresh RevertLog for the given jobID.
@@ -532,14 +574,18 @@ func (f *WorkflowFactory) NewScrapeOnlyWorkflow() (WorkflowInterface, error) {
 	if _, ok := f.cachedScrape.(noOpScrapeOrchestrator); ok {
 		return nil, fmt.Errorf("scrape-only workflow: scraper must not be nil")
 	}
+	return f.buildScrapeOnlyWorkflow(), nil
+}
 
+// buildScrapeOnlyWorkflow requires a factory with a constructed scraper.
+func (f *WorkflowFactory) buildScrapeOnlyWorkflow() *Workflow {
 	return &Workflow{
 		scrape:    f.cachedScrape,
 		apply:     noOpApplyOrchestrator{},
 		compare:   f.cachedCompare,
 		preview:   noOpPreviewOrchestrator{},
 		scanMatch: f.cachedScanMatch,
-	}, nil
+	}
 }
 
 // NewScanOnlyWorkflow produces a scan-only Workflow reusing the cached scanner and matcher.

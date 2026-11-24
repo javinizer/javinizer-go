@@ -149,14 +149,11 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		if err := deps.ActressRepo.PromoteCandidate(c.Request.Context(), uint(id), first, last, jp, thumb); err != nil {
-			switch {
-			case errors.Is(err, database.ErrInvalidLookup):
-				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
-			case errors.Is(err, database.ErrCandidateAlreadyVerified), errors.Is(err, database.ErrCandidateDismissed):
-				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
-			default:
-				c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
-			}
+			writeCandidateMutationError(c, err,
+				candidateMutationErrorRule{database.ErrInvalidLookup, http.StatusBadRequest},
+				candidateMutationErrorRule{database.ErrCandidateAlreadyVerified, http.StatusConflict},
+				candidateMutationErrorRule{database.ErrCandidateDismissed, http.StatusConflict},
+			)
 			return
 		}
 		updated, err := deps.ActressRepo.FindByID(c.Request.Context(), uint(id))
@@ -166,6 +163,24 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, updated)
 	}
+}
+
+type candidateMutationErrorRule struct {
+	target error
+	status int
+}
+
+// writeCandidateMutationError applies the route's rules in priority order, so
+// the route keeps its original precedence for wrapped or joined errors.
+func writeCandidateMutationError(c *gin.Context, err error, rules ...candidateMutationErrorRule) {
+	status := http.StatusInternalServerError
+	for _, rule := range rules {
+		if errors.Is(err, rule.target) {
+			status = rule.status
+			break
+		}
+	}
+	c.JSON(status, contracts.ErrorResponse{Error: err.Error()})
 }
 
 func resolveCandidatePromotionField(requested *string, current string) string {

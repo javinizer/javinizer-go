@@ -603,6 +603,15 @@ func (o *Organizer) strategyFromType(st strategyType) OperationStrategy {
 	}
 }
 
+// executionStrategy preserves the plan's strategy, including per-command
+// configuration. A caller-constructed plan may only specify a strategy type.
+func (o *Organizer) executionStrategy(plan *OrganizePlan) OperationStrategy {
+	if plan.executeStrategy != nil {
+		return plan.executeStrategy
+	}
+	return o.strategyFromType(plan.strategy)
+}
+
 func (o *Organizer) plan(match models.FileMatchInfo, movie *models.Movie, destDir string, forceUpdate bool, modeOverride operationmode.OperationMode) (*OrganizePlan, error) {
 	strategy := o.resolveStrategy()
 	// Honor a per-command mode override so a per-request selection (e.g. the
@@ -685,10 +694,7 @@ func (o *Organizer) execute(plan *OrganizePlan) (*OrganizeResult, error) {
 		return result, nil
 	}
 
-	strategy := plan.executeStrategy
-	if strategy == nil {
-		strategy = o.strategyFromType(plan.strategy)
-	}
+	strategy := o.executionStrategy(plan)
 
 	strategyResult := result
 	if plan.residentSourceProof == nil {
@@ -1121,13 +1127,7 @@ func (o *Organizer) PlanSourceExists(plan *OrganizePlan) bool {
 // are internal implementation details — callers use Organize instead of a
 // fixed sequence.
 func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeResult, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	plan, err := o.withForceRename(cmd.ForceRenameFile).withStagingPathBudget(cmd).plan(cmd.Match, cmd.Movie, cmd.DestDir, cmd.ForceUpdate, cmd.OperationMode)
+	plan, err := o.PlanOrganize(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -1257,12 +1257,7 @@ func (o *Organizer) Organize(ctx context.Context, cmd OrganizeCmd) (*OrganizeRes
 		}, nil
 	}
 
-	strategy := plan.executeStrategy
-	if strategy == nil {
-		strategy = o.strategyFromType(plan.strategy)
-	}
-
-	strategyResult, err := strategy.Execute(plan)
+	strategyResult, err := o.executionStrategy(plan).Execute(plan)
 	if err != nil {
 		if fsutil.PublishCompleted(err) {
 			// codex P1 (PR #241): PARTIAL publish — the cross-device move's

@@ -1321,16 +1321,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	// its result before source cleanup and inverse persistence so both use the
 	// actual published paths rather than ephemeral staging names.
 	if finalResult != nil && s.inPlace {
-		if finalResult.NewPath != "" {
-			finalResult.NewPath, err = s.finalPath(finalResult.NewPath)
-			if err != nil {
-				return err
-			}
-		}
-		if finalResult.FolderPath != "" {
-			finalResult.FolderPath, err = s.finalPath(finalResult.FolderPath)
-			if err != nil {
-				return err
+		for _, path := range [...]*string{&finalResult.NewPath, &finalResult.FolderPath} {
+			if *path != "" {
+				*path, err = s.finalPath(*path)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1479,9 +1475,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if s.inPlace && finalResult.FolderPath != "" {
 			oldDir := filepath.Dir(s.sourcePath)
 			if filepath.Clean(oldDir) != filepath.Clean(finalResult.FolderPath) {
-				if entries, readErr := afero.ReadDir(s.fs, oldDir); readErr == nil && len(entries) == 0 {
-					_ = s.fs.Remove(oldDir)
-				}
+				fsutil.TryRemoveEmptyDir(s.fs, oldDir)
 			}
 		}
 	}

@@ -51,10 +51,10 @@ func (db *DB) RunMigrationsOnStartup(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize startup migration lock: %w", err)
 	}
-	return db.runMigrationsWithLocker(ctx, sqlDB, migrationLocker)
+	return db.runMigrationsWithLocker(ctx, sqlDB, migrationLocker, dbmigrations.Filesystem())
 }
 
-func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrationLocker gooselock.Locker) (err error) {
+func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrationLocker gooselock.Locker, catalog fs.FS) (err error) {
 	if err := migrationLocker.Lock(ctx, sqlDB); err != nil {
 		return fmt.Errorf("acquire startup migration lock: %w", err)
 	}
@@ -72,7 +72,7 @@ func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrat
 	provider, err := goose.NewProvider(
 		goose.DialectSQLite3,
 		sqlDB,
-		dbmigrations.Filesystem(),
+		catalog,
 		goose.WithTableName(schemaMigrationsTable),
 		goose.WithGoMigrations(dbmigrations.GoMigrations()...),
 		goose.WithDisableGlobalRegistry(true),
@@ -94,11 +94,7 @@ func (db *DB) runMigrationsWithLocker(ctx context.Context, sqlDB *sql.DB, migrat
 		}
 	}
 
-	baselineContent, err := fs.ReadFile(dbmigrations.Filesystem(), "000001_baseline.sql")
-	if err != nil {
-		return fmt.Errorf("read baseline migration: %w", err)
-	}
-	baselineHash := computeMigrationHash(baselineContent)
+	baselineHash := computeMigrationHash([]byte(dbmigrations.BaselineSQL()))
 
 	storedHash, err := GetStoredHash(sqlDB, "000001_baseline.sql")
 	if err != nil {

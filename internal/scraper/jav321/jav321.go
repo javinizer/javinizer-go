@@ -203,13 +203,8 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to parse URL: %w", err)
 	}
-	path := strings.Trim(u.Path, "/")
-	if strings.HasPrefix(path, "video/") {
-		id := strings.TrimPrefix(path, "video/")
-		id = strings.TrimSuffix(id, "/")
-		if id != "" {
-			return strings.ToUpper(id), nil
-		}
+	if id := videoIDFromPath(u.Path); id != "" {
+		return id, nil
 	}
 	// Search URL: /search?sn=IPX-123 — extract the sn value as the ID so
 	// ParseInput/resolveScrapeInput sets MovieID correctly for the Search
@@ -220,6 +215,15 @@ func (s *scraper) ExtractIDFromURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("failed to extract ID from URL")
 }
 
+// videoIDFromPath reads the ID from an already-decoded URL path.
+func videoIDFromPath(path string) string {
+	id, ok := strings.CutPrefix(strings.Trim(path, "/"), "video/")
+	if !ok {
+		return ""
+	}
+	return strings.ToUpper(id)
+}
+
 func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.ScraperResult, error) {
 	if !s.CanHandleURL(rawURL) {
 		return nil, models.NewScraperNotFoundError("Jav321", "URL not handled by Jav321 scraper")
@@ -228,14 +232,12 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	// Only /video/ paths are direct detail pages. Search URLs (e.g.
 	// /search?sn=IPX-123) are not directly scrapable; return NotFound so the
 	// caller falls back to keyword Search with the extracted ID.
-	pu, perr := url.Parse(rawURL)
-	if perr != nil || !strings.HasPrefix(strings.Trim(pu.Path, "/"), "video/") {
-		return nil, models.NewScraperNotFoundError("Jav321", "URL is not a direct video page")
+	var id string
+	if u, err := url.Parse(rawURL); err == nil {
+		id = videoIDFromPath(u.Path)
 	}
-
-	id, err := s.ExtractIDFromURL(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract ID from URL: %w", err)
+	if id == "" {
+		return nil, models.NewScraperNotFoundError("Jav321", "URL is not a direct video page")
 	}
 
 	html, status, err := s.fetchPageCtx(ctx, rawURL)

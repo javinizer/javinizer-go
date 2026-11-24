@@ -184,14 +184,11 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 	}()
 
 	id := args[0]
-	cfg, err := config.LoadOrCreate(configFile)
+	cfg, err := commandutil.LoadCLIConfig(configFile, "invalid configuration after CLI overrides", func(cfg *config.Config) {
+		ApplyFlagOverrides(cmd, cfg)
+	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
-	}
-	config.ApplyEnvironmentOverrides(cfg)
-	ApplyFlagOverrides(cmd, cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, nil, fmt.Errorf("invalid configuration after CLI overrides: %w", err)
+		return nil, nil, err
 	}
 
 	var ownDeps bool
@@ -205,17 +202,9 @@ func Run(ctx context.Context, cmd *cobra.Command, args []string, configFile stri
 		wf = bs.Workflow
 		ownDeps = true
 	} else {
-		fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
-		if fcErr != nil {
-			return nil, nil, fmt.Errorf("failed to create factory config: %w", fcErr)
-		}
-		factory, factoryErr := workflow.NewWorkflowFactory(fc)
-		if factoryErr != nil {
-			return nil, nil, fmt.Errorf("failed to create workflow factory: %w", factoryErr)
-		}
-		wf, err = factory.NewScrapeOnlyWorkflow()
+		_, wf, err = workflow.NewScrapeOnlyWorkflowFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create scraper: %w", err)
+			return nil, nil, fmt.Errorf("failed to create factory config: %w", err)
 		}
 	}
 	if ownDeps {
@@ -317,15 +306,11 @@ func runScrapeJSON(cmd *cobra.Command, args []string, configFile string) error {
 		_ = logging.SetOutput(os.Stderr)
 	}
 
-	cfg, err := config.LoadOrCreate(configFile)
+	cfg, err := commandutil.LoadCLIConfig(configFile, "invalid configuration", func(cfg *config.Config) {
+		ApplyFlagOverrides(cmd, cfg)
+	})
 	if err != nil {
-		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("failed to load config: %v", err)))
-		return ErrJSONExit
-	}
-	config.ApplyEnvironmentOverrides(cfg)
-	ApplyFlagOverrides(cmd, cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		writeJSONError(cmd, unknownErrorEnvelope(fmt.Sprintf("invalid configuration: %v", err)))
+		writeJSONError(cmd, unknownErrorEnvelope(err.Error()))
 		return ErrJSONExit
 	}
 

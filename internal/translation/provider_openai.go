@@ -132,7 +132,7 @@ func (p *OpenAICompatibleProvider) Translate(ctx context.Context, sourceLang, ta
 
 		lastErr = err
 		if strategy == openAICompatibleThinkingStrategyNone || !isRetryableThinkingStrategyError(err) {
-			return nil, err
+			break
 		}
 
 		logging.Debugf("Translation (openai-compatible): thinking strategy %q failed (%s), trying fallback", strategy, safeErrorDetail(err))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
+	"github.com/javinizer/javinizer-go/internal/history"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -304,14 +306,27 @@ func TestRevertOperation_Success(t *testing.T) {
 func TestRevertOperation_AlreadyReverted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	deps, db, fs := setupJobsTestDepsWithReverter(t)
-	defer func() { _ = db.Close() }()
+	deps, db := setupJobsTestDeps(t)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	deps.Reverter = history.NewReverter(afero.NewOsFs(), deps.Repos.BatchFileOpRepo)
 
-	jobID := seedRevertableJob(t, deps, fs, []string{"ABC-001", "ABC-002"})
+	ctx := t.Context()
+	jobID := createTestJob(t, deps, models.JobStatusOrganized).ID
+	dir := t.TempDir()
+	source := func(id string) string { return filepath.Join(dir, "incoming", id+".mp4") }
+	organized := func(id string) string { return filepath.Join(dir, "organized", id, id+".mp4") }
+	for _, id := range []string{"ABC-001", "ABC-002"} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(source(id)), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Dir(organized(id)), 0o755))
+		require.NoError(t, os.WriteFile(organized(id), []byte("test-content-"+id), 0o644))
+		require.NoError(t, deps.Repos.BatchFileOpRepo.Create(ctx, &models.BatchFileOperation{
+			BatchJobID: jobID, MovieID: id, OriginalPath: source(id), NewPath: organized(id),
+			OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusApplied,
+		}))
+	}
 
-	svc := newTestJobDeps(deps)
 	router := gin.New()
-	router.POST("/api/v1/jobs/:id/operations/:movieId/revert", revertOperation(svc))
+	RegisterRoutes(router.Group("/api/v1"), newTestJobDeps(deps))
 
 	// First revert succeeds
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/operations/ABC-001/revert", nil)
@@ -321,7 +336,6 @@ func TestRevertOperation_AlreadyReverted(t *testing.T) {
 
 	// Only the requested movie was reverted. Repeating it must not touch the
 	// restored file, the sibling's pending operation, or the organized job.
-	ctx := t.Context()
 	rows, err := deps.Repos.BatchFileOpRepo.FindByBatchJobID(ctx, jobID)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -334,6 +348,18 @@ func TestRevertOperation_AlreadyReverted(t *testing.T) {
 	jobBeforeRetry, err := deps.Repos.JobRepo.FindByID(ctx, jobID)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusOrganized, jobBeforeRetry.Status)
+	writes := map[string]string{source("ABC-001"): "test-content-ABC-001", organized("ABC-002"): "test-content-ABC-002"}
+	beforeFiles := make(map[string]os.FileInfo, len(writes))
+	for path, want := range writes {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err, path)
+		require.Equal(t, want, string(data), path)
+		beforeFiles[path], err = os.Stat(path)
+		require.NoError(t, err, path)
+	}
+	for _, path := range []string{organized("ABC-001"), source("ABC-002")} {
+		require.NoFileExists(t, path)
+	}
 
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+jobID+"/operations/ABC-001/revert", nil)
 	w2 := httptest.NewRecorder()
@@ -347,12 +373,18 @@ func TestRevertOperation_AlreadyReverted(t *testing.T) {
 	jobAfterRetry, err := deps.Repos.JobRepo.FindByID(ctx, jobID)
 	require.NoError(t, err)
 	require.Equal(t, jobBeforeRetry, jobAfterRetry)
-	restored, err := afero.ReadFile(fs, "/src/ABC-001.mp4")
-	require.NoError(t, err)
-	require.Equal(t, "test-content-ABC-001", string(restored))
-	pending, err := afero.ReadFile(fs, "/dest/ABC-002/ABC-002.mp4")
-	require.NoError(t, err)
-	require.Equal(t, "test-content-ABC-002", string(pending))
+	for path, want := range writes {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err, path)
+		require.Equal(t, want, string(data), path)
+		info, err := os.Stat(path)
+		require.NoError(t, err, path)
+		require.True(t, os.SameFile(beforeFiles[path], info), path)
+		require.Equal(t, beforeFiles[path].ModTime(), info.ModTime(), path)
+	}
+	for _, path := range []string{organized("ABC-001"), source("ABC-002")} {
+		require.NoFileExists(t, path)
+	}
 }
 
 func TestRevertOperation_NoOpRemainsSuccessful(t *testing.T) {

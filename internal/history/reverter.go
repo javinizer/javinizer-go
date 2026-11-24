@@ -797,19 +797,8 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 	stop := filepath.Clean(stopAt)
 
 	for current != "" && current != "." && current != "/" && current != filepath.ToSlash(filepath.VolumeName(current)+"/") && current != stop {
-		// Read directory entries to check if empty
-		entries, err := afero.ReadDir(fs, current)
-		if err != nil {
-			// Directory doesn't exist or can't be read — nothing to clean up
-			return
-		}
-		if len(entries) > 0 {
-			// Directory is not empty — stop walking up
-			return
-		}
-		// Directory is empty — remove it
-		if err := fs.Remove(current); err != nil {
-			// Failed to remove (e.g., permission denied) — stop walking up
+		// Stop at the first nonempty, unreadable, or unremovable directory.
+		if !fsutil.TryRemoveEmptyDir(fs, current) {
 			return
 		}
 		// Walk up to parent

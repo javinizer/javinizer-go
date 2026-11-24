@@ -223,7 +223,16 @@ func mergeMovieMetadataWithRenderPolicy(scraped, nfo *models.Movie, scalarStrate
 	if scraped == nil && nfo == nil {
 		return nil, fmt.Errorf("both scraped and nfo are nil")
 	}
+	result, ambiguity := mergeAvailableMovieMetadata(scraped, nfo, scalarStrategy, mergeArrays, useCreditedName)
+	if ambiguity != nil {
+		return nil, ambiguity
+	}
+	return result, nil
+}
 
+// mergeAvailableMovieMetadata requires at least one source. Once that is
+// established, only cast ambiguity can prevent a merge.
+func mergeAvailableMovieMetadata(scraped, nfo *models.Movie, scalarStrategy MergeStrategy, mergeArrays, useCreditedName bool) (*MergeResult, *CastAmbiguityError) {
 	// If only one source exists, use it
 	if scraped == nil {
 		links, _ := nfo.NFOActorLinks()

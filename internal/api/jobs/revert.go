@@ -102,6 +102,19 @@ func emitRevertEvent(ctx context.Context, emitter eventlog.EventEmitter, message
 	_ = emitter.EmitOrganizeEvent(ctx, "revert", message, sev, fields)
 }
 
+// writeRevertError classifies reverter errors identically for batch and movie
+// endpoints while keeping their public messages distinct.
+func writeRevertError(c *gin.Context, err error, conflict, notFound, failure string) {
+	switch {
+	case errors.Is(err, history.ErrBatchAlreadyReverted):
+		c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: conflict})
+	case errors.Is(err, history.ErrNoOperationsFound):
+		c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: notFound})
+	default:
+		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: failure})
+	}
+}
+
 // revertBatch godoc
 // @Summary Revert a batch job
 // @Description Revert all file organization operations for a batch job, moving files back to original paths
@@ -147,15 +160,11 @@ func revertBatch(deps JobDeps) gin.HandlerFunc {
 
 		result, err := deps.Reverter.RevertBatch(c.Request.Context(), jobID)
 		if err != nil {
-			if errors.Is(err, history.ErrBatchAlreadyReverted) {
-				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "Batch already reverted"})
-				return
-			}
-			if errors.Is(err, history.ErrNoOperationsFound) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "No operations found for batch"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to revert batch"})
+			writeRevertError(c, err,
+				"Batch already reverted",
+				"No operations found for batch",
+				"Failed to revert batch",
+			)
 			return
 		}
 
@@ -227,15 +236,11 @@ func revertOperation(deps JobDeps) gin.HandlerFunc {
 		// Call Reverter for individual movie
 		result, err := deps.Reverter.RevertScrape(c.Request.Context(), jobID, movieID)
 		if err != nil {
-			if errors.Is(err, history.ErrBatchAlreadyReverted) {
-				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "Operation already reverted"})
-				return
-			}
-			if errors.Is(err, history.ErrNoOperationsFound) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "No operations found for the specified movie"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "Failed to revert operation"})
+			writeRevertError(c, err,
+				"Operation already reverted",
+				"No operations found for the specified movie",
+				"Failed to revert operation",
+			)
 			return
 		}
 

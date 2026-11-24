@@ -90,22 +90,14 @@ func (s *stateStore) LoadState() (*updateState, error) {
 		return nil, err
 	}
 
-	data, err := afero.ReadFile(s.fs, s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	state, err := loadStateFromFile(s.fs, s.path)
+	if err != nil || state == nil {
 		return nil, err
 	}
 
-	var state updateState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, err
-	}
-
-	s.state = &state
+	s.state = state
 	// Return a copy to prevent mutation of internal state
-	copy := state
+	copy := *state
 	return &copy, nil
 }
 
@@ -208,13 +200,14 @@ func saveStateToFile(fs afero.Fs, path string, state *updateState) error {
 		return err
 	}
 
-	data, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-
+	// Stage the encoded state before publication. Neither an encoding nor
+	// a staging write failure may attempt to replace the current file.
 	tmpPath := path + ".tmp"
-	if err := afero.WriteFile(fs, tmpPath, data, config.FilePerm); err != nil {
+	data, err := json.Marshal(state)
+	if err == nil {
+		err = afero.WriteFile(fs, tmpPath, data, config.FilePerm)
+	}
+	if err != nil {
 		return err
 	}
 

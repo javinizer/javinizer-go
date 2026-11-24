@@ -12,7 +12,7 @@ import (
 // mergeCreditPresentation keeps the durable credit ledger separate from NFO
 // presentation. The legacy actress merge remains available to review/JSON
 // consumers, but cannot overwrite explicit credit choices during rendering.
-func mergeCreditPresentation(merged, scraped, existing *models.Movie, nfoActors []models.Actress, strategy MergeStrategy, scraperOnly, useCreditedName bool) error {
+func mergeCreditPresentation(merged, scraped, existing *models.Movie, nfoActors []models.Actress, strategy MergeStrategy, scraperOnly, useCreditedName bool) *CastAmbiguityError {
 	merged.Credits = (&models.Movie{Credits: scraped.Credits}).Clone().Credits
 	if len(nfoActors) == 0 || scraperOnly {
 		return nil
@@ -40,7 +40,7 @@ func (e *CastAmbiguityError) Error() string {
 	return fmt.Sprintf("NFO cast requires review (%s): %s. Remove stale NFO actor entries or add genuinely new actors in the movie editor, then retry; ForceOverwrite deliberately replaces existing NFO metadata", e.Reason, strings.Join(e.Actors, ", "))
 }
 
-func castAmbiguity(actor models.Actress, reason string) error {
+func castAmbiguity(actor models.Actress, reason string) *CastAmbiguityError {
 	return &CastAmbiguityError{Actors: []string{models.FormatActressName(actor, models.FormatActressNameOptions{FirstNameOrder: true})}, Reason: reason}
 }
 
@@ -53,7 +53,7 @@ func hasOwnedCastSelection(credits []models.MovieCredit, useCreditedName bool) b
 	return false
 }
 
-func buildMergedCreditPresentation(source *models.Movie, nfoActors []models.Actress, strategy MergeStrategy, links [][]models.ActorPresentationLink, parsed, useCreditedName bool) ([]models.MovieCredit, error) {
+func buildMergedCreditPresentation(source *models.Movie, nfoActors []models.Actress, strategy MergeStrategy, links [][]models.ActorPresentationLink, parsed, useCreditedName bool) ([]models.MovieCredit, *CastAmbiguityError) {
 	credits := (&models.Movie{Credits: source.Credits}).Clone().Credits
 	projection := make([]models.MovieCredit, 0, len(credits)+len(nfoActors))
 	projectionIndex := make([]int, len(credits))
@@ -200,7 +200,7 @@ func nfoCastComponents(actors []models.Actress, sourceKeys map[string]map[int]st
 
 // References only select from already supplied same-movie credits. They never
 // create or resolve an identity, including when the linked credit is hidden.
-func bindPresentationLinks(source *models.Movie, actors []models.Actress, links [][]models.ActorPresentationLink, components []*nfoCastComponent) error {
+func bindPresentationLinks(source *models.Movie, actors []models.Actress, links [][]models.ActorPresentationLink, components []*nfoCastComponent) *CastAmbiguityError {
 	for row, rowLinks := range links {
 		if len(rowLinks) == 0 {
 			continue

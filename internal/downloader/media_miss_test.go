@@ -522,7 +522,7 @@ func TestDownload_PartialErrorPreservesNonCriticalPaths(t *testing.T) {
 			FanartFormat:     "<ID>-fanart.jpg",
 			PosterFormat:     "<ID>-poster.jpg",
 			ScreenshotFolder: "extrafanart",
-			ScreenshotFormat: "<ID>-fanart<INDEX>.jpg",
+			ScreenshotFormat: "fixture.jpg",
 		},
 	}
 	dl := NewDownloader(okSrv.Client(), memFS, cfg, nil)
@@ -544,8 +544,21 @@ func TestDownload_PartialErrorPreservesNonCriticalPaths(t *testing.T) {
 	var partial *DownloadPartialError
 	require.ErrorAs(t, err, &partial, "expected DownloadPartialError when all critical media fails")
 	require.NotNil(t, outcome, "partial error must return a non-nil outcome with non-critical paths")
-	assert.NotEmpty(t, outcome.DownloadedPaths,
-		"non-critical media that succeeded before the partial error must be preserved in DownloadedPaths")
+	require.Equal(t, &DownloadPartialError{Attempted: 2, Succeeded: 0}, partial)
+	screenshotPath := nativePath("/output/extrafanart/fixture.jpg")
+	require.Equal(t, []string{screenshotPath}, outcome.DownloadedPaths)
+	require.Equal(t, []string{screenshotPath}, outcome.CreatedPaths)
+	data, readErr := afero.ReadFile(memFS, screenshotPath)
+	require.NoError(t, readErr)
+	require.NotEmpty(t, data)
+	var failed []MediaType
+	for _, result := range outcome.Results {
+		if result.Error != nil {
+			failed = append(failed, result.Type)
+			require.False(t, result.Downloaded)
+		}
+	}
+	require.Equal(t, []MediaType{MediaTypeCover, MediaTypePoster}, failed)
 }
 
 func TestDownload_UsesConfigExtrafanartWhenNil(t *testing.T) {

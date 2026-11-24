@@ -10,6 +10,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
+	"github.com/javinizer/javinizer-go/internal/scraperutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -262,7 +263,7 @@ func TestFetchPageCtxV2_Non200(t *testing.T) {
 	assert.Equal(t, 404, status)
 }
 
-// TestDecodeBodyV2 tests decodeBody function
+// TestDecodeBodyV2 checks the response decoder with a Caribbeancom page.
 func TestDecodeBodyV2(t *testing.T) {
 	client := resty.New()
 	client.SetTransport(&caribbeanRoundTripper{
@@ -274,7 +275,7 @@ func TestDecodeBodyV2(t *testing.T) {
 	resp, err := client.R().Get("https://www.caribbeancom.com/test")
 	require.NoError(t, err)
 
-	decoded := decodeBody(resp)
+	decoded := scraperutil.DecodeHTMLResponse(resp)
 	assert.Contains(t, decoded, "テスト")
 }
 

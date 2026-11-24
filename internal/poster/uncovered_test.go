@@ -61,17 +61,17 @@ func TestValidateJobID_MoreCases_Uncovered(t *testing.T) {
 
 func TestValidatePathWithinDir_Uncovered(t *testing.T) {
 	t.Run("path inside dir", func(t *testing.T) {
-		err := validatePathWithinDir("/tmp/posters/job1/poster.jpg", "/tmp/posters/job1")
+		err := validatePathsWithinDir("/tmp/posters/job1", "/tmp/posters/job1/poster.jpg")
 		assert.NoError(t, err)
 	})
 
 	t.Run("path escapes dir", func(t *testing.T) {
-		err := validatePathWithinDir("/etc/passwd", "/tmp/posters/job1")
+		err := validatePathsWithinDir("/tmp/posters/job1", "/etc/passwd")
 		assert.Error(t, err)
 	})
 
 	t.Run("path traversal", func(t *testing.T) {
-		err := validatePathWithinDir("/tmp/posters/job1/../../etc/passwd", "/tmp/posters/job1")
+		err := validatePathsWithinDir("/tmp/posters/job1", "/tmp/posters/job1/../../etc/passwd")
 		assert.Error(t, err)
 	})
 }

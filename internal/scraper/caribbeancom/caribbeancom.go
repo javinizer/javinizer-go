@@ -18,7 +18,6 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/ratelimit"
 	"github.com/javinizer/javinizer-go/internal/scraperutil"
-	"golang.org/x/net/html/charset"
 )
 
 const defaultBaseURL = "https://www.caribbeancom.com"
@@ -603,10 +602,7 @@ func normalizeMovieID(v string) string {
 		}
 		return m[1] + "-" + suffix
 	}
-	if m := movieIDFromPageRe.FindStringSubmatch(v); len(m) > 1 {
-		return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(m[1])), "_", "-")
-	}
-	return strings.ReplaceAll(strings.ToLower(v), "_", "-")
+	return strings.ReplaceAll(v, "_", "-")
 }
 
 func stripSiteSuffix(v string) string {
@@ -687,7 +683,7 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 		return "", 0, err
 	}
 
-	decoded := decodeBody(resp)
+	decoded := scraperutil.DecodeHTMLResponse(resp)
 
 	if resp.StatusCode() == 200 && challengedetect.IsCloudflareChallengePage(decoded) {
 		return "", resp.StatusCode(), models.NewScraperChallengeError(
@@ -697,19 +693,4 @@ func (s *scraper) fetchPageCtx(ctx context.Context, targetURL string) (string, i
 	}
 
 	return decoded, resp.StatusCode(), nil
-}
-
-// decodeBody preserves the raw-response fallback if charset decoding fails.
-func decodeBody(resp *resty.Response) string {
-	body := resp.Body()
-	if len(body) == 0 {
-		return ""
-	}
-	contentType := resp.Header().Get("Content-Type")
-	enc, _, _ := charset.DetermineEncoding(body, contentType)
-	decoded, err := enc.NewDecoder().Bytes(body)
-	if err != nil {
-		return resp.String()
-	}
-	return string(decoded)
 }

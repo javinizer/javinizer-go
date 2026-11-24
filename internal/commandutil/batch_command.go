@@ -245,21 +245,14 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		presenter = &defaultBatchCommandPresenter{}
 	}
 
-	// Load configuration
-	cfg, err := config.LoadOrCreate(opts.ConfigFile)
+	cfg, err := LoadCLIConfig(opts.ConfigFile, "invalid configuration", func(cfg *config.Config) {
+		// Override config with flag if extrafanart is explicitly enabled.
+		if opts.DownloadExtrafanart {
+			cfg.Output.Download.DownloadExtrafanart = true
+		}
+	})
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-
-	// Override config with flag if extrafanart is explicitly enabled
-	if opts.DownloadExtrafanart {
-		cfg.Output.Download.DownloadExtrafanart = true
-	}
-
-	if _, err := config.Prepare(cfg); err != nil {
-		return fmt.Errorf("invalid configuration: %w", err)
+		return err
 	}
 
 	// Pre-generate the batch job ID up front (mirrors the API organize
@@ -447,22 +440,17 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		return runErr
 	}
 
-	// Process results
+	// Tally each file result once: movies are keyed by ID, but several files
+	// can share one movie ID.
 	movies := make(map[string]*models.Movie, len(uniqueIDs))
-	results := job.GetResults()
-	successCount := 0
-	for _, r := range results {
-		if r.Status == models.JobStatusCompleted && r.Movie != nil {
-			movies[r.FileMatchInfo.MovieID] = r.Movie
-			successCount++
+	successCount, failedCount := 0, 0
+	for _, r := range job.GetResults() {
+		if r.Status != models.JobStatusCompleted || r.Movie == nil {
+			failedCount++
+			continue
 		}
-	}
-	// Compute failures from the number of processed file results (not unique
-	// IDs): duplicate files sharing a MovieID would otherwise make the count
-	// inaccurate since SuccessCount is per-file.
-	failedCount := len(results) - successCount
-	if failedCount < 0 {
-		failedCount = 0
+		movies[r.FileMatchInfo.MovieID] = r.Movie
+		successCount++
 	}
 
 	terminalApplyFailures := int(applyFailureCount.Load())

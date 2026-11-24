@@ -1,17 +1,20 @@
 package commandutil
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
+	"regexp/syntax"
 	"testing"
 
 	"github.com/javinizer/javinizer-go/internal/config"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// --- Bootstrap error paths via invalid regex (lines 250-258) ---
+// A matcher configuration error must leave no workflow or open SQLite handle.
 
 func TestBootstrap_InvalidRegex_InMatcher(t *testing.T) {
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			DSN: filepath.Join(t.TempDir(), "test.db"),
@@ -23,13 +26,11 @@ func TestBootstrap_InvalidRegex_InMatcher(t *testing.T) {
 	cfg.Matching.RegexPattern = "[invalid"
 
 	result, err := Bootstrap(cfg)
-	assert.Error(t, err, "Bootstrap should fail when matcher regex is invalid")
-	assert.Nil(t, result)
+	assertBootstrapMatcherFailure(t, cfg.Database.DSN, result, err)
 }
 
-// --- BootstrapScrapeOnly error paths via invalid regex (lines 270-278) ---
-
 func TestBootstrapScrapeOnly_InvalidRegex_InMatcher(t *testing.T) {
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			DSN: filepath.Join(t.TempDir(), "test.db"),
@@ -40,15 +41,28 @@ func TestBootstrapScrapeOnly_InvalidRegex_InMatcher(t *testing.T) {
 	cfg.Matching.RegexPattern = "[invalid"
 
 	result, err := BootstrapScrapeOnly(cfg)
-	assert.Error(t, err, "BootstrapScrapeOnly should fail when matcher regex is invalid")
-	assert.Nil(t, result)
+	assertBootstrapMatcherFailure(t, cfg.Database.DSN, result, err)
 }
 
-// --- Bootstrap: NewWorkflowFactory error (line 255-258) ---
-// This is hard to trigger without mocking, but we can try with a config that
-// has valid regex but causes NewWorkflowFactory to fail.
+func assertBootstrapMatcherFailure(t *testing.T, dsn string, result *bootstrapResult, err error) {
+	t.Helper()
+	require.Nil(t, result)
+	var syntaxErr *syntax.Error
+	require.ErrorAs(t, err, &syntaxErr)
+	// Preserve the concrete first-stage wrapper, not an errors.Join wrapper or
+	// a subsequent factory validation error.
+	require.Same(t, syntaxErr, errors.Unwrap(err))
+	require.ErrorContains(t, err, "buildMatcher:")
+
+	// The database was opened and migrated before the error. Closing its last
+	// connection must remove the WAL, as in the dependency cleanup tests.
+	require.FileExists(t, dsn)
+	_, err = os.Stat(dsn + "-wal")
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
 
 func TestBootstrap_ValidRegex_StillSucceeds(t *testing.T) {
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			DSN: filepath.Join(t.TempDir(), "test.db"),
@@ -63,11 +77,8 @@ func TestBootstrap_ValidRegex_StillSucceeds(t *testing.T) {
 	require.NoError(t, result.Close())
 }
 
-// --- BootstrapScrapeOnly: NewWorkflowFactory error ---
-// Similar to above — the scrape-only path should also fail with invalid regex
-// since NewFactoryConfigFromRepos is called before NewWorkflowFactory
-
 func TestBootstrapScrapeOnly_ValidRegex_StillSucceeds(t *testing.T) {
+	t.Setenv("JAVINIZER_E2E_SCRAPERS", "true")
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			DSN: filepath.Join(t.TempDir(), "test.db"),

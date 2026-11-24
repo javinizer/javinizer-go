@@ -495,7 +495,7 @@ type bootstrapMode int
 
 const (
 	bootstrapModeFull       bootstrapMode = iota // calls factory.NewWorkflow("")
-	bootstrapModeScrapeOnly                      // calls factory.NewScrapeOnlyWorkflow()
+	bootstrapModeScrapeOnly                      // uses the repo-backed scrape-only constructor
 )
 
 // bootstrapWorkflow runs the shared dependency bootstrap + factory construction
@@ -507,23 +507,7 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 	if err != nil {
 		return nil, err
 	}
-	fc, fcErr := workflow.NewFactoryConfigFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
-	if fcErr != nil {
-		_ = deps.Close()
-		return nil, fcErr
-	}
-	factory, err := workflow.NewWorkflowFactory(fc)
-	if err != nil {
-		_ = deps.Close()
-		return nil, err
-	}
-
-	var wf workflow.WorkflowInterface
-	if mode == bootstrapModeScrapeOnly {
-		wf, err = factory.NewScrapeOnlyWorkflow()
-	} else {
-		wf, err = factory.NewWorkflow("")
-	}
+	factory, wf, err := buildBootstrapWorkflow(cfg, deps, mode)
 	if err != nil {
 		_ = deps.Close()
 		return nil, err
@@ -539,6 +523,20 @@ func bootstrapWorkflow(cfg *config.Config, mode bootstrapMode) (*bootstrapResult
 		},
 		workflowFactory: factory,
 	}, nil
+}
+
+// buildBootstrapWorkflow selects the requested mode without taking ownership
+// of deps. The caller closes deps if any workflow construction step fails.
+func buildBootstrapWorkflow(cfg *config.Config, deps *CoreDeps, mode bootstrapMode) (*workflow.WorkflowFactory, workflow.WorkflowInterface, error) {
+	if mode == bootstrapModeScrapeOnly {
+		return workflow.NewScrapeOnlyWorkflowFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
+	}
+	factory, err := workflow.NewStrictWorkflowFactoryFromRepos(cfg, deps.ScraperRegistry, deps.DB.Repositories())
+	if err != nil {
+		return nil, nil, err
+	}
+	wf, err := factory.NewWorkflow("")
+	return factory, wf, err
 }
 
 // Bootstrap initializes the full dependency stack from a config:

@@ -92,16 +92,17 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, nil
 	}
 
-	destDir := filepath.Dir(destPath)
-	if err := d.fs.MkdirAll(destDir, config.DirPerm); err != nil {
-		result.Error = fmt.Errorf("failed to create directory: %w", err)
-		result.Duration = time.Since(startTime)
-		return result, result.Error
+	// Prepare the destination before constructing the request. Both failures
+	// report the elapsed preparation time through the same result path.
+	var req *http.Request
+	failure := "failed to create directory: %w"
+	err := d.fs.MkdirAll(filepath.Dir(destPath), config.DirPerm)
+	if err == nil {
+		failure = "failed to create request: %w"
+		req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to create request: %w", err)
+		result.Error = fmt.Errorf(failure, err)
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}

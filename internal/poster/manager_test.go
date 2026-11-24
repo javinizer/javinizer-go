@@ -105,7 +105,7 @@ func TestValidateJobID(t *testing.T) {
 	}
 }
 
-// ---- validatePathWithinDir ----
+// ---- validatePathsWithinDir ----
 
 func TestValidatePathWithinDir(t *testing.T) {
 	dir := "/tmp/posters/job1"
@@ -122,7 +122,7 @@ func TestValidatePathWithinDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePathWithinDir(tt.path, tt.dir)
+			err := validatePathsWithinDir(tt.dir, tt.path)
 			if tt.wantError {
 				assert.Error(t, err)
 			} else {
@@ -130,6 +130,18 @@ func TestValidatePathWithinDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePathsWithinDirChecksInOrder(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "original")
+	valid := filepath.Join(dir, "preview.jpg")
+	outside := filepath.Join(filepath.Dir(dir), "other")
+	first := filepath.Join(outside, "first.jpg")
+	second := filepath.Join(outside, "second.jpg")
+
+	require.NoError(t, validatePathsWithinDir(dir, valid, valid))
+	require.EqualError(t, validatePathsWithinDir(dir, first, second), fmt.Sprintf("path %q escapes directory %q", first, dir))
+	require.EqualError(t, validatePathsWithinDir(dir, valid, second), fmt.Sprintf("path %q escapes directory %q", second, dir))
 }
 
 // ---- CropWithBounds ----
@@ -160,6 +172,34 @@ func TestCropWithBounds_SourceNotFound(t *testing.T) {
 	_, err := pm.CropWithBounds(context.Background(), "job1", "ABC-123", 0, 0, 100, 100, 500)
 	assert.Error(t, err, "should fail when source poster doesn't exist")
 	assert.Contains(t, err.Error(), "source poster not found")
+}
+
+func TestCropWithBounds_CorruptFullSourceDoesNotReplacePreview(t *testing.T) {
+	const jobID, posterID = "job1", "ABC-123"
+	fs := afero.NewOsFs()
+	pm := NewPosterManager(fs, t.TempDir(), nil, 0)
+	dir := filepath.Join(pm.tempDir, "posters", jobID)
+	fullPath := filepath.Join(dir, posterID+"-full.jpg")
+	previewPath := filepath.Join(dir, posterID+".jpg")
+
+	// The existing full path wins selection, even when local state was
+	// corrupted into a directory. Measurement must fail before a preview
+	// is staged; it must not switch to the still-valid older preview.
+	require.NoError(t, fs.MkdirAll(fullPath, 0o755))
+	require.NoError(t, createTestJPEG(fs, previewPath, 200, 300))
+	previous, err := afero.ReadFile(fs, previewPath)
+	require.NoError(t, err)
+
+	result, err := pm.CropWithBounds(t.Context(), jobID, posterID, 0, 0, 100, 150, 500)
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "failed to measure source poster")
+	require.NotNil(t, errors.Unwrap(err))
+	current, err := afero.ReadFile(fs, previewPath)
+	require.NoError(t, err)
+	require.Equal(t, previous, current)
+	entries, err := afero.ReadDir(fs, dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "no staged or backup assets should exist")
 }
 
 func TestCropWithBounds_FallbackToNonFullPath(t *testing.T) {
@@ -496,7 +536,7 @@ func TestCropWithBounds_PathTraversal(t *testing.T) {
 	require.NoError(t, err)
 
 	// Direct validation of the defense helper.
-	err = validatePathWithinDir("/tmp/posters/job1/../../etc/passwd", "/tmp/posters/job1")
+	err = validatePathsWithinDir("/tmp/posters/job1", "/tmp/posters/job1/../../etc/passwd")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes")
 }

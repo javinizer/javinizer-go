@@ -49,10 +49,11 @@ func TestWebSocketHandler(t *testing.T) {
 	initTestWebSocket(t)
 
 	tests := []struct {
-		name          string
-		headers       map[string]string
-		expectedCode  int
-		expectedError bool
+		name            string
+		headers         map[string]string
+		expectedCode    int
+		expectedError   bool
+		responseUpgrade []string
 	}{
 		{
 			name: "WebSocket upgrade request with valid headers",
@@ -87,6 +88,26 @@ func TestWebSocketHandler(t *testing.T) {
 			expectedError: true,
 		},
 		{
+			name: "WebSocket request with a different Upgrade token",
+			headers: map[string]string{
+				"Upgrade":               "h2c",
+				"Connection":            "Upgrade",
+				"Sec-WebSocket-Key":     "dGhlIHNhbXBsZSBub25jZQ==",
+				"Sec-WebSocket-Version": "13",
+			},
+			expectedCode:  http.StatusBadRequest,
+			expectedError: true,
+		},
+		{
+			name: "Missing Upgrade token with middleware response header values",
+			headers: map[string]string{
+				"Connection": "Upgrade",
+			},
+			expectedCode:    http.StatusBadRequest,
+			expectedError:   true,
+			responseUpgrade: []string{"existing", "alternate"},
+		},
+		{
 			name: "WebSocket request with missing Connection header",
 			headers: map[string]string{
 				"Upgrade":               "websocket",
@@ -103,6 +124,12 @@ func TestWebSocketHandler(t *testing.T) {
 			// Setup router with WebSocket handler
 			router := gin.New()
 			router.Use(gin.Recovery()) // Add recovery middleware to catch panics
+			router.Use(func(c *gin.Context) {
+				for _, value := range tt.responseUpgrade {
+					c.Writer.Header().Add("Upgrade", value)
+				}
+				c.Next()
+			})
 			router.GET("/ws", handleWebSocket(testkit.GetTestRuntime(testRuntimeDeps)))
 
 			// Create request with headers
@@ -115,8 +142,53 @@ func TestWebSocketHandler(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedCode, w.Code)
+			if tt.expectedError {
+				assert.Equal(t, "Bad Request\n", w.Body.String())
+				wantHeader := http.Header{
+					"Content-Type":           []string{"text/plain; charset=utf-8"},
+					"Sec-Websocket-Version":  []string{"13"},
+					"X-Content-Type-Options": []string{"nosniff"},
+				}
+				if tt.responseUpgrade != nil {
+					wantHeader["Upgrade"] = tt.responseUpgrade
+				}
+				assert.Equal(t, wantHeader, w.Result().Header)
+			}
 		})
 	}
+}
+
+func TestWebSocketHandlerPreservesConfiguredUpgradeError(t *testing.T) {
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+		req.Header.Set("Connection", "Upgrade")
+		return req
+	}
+	rt := testkit.GetTestRuntime(newTestRuntimeDeps(ws.NewHub()))
+	var callbackStatuses []int
+	upgrader := websocket.Upgrader{
+		Error: func(w http.ResponseWriter, _ *http.Request, status int, err error) {
+			callbackStatuses = append(callbackStatuses, status)
+			assert.Error(t, err)
+			w.WriteHeader(http.StatusUnprocessableEntity)
+		},
+	}
+	// The route must not wrap an explicitly configured callback or remap its status.
+	rawResponse := httptest.NewRecorder()
+	_, err := upgrader.Upgrade(rawResponse, newRequest(), nil)
+	require.Error(t, err)
+	require.Len(t, callbackStatuses, 1)
+	rt.GetRuntime().SetWebSocketUpgraderForTesting(upgrader)
+	router := gin.New()
+	router.GET("/ws", handleWebSocket(rt))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, newRequest())
+
+	require.Len(t, callbackStatuses, 2)
+	require.Equal(t, callbackStatuses[0], callbackStatuses[1])
+	require.Equal(t, http.StatusUnprocessableEntity, response.Code)
+	require.Equal(t, rawResponse.Result().Header, response.Result().Header)
 }
 
 // TestWebSocketHub tests the WebSocket hub integration

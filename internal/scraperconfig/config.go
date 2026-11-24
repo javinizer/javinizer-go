@@ -325,8 +325,6 @@ func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *Prox
 	mode := ResolveScraperProxyMode(global, scraperOverride)
 
 	switch mode {
-	case ScraperProxyModeDirect:
-		return &ProxyProfile{} // Empty = no proxy
 	case ScraperProxyModeInherit:
 		return ResolveGlobalProxy(global)
 	case ScraperProxyModeSpecific:
@@ -350,8 +348,10 @@ func ResolveScraperProxy(global ProxyConfig, scraperOverride *ProxyConfig) *Prox
 		}
 		// Profile not found → fallback to inherit
 		return ResolveGlobalProxy(global)
+	default:
+		// Direct and unrecognized modes must not select any proxy.
+		return &ProxyProfile{}
 	}
-	return &ProxyProfile{}
 }
 
 // ResolveGlobalProxy returns the effective global proxy profile, including the
@@ -443,6 +443,11 @@ type ScraperSettings struct {
 // Nil pointers must be passed to yaml.Marshal/json.Marshal (which emit null),
 // rather than invoking these value-receiver methods directly.
 func (s ScraperSettings) MarshalYAML() (interface{}, error) {
+	return s.marshalSettingsMap(), nil
+}
+
+// marshalSettingsMap is the common presence-preserving wire shape.
+func (s ScraperSettings) marshalSettingsMap() map[string]any {
 	result := make(map[string]any)
 
 	if len(s.ActressNameOverrides) > 0 {
@@ -493,17 +498,12 @@ func (s ScraperSettings) MarshalYAML() (interface{}, error) {
 		result["respect_retry_after"] = *s.RespectRetryAfter
 	}
 
-	return result, nil
+	return result
 }
 
 // MarshalJSON uses the same presence-preserving shape as YAML serialization.
 func (s ScraperSettings) MarshalJSON() ([]byte, error) {
-	// Reuse MarshalYAML logic
-	result, err := s.MarshalYAML()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(result)
+	return json.Marshal(s.marshalSettingsMap())
 }
 
 // Clone returns a deep copy of the ScraperSettings.

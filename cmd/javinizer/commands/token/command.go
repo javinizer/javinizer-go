@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/api/token"
 	"github.com/javinizer/javinizer-go/internal/commandutil"
-	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/spf13/cobra"
 )
@@ -73,23 +73,28 @@ func newListCommand() *cobra.Command {
 	return cmd
 }
 
-// RunCreate creates a new API token and returns the result with the full token value.
-func RunCreate(cmd *cobra.Command, args []string, configFile string) (*tokenCreateResult, error) {
-	name, _ := cmd.Flags().GetString("name")
-
-	cfg, err := config.LoadOrCreate(configFile)
+// openTokenDependencies applies the same startup configuration and validation
+// for every token command. The caller owns the returned dependencies.
+func openTokenDependencies(configFile string) (*commandutil.CoreDeps, error) {
+	cfg, err := commandutil.LoadCLIConfig(configFile, "invalid configuration", nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, err
 	}
 
 	deps, err := commandutil.NewDependencies(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+	}
+	return deps, nil
+}
+
+// RunCreate creates a new API token and returns the result with the full token value.
+func RunCreate(cmd *cobra.Command, args []string, configFile string) (*tokenCreateResult, error) {
+	name, _ := cmd.Flags().GetString("name")
+
+	deps, err := openTokenDependencies(configFile)
+	if err != nil {
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 
@@ -162,19 +167,9 @@ func runCreate(cmd *cobra.Command, configFile string) error {
 func RunRevoke(cmd *cobra.Command, args []string, configFile string) (*tokenRevokeResult, error) {
 	idOrPrefix := args[0]
 
-	cfg, err := config.LoadOrCreate(configFile)
+	deps, err := openTokenDependencies(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	deps, err := commandutil.NewDependencies(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 
@@ -249,19 +244,9 @@ func runRevoke(cmd *cobra.Command, configFile string, idOrPrefix string) error {
 
 // RunList returns all active (non-revoked) API tokens as list entries.
 func RunList(cmd *cobra.Command, args []string, configFile string) ([]tokenListEntry, error) {
-	cfg, err := config.LoadOrCreate(configFile)
+	deps, err := openTokenDependencies(configFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
-	}
-
-	deps, err := commandutil.NewDependencies(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize dependencies: %w", err)
+		return nil, err
 	}
 	defer func() { _ = deps.Close() }()
 
@@ -303,32 +288,32 @@ func runList(cmd *cobra.Command, configFile string) error {
 		return err
 	}
 
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tPREFIX\tNAME\tCREATED\tLAST USED"); err != nil {
-		return err
-	}
+	return writeTokenListTable(cmd.OutOrStdout(), result)
+}
 
-	for _, t := range result {
-		name := t.Name
-		if name == "" {
-			name = "(unnamed)"
-		}
-		if len(name) > 30 {
-			name = name[:27] + "..."
+func writeTokenListTable(output io.Writer, entries []tokenListEntry) error {
+	w := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
+	// Format the header and each entry through the same checked write.
+	for i := 0; i <= len(entries); i++ {
+		row := [5]string{"ID", "PREFIX", "NAME", "CREATED", "LAST USED"}
+		if i > 0 {
+			t := entries[i-1]
+			name := t.Name
+			if name == "" {
+				name = "(unnamed)"
+			}
+			if len(name) > 30 {
+				name = name[:27] + "..."
+			}
+
+			lastUsed := "never"
+			if t.LastUsedAt != nil {
+				lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
+			}
+			row = [5]string{shortID(t.ID), "jv_" + t.TokenPrefix, name, t.CreatedAt.Format("2006-01-02 15:04"), lastUsed}
 		}
 
-		lastUsed := "never"
-		if t.LastUsedAt != nil {
-			lastUsed = t.LastUsedAt.Format("2006-01-02 15:04")
-		}
-
-		if _, err := fmt.Fprintf(w, "%s\tjv_%s\t%s\t%s\t%s\n",
-			shortID(t.ID),
-			t.TokenPrefix,
-			name,
-			t.CreatedAt.Format("2006-01-02 15:04"),
-			lastUsed,
-		); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", row[0], row[1], row[2], row[3], row[4]); err != nil {
 			return err
 		}
 	}

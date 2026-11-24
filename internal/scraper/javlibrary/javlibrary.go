@@ -301,12 +301,12 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 	return nil, models.NewScraperNotFoundError("JavLibrary", "page does not contain video info")
 }
 
-func (s *scraper) GetURL(ctx context.Context, id string) (string, error) {
-	return s.getURLCtx(ctx, id)
+func (s *scraper) GetURL(_ context.Context, id string) (string, error) {
+	return s.keywordSearchURL(id), nil
 }
 
-func (s *scraper) getURLCtx(ctx context.Context, id string) (string, error) {
-	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id)), nil
+func (s *scraper) keywordSearchURL(id string) string {
+	return fmt.Sprintf("%s/%s/vl_searchbyid.php?keyword=%s", s.baseURL, s.language, url.QueryEscape(id))
 }
 
 // Search searches for a movie by ID with context support.
@@ -332,11 +332,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return s.parseDetailPage(html, pageID, redactPageURL(id), languageFromURL(id, s.language))
 	}
 
-	searchURL, err := s.getURLCtx(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
+	searchURL := s.keywordSearchURL(id)
 	// Fetch the search page
 	html, err := s.fetchPageCtx(ctx, searchURL)
 	if err != nil {
@@ -433,15 +429,12 @@ func (s *scraper) fetchPageCtx(ctx context.Context, url string) (string, error) 
 		)
 	}
 
-	html := string(resp.Body())
-	if challengedetect.IsCloudflareChallengePage(html) {
-		return "", models.NewScraperChallengeError(
-			"JavLibrary",
-			"JavLibrary returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
-		)
-	}
-
-	return html, nil
+	// The earlier direct-success path returns every non-challenge HTTP 200.
+	// The solver did not succeed, so the original direct challenge remains.
+	return "", models.NewScraperChallengeError(
+		"JavLibrary",
+		"JavLibrary returned a Cloudflare challenge page (request blocked; enable FlareSolverr or adjust proxy/IP)",
+	)
 }
 
 // parseDetailPage parses a JavLibrary detail page HTML
@@ -1034,14 +1027,12 @@ func (s *scraper) extractMovieURLFromHTML(html string, searchID string) string {
 	// Pattern 1: Current JavLibrary format uses relative HTML links
 	// e.g., <div class="video" id="vid_javliat76u"> with <div class="id">ONED-025</div>
 	matches := reVideoThumbDiv.FindAllStringSubmatch(html, -1)
+	normalizedSearch := strings.ToUpper(strings.ReplaceAll(searchID, "-", ""))
 
 	firstVidID := ""
 	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
+		// reVideoThumbDiv captures the displayed catalog ID in group 1.
 		displayID := strings.ToUpper(strings.ReplaceAll(m[1], "-", ""))
-		normalizedSearch := strings.ToUpper(strings.ReplaceAll(searchID, "-", ""))
 
 		// Extract vid_ ID from the full match (order-independent)
 		vidMatch := reVideoThumbID.FindStringSubmatch(m[0])

@@ -11,6 +11,7 @@ import (
 	apiauth "github.com/javinizer/javinizer-go/internal/api/auth"
 	apicore "github.com/javinizer/javinizer-go/internal/api/core"
 	apiserver "github.com/javinizer/javinizer-go/internal/api/server"
+	"github.com/javinizer/javinizer-go/internal/commandutil"
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/desktop"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -63,22 +64,16 @@ func NewCommand() *cobra.Command {
 // Exported for testing purposes (Epic 7 Story 7.1).
 // Returns initialized APIDeps for the API server.
 func Run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) (*apicore.APIDeps, *apicore.APIRuntime, error) {
-	cfg, err := config.LoadOrCreate(configFile)
+	cfg, err := commandutil.LoadCLIConfig(configFile, "invalid configuration", func(cfg *config.Config) {
+		if hostFlag != "" {
+			cfg.Server.Host = hostFlag
+		}
+		if portFlag != 0 {
+			cfg.Server.Port = portFlag
+		}
+	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	config.ApplyEnvironmentOverrides(cfg)
-
-	if hostFlag != "" {
-		cfg.Server.Host = hostFlag
-	}
-	if portFlag != 0 {
-		cfg.Server.Port = portFlag
-	}
-
-	if _, err := config.Prepare(cfg); err != nil {
-		return nil, nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, nil, err
 	}
 
 	logging.Infof("Loaded configuration from %s", configFile)
@@ -120,15 +115,7 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 		return fmt.Errorf("failed to initialize API dependencies: %w", err)
 	}
 	drained := false
-	defer func() {
-		if drained {
-			if err := rt.CloseAfterHTTPDrain(10 * time.Second); err != nil {
-				logging.Warnf("API cleanup failed: %v", err)
-			}
-		} else {
-			rt.Shutdown()
-		}
-	}()
+	defer func() { closeServerRuntime(rt, drained) }()
 
 	router := apiserver.NewServer(rt)
 
@@ -170,4 +157,17 @@ func run(cmd *cobra.Command, configFile string, hostFlag string, portFlag int) e
 	}
 	drained = true
 	return serveErr
+}
+
+// closeServerRuntime is the CLI's final teardown step. Only a drained HTTP
+// server permits dependency closure; otherwise shutdown only signals and joins
+// server-owned work, leaving resources available to still-running handlers.
+func closeServerRuntime(rt *apicore.APIRuntime, drained bool) {
+	if !drained {
+		rt.Shutdown()
+		return
+	}
+	if err := rt.CloseAfterHTTPDrain(10 * time.Second); err != nil {
+		logging.Warnf("API cleanup failed: %v", err)
+	}
 }

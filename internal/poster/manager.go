@@ -115,40 +115,12 @@ func (pm *PosterManager) WithSSRFCheck(fn ssrfCheckFunc) *PosterManager {
 // NOTE: ctx is currently unused because the image crop operation does not
 // support cancellation; it is accepted for forward compatibility.
 func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID string, x, y, width, height, maxPosterHeight int) (*cropResult, error) {
-	if err := ValidateJobID(jobID); err != nil {
-		return nil, err
-	}
-	if err := validatePosterID(posterID); err != nil {
-		return nil, err
-	}
-
-	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
-	sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
-	sourceIsFull := true
-
-	// Fallback for older jobs where the full image was cleaned up.
-	if _, err := pm.fs.Stat(sourcePath); err != nil {
-		sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
-		sourceIsFull = false
-	}
-
-	if _, err := pm.fs.Stat(sourcePath); err != nil {
-		return nil, fmt.Errorf("source poster not found for manual crop: %w", err)
-	}
-	identity, err := assetidentity.Measure(pm.fs, sourcePath)
+	source, err := pm.prepareManualCrop(jobID, posterID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to measure source poster: %w", err)
-	}
-
-	croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
-
-	// Defense in depth: ensure both paths are inside tempPosterDir.
-	if err := validatePathWithinDir(sourcePath, tempPosterDir); err != nil {
 		return nil, err
 	}
-	if err := validatePathWithinDir(croppedPath, tempPosterDir); err != nil {
-		return nil, err
-	}
+
+	sourcePath, croppedPath := source.path, source.croppedPath
 
 	left := x
 	top := y
@@ -176,9 +148,9 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 		CroppedPath:       croppedPath,
 		FullPath:          sourcePath,
 		CroppedURL:        croppedURL,
-		SourceFull:        sourceIsFull,
-		SourceRevision:    identity.Revision,
-		SourceFingerprint: identity.Fingerprint,
+		SourceFull:        source.isFull,
+		SourceRevision:    source.identity.Revision,
+		SourceFingerprint: source.identity.Fingerprint,
 	}
 	// Record the source dimensions; a decode failure leaves them zero and the
 	// caller treats the geometry as not applyable (pre-change behavior).
@@ -193,33 +165,12 @@ func (pm *PosterManager) CropWithBounds(_ context.Context, jobID, posterID strin
 // with SSRF checks, writes the full image, and attempts an automatic crop
 // (falling back to a simple copy if cropping fails).
 func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, rawURL, userAgent, referer string) (*cropResult, error) {
-	if err := ValidateJobID(jobID); err != nil {
-		return nil, err
-	}
-	if err := validatePosterID(posterID); err != nil {
+	target, err := pm.prepareDownloadTarget(jobID, posterID, rawURL)
+	if err != nil {
 		return nil, err
 	}
 
-	// SSRF mitigation: validate URL scheme and reject private/reserved IPs.
-	if err := pm.ssrfCheck(rawURL); err != nil {
-		return nil, fmt.Errorf("SSRF validation failed: %w", err)
-	}
-
-	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
-	if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
-		return nil, fmt.Errorf("failed to create temp poster directory: %w", err)
-	}
-
-	tempFullPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
-	tempCroppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
-
-	// Defense in depth: ensure paths are inside tempPosterDir.
-	if err := validatePathWithinDir(tempFullPath, tempPosterDir); err != nil {
-		return nil, err
-	}
-	if err := validatePathWithinDir(tempCroppedPath, tempPosterDir); err != nil {
-		return nil, err
-	}
+	tempPosterDir, tempFullPath, tempCroppedPath := target.dir, target.fullPath, target.croppedPath
 
 	// Build HTTP request.
 	downloadReq, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
@@ -380,6 +331,82 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 	}, nil
 }
 
+type manualCropSource struct {
+	path, croppedPath string
+	isFull            bool
+	identity          assetidentity.AssetRevision
+}
+
+// prepareManualCrop resolves the full or legacy source and captures its
+// identity before creating or installing a preview.
+func (pm *PosterManager) prepareManualCrop(jobID, posterID string) (manualCropSource, error) {
+	if err := ValidateJobID(jobID); err != nil {
+		return manualCropSource{}, err
+	}
+	if err := validatePosterID(posterID); err != nil {
+		return manualCropSource{}, err
+	}
+
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	sourcePath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
+	sourceIsFull := true
+
+	// Fallback for older jobs where the full image was cleaned up.
+	if _, err := pm.fs.Stat(sourcePath); err != nil {
+		sourcePath = filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+		sourceIsFull = false
+	}
+
+	if _, err := pm.fs.Stat(sourcePath); err != nil {
+		return manualCropSource{}, fmt.Errorf("source poster not found for manual crop: %w", err)
+	}
+	identity, err := assetidentity.Measure(pm.fs, sourcePath)
+	if err != nil {
+		return manualCropSource{}, fmt.Errorf("failed to measure source poster: %w", err)
+	}
+
+	croppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+
+	// Defense in depth: ensure the selected source and preview are contained
+	// before creating a staged sibling or installing an image.
+	return manualCropSource{
+		path: sourcePath, croppedPath: croppedPath, isFull: sourceIsFull, identity: identity,
+	}, validatePathsWithinDir(tempPosterDir, sourcePath, croppedPath)
+}
+
+type posterDownloadTarget struct {
+	dir, fullPath, croppedPath string
+}
+
+// prepareDownloadTarget checks URL admission and prepares the destination,
+// leaving transfer and the two-asset replacement lifecycle to the caller.
+func (pm *PosterManager) prepareDownloadTarget(jobID, posterID, rawURL string) (posterDownloadTarget, error) {
+	if err := ValidateJobID(jobID); err != nil {
+		return posterDownloadTarget{}, err
+	}
+	if err := validatePosterID(posterID); err != nil {
+		return posterDownloadTarget{}, err
+	}
+
+	// SSRF mitigation: validate URL scheme and reject private/reserved IPs.
+	if err := pm.ssrfCheck(rawURL); err != nil {
+		return posterDownloadTarget{}, fmt.Errorf("SSRF validation failed: %w", err)
+	}
+
+	tempPosterDir := filepath.Join(pm.tempDir, "posters", jobID)
+	if err := pm.fs.MkdirAll(tempPosterDir, configDirPermTemp); err != nil {
+		return posterDownloadTarget{}, fmt.Errorf("failed to create temp poster directory: %w", err)
+	}
+
+	tempFullPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s-full.jpg", posterID))
+	tempCroppedPath := filepath.Join(tempPosterDir, fmt.Sprintf("%s.jpg", posterID))
+
+	// Defense in depth: ensure both paths are contained before any transfer.
+	return posterDownloadTarget{
+		dir: tempPosterDir, fullPath: tempFullPath, croppedPath: tempCroppedPath,
+	}, validatePathsWithinDir(tempPosterDir, tempFullPath, tempCroppedPath)
+}
+
 // validatePosterID ensures the posterID is a safe, non-empty filename
 // component with no path traversal.
 func validatePosterID(posterID string) error {
@@ -402,13 +429,15 @@ func ValidateJobID(jobID string) error {
 	return err
 }
 
-// validatePathWithinDir checks that the cleaned path starts with the
-// cleaned directory plus a path separator, preventing path traversal.
-func validatePathWithinDir(path, dir string) error {
+// validatePathsWithinDir checks that each cleaned path starts with the
+// cleaned directory plus a path separator. It reports the first path outside
+// the directory.
+func validatePathsWithinDir(dir string, paths ...string) error {
 	cleanDir := filepath.Clean(dir) + string(os.PathSeparator)
-	cleanPath := filepath.Clean(path)
-	if !strings.HasPrefix(cleanPath, cleanDir) {
-		return fmt.Errorf("path %q escapes directory %q", path, dir)
+	for _, path := range paths {
+		if !strings.HasPrefix(filepath.Clean(path), cleanDir) {
+			return fmt.Errorf("path %q escapes directory %q", path, dir)
+		}
 	}
 	return nil
 }

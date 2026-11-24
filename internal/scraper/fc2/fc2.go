@@ -161,12 +161,7 @@ func (s *scraper) ScrapeURL(ctx context.Context, rawURL string) (*models.Scraper
 		return nil, fmt.Errorf("failed to parse FC2 detail page: %w", err)
 	}
 
-	result := parseDetailPage(doc, html, rawURL, articleID)
-	if result == nil || strings.TrimSpace(result.ID) == "" {
-		return nil, models.NewScraperNotFoundError("FC2", "failed to parse FC2 page")
-	}
-
-	return result, nil
+	return parseIdentifiedDetailPage(doc, rawURL, resolveDetailArticleID(html, rawURL, articleID)), nil
 }
 
 func (s *scraper) ResolveSearchQuery(input string) (string, bool) {
@@ -214,11 +209,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s does not match FC2 ID format", id))
 	}
 
-	detailURL, err := s.getURLCtx(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
+	detailURL := s.buildArticleURL(expectedArticleID)
 	html, status, err := s.fetchPageCtx(ctx, detailURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch FC2 detail page: %w", err)
@@ -239,11 +230,7 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 		return nil, fmt.Errorf("failed to parse FC2 detail page: %w", err)
 	}
 
-	result := parseDetailPage(doc, html, detailURL, expectedArticleID)
-	if result == nil || strings.TrimSpace(result.ID) == "" {
-		return nil, models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s not found on FC2", id))
-	}
-
+	result := parseIdentifiedDetailPage(doc, detailURL, resolveDetailArticleID(html, detailURL, expectedArticleID))
 	if actualArticleID := extractArticleID(result.ID); actualArticleID != "" && expectedArticleID != actualArticleID {
 		return nil, models.NewScraperNotFoundError("FC2", fmt.Sprintf("movie %s not found on FC2", id))
 	}
@@ -258,6 +245,14 @@ func ParseHTML(doc *goquery.Document, html, sourceURL string) *models.ScraperRes
 }
 
 func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID string) *models.ScraperResult {
+	articleID := resolveDetailArticleID(html, sourceURL, fallbackArticleID)
+	if articleID == "" {
+		return nil
+	}
+	return parseIdentifiedDetailPage(doc, sourceURL, articleID)
+}
+
+func resolveDetailArticleID(html, sourceURL, fallbackArticleID string) string {
 	articleID := strings.TrimSpace(fallbackArticleID)
 	if id := extractArticleID(sourceURL); id != "" {
 		articleID = id
@@ -266,16 +261,18 @@ func parseDetailPage(doc *goquery.Document, html, sourceURL, fallbackArticleID s
 		articleID = id
 	}
 
-	if articleID == "" {
-		return nil
-	}
+	return articleID
+}
 
+// parseIdentifiedDetailPage builds metadata once the caller has an article ID.
+func parseIdentifiedDetailPage(doc *goquery.Document, sourceURL, articleID string) *models.ScraperResult {
+	id := canonicalFC2ID(articleID)
 	result := &models.ScraperResult{
 		Source:           "fc2",
 		SourceURL:        sourceURL,
 		Language:         "ja",
-		ID:               canonicalFC2ID(articleID),
-		ContentID:        canonicalFC2ID(articleID),
+		ID:               id,
+		ContentID:        id,
 		ShouldCropPoster: false,
 	}
 

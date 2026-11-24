@@ -61,17 +61,42 @@ func validateRoot(root string) error {
 	if err != nil || string(marker) != disposableMarker {
 		return errors.New("refusing unmarked fixture directory")
 	}
-	for _, name := range []string{"names.db", "names.db-wal", "names.db-shm", "fixture.json", "config.yaml", "worker.paused", "worker.release"} {
-		info, err := os.Lstat(filepath.Join(root, name))
+	return prepareFixturePaths(root, []string{"names.db", "names.db-wal", "names.db-shm", "fixture.json", "config.yaml", "worker.paused", "worker.release"}, fixtureStateFile)
+}
+
+type fixturePathKind uint8
+
+const (
+	fixtureStateFile fixturePathKind = iota
+	fixtureDirectory
+)
+
+// prepareFixturePaths checks each path without following its final symlink.
+// Missing state files are allowed but never created here. Directories are
+// checked and created in the caller's order, which puts parents before children.
+func prepareFixturePaths(root string, names []string, kind fixturePathKind) error {
+	for _, name := range names {
+		path := filepath.Join(root, name)
+		info, err := os.Lstat(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if err == nil && !info.Mode().IsRegular() {
-			return errors.New("fixture state must be regular files")
+		if kind == fixtureStateFile {
+			if err == nil && !info.Mode().IsRegular() {
+				return errors.New("fixture state must be regular files")
+			}
+			continue
+		}
+		if err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+			return errors.New("fixture directories must not be symlinks")
+		}
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
 func run() error {
 	root := os.Getenv("JAVINIZER_SYNC_E2E_ROOT")
 	if err := validateRoot(root); err != nil {
@@ -97,18 +122,8 @@ func run() error {
 	if err != nil || pause < -1 {
 		return errors.New("invalid pause count")
 	}
-	for _, name := range []string{"tmp", "artifacts", "artifacts/ready", "artifacts/stale", "artifacts/future", "artifacts/missing"} {
-		path := filepath.Join(root, name)
-		info, err := os.Lstat(path)
-		if err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
-			return errors.New("fixture directories must not be symlinks")
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.MkdirAll(path, 0700); err != nil {
-			return err
-		}
+	if err := prepareFixturePaths(root, []string{"tmp", "artifacts", "artifacts/ready", "artifacts/stale", "artifacts/future", "artifacts/missing"}, fixtureDirectory); err != nil {
+		return err
 	}
 	_, fixtureErr := os.Stat(filepath.Join(root, "fixture.json"))
 	_, dbErr := os.Stat(filepath.Join(root, "names.db"))
@@ -125,10 +140,9 @@ func run() error {
 		return err
 	}
 	if errors.Is(fixtureErr, os.ErrNotExist) {
-		if err := provision(root, db); err != nil {
-			return err
-		}
-	} else if fixtureErr != nil {
+		fixtureErr = provision(root, db)
+	}
+	if fixtureErr != nil {
 		return fixtureErr
 	}
 	cfg := config.DefaultConfig(nil, nil)

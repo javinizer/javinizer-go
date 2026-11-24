@@ -116,10 +116,9 @@ func TestResolveScraperProxy(t *testing.T) {
 		assert.Equal(t, "", profile.URL)
 	})
 
-	t.Run("direct mode returns empty profile when override disabled", func(t *testing.T) {
-		override := &ProxyConfig{Enabled: false}
-		profile := ResolveScraperProxy(global, override)
-		assert.Equal(t, "", profile.URL)
+	t.Run("disabled override does not inherit global URL or credentials", func(t *testing.T) {
+		override := &ProxyConfig{Enabled: false, Profile: "backup"}
+		assert.Equal(t, &ProxyProfile{}, ResolveScraperProxy(global, override))
 	})
 
 	t.Run("inherit mode returns global default when nil override", func(t *testing.T) {

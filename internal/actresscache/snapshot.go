@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -129,13 +130,28 @@ func (s *Snapshot) LookupUnique(namespace, value string) (UniqueLookupResult, er
 	if _, err := SourceKey(namespace, value); err != nil {
 		return UniqueLookupResult{}, err
 	}
-	indexes := s.byExternalID[ExternalID{namespace, value}]
+	return s.lookupUnique(ExternalID{namespace, value}), nil
+}
+
+// LookupDMMID returns unique evidence for a positive numeric DMM identifier.
+// It looks up the exact decimal key: claims such as "07" never match 7.
+// Nonpositive values have no evidence. The result provides no authority to
+// select a local identity or change it.
+func (s *Snapshot) LookupDMMID(id int) UniqueLookupResult {
+	if id <= 0 {
+		return UniqueLookupResult{}
+	}
+	return s.lookupUnique(ExternalID{"dmm", strconv.Itoa(id)})
+}
+
+func (s *Snapshot) lookupUnique(key ExternalID) UniqueLookupResult {
+	indexes := s.byExternalID[key]
 	if len(indexes) > 1 {
-		return UniqueLookupResult{Ambiguous: true}, nil
+		return UniqueLookupResult{Ambiguous: true}
 	}
 	if len(indexes) == 0 {
-		return UniqueLookupResult{}, nil
+		return UniqueLookupResult{}
 	}
 	candidate := cloneEvidence(s.records[indexes[0]])
-	return UniqueLookupResult{Candidate: &candidate}, nil
+	return UniqueLookupResult{Candidate: &candidate}
 }

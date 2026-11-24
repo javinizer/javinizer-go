@@ -544,12 +544,8 @@ func firstNonEmpty(values []string) string {
 }
 
 func normalizeMovieURL(raw, base string) (string, bool) {
-	if !scraperutil.IsHTTPURL(raw) {
-		return "", false
-	}
-
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
+	parsed := scraperutil.ParseHTTPURL(raw)
+	if parsed == nil {
 		return "", false
 	}
 	host := strings.ToLower(parsed.Hostname())
@@ -675,10 +671,6 @@ func (s *scraper) filterPlaceholderScreenshotsCtx(ctx context.Context, result *m
 	}
 
 	cfg := placeholder.ConfigFromSettings(&s.settings, placeholder.DefaultDMMPlaceholderHashes)
-	if !cfg.Enabled {
-		return
-	}
-
 	filtered, count := placeholder.FilterURLs(ctx, s.client, result.ScreenshotURL, cfg)
 	if count > 0 {
 		logging.Debugf("libredmm: Filtered %d placeholder screenshots", count)
