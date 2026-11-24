@@ -58,10 +58,7 @@ func (s *TokenService) Regenerate(ctx context.Context, id string) (*models.ApiTo
 // issueToken sends only the hash and display prefix to storage and returns
 // the plaintext token only after storage succeeds.
 func issueToken(persist func(hash, prefix string) (*models.ApiToken, error)) (*models.ApiToken, string, error) {
-	fullToken, prefix, err := GenerateToken()
-	if err != nil {
-		return nil, "", err
-	}
+	fullToken, prefix := generateTokenMaterial()
 
 	token, err := persist(HashToken(fullToken), prefix)
 	if err != nil {
