@@ -1390,20 +1390,21 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 
 	// Filter to matching movieID AND processable status
 	var matching []models.BatchFileOperation
-	noopMatching := 0
+	var matchedCount, noopMatching, revertedMatching int
 	for i := range ops {
 		if ops[i].MovieID != movieID {
 			continue
 		}
+		matchedCount++
 		// codex P2 (PR #241 F2): a completed-noop row (authorized duplicate
 		// skip mutated nothing) is terminal — it never enters the revert
-		// selection, and a movie whose ONLY rows are noop completes trivially
-		// success-shaped so the batch's fully-reverted accounting can close.
-		if ops[i].RevertStatus == models.RevertStatusNoOp {
+		// selection, and noop rows retain the success-shaped empty result.
+		switch ops[i].RevertStatus {
+		case models.RevertStatusNoOp:
 			noopMatching++
-			continue
-		}
-		if ops[i].RevertStatus == models.RevertStatusApplied || ops[i].RevertStatus == models.RevertStatusFailed {
+		case models.RevertStatusReverted:
+			revertedMatching++
+		case models.RevertStatusApplied, models.RevertStatusFailed:
 			matching = append(matching, ops[i])
 		}
 	}
@@ -1411,6 +1412,11 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 	if len(matching) == 0 {
 		if noopMatching > 0 {
 			return &RevertBatchResult{}, nil
+		}
+		// Only report a repeat when every matching row was actually reverted.
+		// Unrelated and unknown states retain their existing verdicts.
+		if matchedCount > 0 && revertedMatching == matchedCount {
+			return nil, ErrBatchAlreadyReverted
 		}
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
 	}

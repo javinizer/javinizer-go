@@ -179,30 +179,69 @@ func TestRunHistoryRevert_ScrapeIDsAlreadyReverted(t *testing.T) {
 	createOrganizedJob(t, db, batchID)
 
 	batchRepo := database.NewBatchFileOperationRepository(db)
-	ctx := context.Background()
-	require.NoError(t, batchRepo.Create(ctx, &models.BatchFileOperation{
+	ctx := t.Context()
+	root := t.TempDir()
+	source := filepath.Join(root, "incoming", "alr.mp4")
+	destination := filepath.Join(root, "organized", "alr.mp4")
+	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(destination), 0o755))
+	require.NoError(t, os.WriteFile(destination, []byte("organized video"), 0o644))
+	target := &models.BatchFileOperation{
 		BatchJobID:    batchID,
 		MovieID:       "ALR-001",
-		OriginalPath:  "/old/alr.mp4",
-		NewPath:       "/new/alr.mp4",
+		OriginalPath:  source,
+		NewPath:       destination,
 		OperationType: models.OperationTypeMove,
-		RevertStatus:  models.RevertStatusReverted,
+		RevertStatus:  models.RevertStatusApplied,
+	}
+	require.NoError(t, batchRepo.Create(ctx, target))
+	// A different pending movie keeps the batch organized, so a retry with
+	// --scrape-ids reaches the per-movie revert rather than the batch status gate.
+	otherSource := filepath.Join(root, "incoming", "other.mp4")
+	otherDestination := filepath.Join(root, "organized", "other.mp4")
+	require.NoError(t, os.WriteFile(otherDestination, []byte("pending video"), 0o644))
+	require.NoError(t, batchRepo.Create(ctx, &models.BatchFileOperation{
+		BatchJobID: batchID, MovieID: "OTHER-001", OriginalPath: otherSource, NewPath: otherDestination,
+		OperationType: models.OperationTypeMove, RevertStatus: models.RevertStatusApplied,
 	}))
 
-	rootCmd := &cobra.Command{Use: "root"}
-	rootCmd.PersistentFlags().String("config", configPath, "config file")
-	cmd := NewCommand()
-	rootCmd.AddCommand(cmd)
-	rootCmd.SetArgs([]string{"history", "revert", batchID, "--scrape-ids", "ALR-001"})
-
+	run := func() {
+		rootCmd := &cobra.Command{Use: "root"}
+		rootCmd.PersistentFlags().String("config", configPath, "config file")
+		rootCmd.AddCommand(NewCommand())
+		rootCmd.SetArgs([]string{"history", "revert", batchID, "--scrape-ids", "ALR-001"})
+		require.NoError(t, rootCmd.Execute())
+	}
 	output := captureMissOutput(t, func() {
-		err := rootCmd.Execute()
+		run()
+		before, err := batchRepo.FindByBatchJobID(ctx, batchID)
 		require.NoError(t, err)
-	})
+		reverted, err := batchRepo.FindByID(ctx, target.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.RevertStatusReverted, reverted.RevertStatus)
+		jobRepo := database.NewJobRepository(db)
+		job, err := jobRepo.FindByID(ctx, batchID)
+		require.NoError(t, err)
+		require.Equal(t, models.JobStatusOrganized, job.Status)
 
-	// When all operations for a movie are already reverted, RevertScrape returns
-	// "no processable operations found" (not ErrBatchAlreadyReverted)
-	assert.Contains(t, output, "Failed to revert movie ALR-001")
+		run()
+		after, err := batchRepo.FindByBatchJobID(ctx, batchID)
+		require.NoError(t, err)
+		require.ElementsMatch(t, before, after)
+		jobAfter, err := jobRepo.FindByID(ctx, batchID)
+		require.NoError(t, err)
+		require.Equal(t, job, jobAfter)
+	})
+	require.NoFileExists(t, destination)
+	require.NoFileExists(t, otherSource)
+	require.Contains(t, output, "Reverting ALR-001: 1 succeeded, 0 failed")
+	require.Contains(t, output, "Movie ALR-001 in batch "+batchID+" is already reverted")
+	require.NotContains(t, output, "Failed to revert movie ALR-001")
+	for path, content := range map[string]string{source: "organized video", otherDestination: "pending video"} {
+		got, err := os.ReadFile(path)
+		require.NoError(t, err, path)
+		require.Equal(t, content, string(got), path)
+	}
 }
 
 // --- runHistoryRevert: scrape-ids with non-existent movie ---
@@ -270,9 +309,9 @@ func TestRunHistoryRevert_ScrapeIDsMultiple(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	// Already reverted operations get "Failed to revert movie" from RevertScrape
-	assert.Contains(t, output, "Failed to revert movie MUL-001")
-	assert.Contains(t, output, "Failed to revert movie MUL-002")
+	assert.Contains(t, output, "Movie MUL-001 in batch "+batchID+" is already reverted")
+	assert.Contains(t, output, "Movie MUL-002 in batch "+batchID+" is already reverted")
+	assert.NotContains(t, output, "Failed to revert movie")
 }
 
 // --- runHistoryRevert: scrape-ids where revert succeeds and job status updates ---
