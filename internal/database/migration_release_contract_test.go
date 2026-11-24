@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	dbmigrations "github.com/javinizer/javinizer-go/internal/database/migrations"
 	"github.com/mattn/go-sqlite3"
 	gooselock "github.com/pressly/goose/v3/lock"
 	"github.com/stretchr/testify/require"
@@ -120,7 +121,7 @@ func TestStartupMigrationReleaseFailurePrecedence(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
-			err = db.runMigrationsWithLocker(ctx, sqlDB, locker)
+			err = db.runMigrationsWithLocker(ctx, sqlDB, locker, dbmigrations.Filesystem())
 			if rejectMigration {
 				require.ErrorContains(t, err, "database migration failed:")
 				require.ErrorContains(t, err, "backup created at")
@@ -189,7 +190,7 @@ func TestStartupMigrationFailedAcquisitionDoesNotRelease(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err = db.runMigrationsWithLocker(ctx, sqlDB, locker)
+	err = db.runMigrationsWithLocker(ctx, sqlDB, locker, dbmigrations.Filesystem())
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualError(t, err, "acquire startup migration lock: context canceled")
 	require.Equal(t, []string{"lock"}, fileLock.calls)
