@@ -797,14 +797,13 @@ func cleanupEmptyDirFS(fs afero.Fs, dirPath string, stopAt string) {
 	stop := filepath.Clean(stopAt)
 
 	for current != "" && current != "." && current != "/" && current != filepath.ToSlash(filepath.VolumeName(current)+"/") && current != stop {
-		// Stop at the first nonempty, unreadable, or unremovable directory.
-		if !fsutil.TryRemoveEmptyDir(fs, current) {
-			return
-		}
-		// Walk up to parent
+		// Stop at a filesystem root using native path semantics before filesystem I/O.
 		parent := filepath.Dir(current)
 		if parent == current {
-			// Reached filesystem root
+			return
+		}
+		// Stop at the first nonempty, unreadable, or unremovable directory.
+		if !fsutil.TryRemoveEmptyDir(fs, current) {
 			return
 		}
 		current = parent
