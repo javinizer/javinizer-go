@@ -55,16 +55,17 @@ func cloneEvidence(record *actresscache.Evidence) *actresscache.Evidence {
 	owned.ExternalIDs = append([]actresscache.ExternalID(nil), record.ExternalIDs...)
 	return &owned
 }
-func (q Query) validate() error {
+
+// lookupKeys checks the query before a snapshot read or provider selection.
+func (q Query) lookupKeys() (reference string, claim actresscache.ExternalIDLookupKey, err error) {
 	if (q.Reference == nil) == (q.Claim == nil) {
-		return fmt.Errorf("exactly one reference or claim is required")
+		err = fmt.Errorf("exactly one reference or claim is required")
+	} else if q.Reference != nil {
+		reference, err = actresscache.SourceKey(q.Reference.Source, q.Reference.ID)
+	} else {
+		claim, err = actresscache.NewExternalIDLookupKey(q.Claim.Namespace, q.Claim.Value)
 	}
-	if q.Reference != nil {
-		_, err := actresscache.SourceKey(q.Reference.Source, q.Reference.ID)
-		return err
-	}
-	_, err := actresscache.SourceKey(q.Claim.Namespace, q.Claim.Value)
-	return err
+	return reference, claim, err
 }
 
 // Outcome describes evidence availability without granting mutation authority.
@@ -123,7 +124,8 @@ func (p *SnapshotProvider) LookupEvidence(ctx context.Context, q Query) (Result,
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if err := q.validate(); err != nil {
+	referenceKey, claimKey, err := q.lookupKeys()
+	if err != nil {
 		return Result{}, err
 	}
 	if p.snapshot == nil {
@@ -135,16 +137,12 @@ func (p *SnapshotProvider) LookupEvidence(ctx context.Context, q Query) (Result,
 		if q.Reference.Source != p.source {
 			return result, nil
 		}
-		key, _ := actresscache.SourceKey(q.Reference.Source, q.Reference.ID)
-		if record, ok := p.snapshot.Get(key); ok {
+		if record, ok := p.snapshot.Get(referenceKey); ok {
 			candidate = &record
 		}
 	} else {
 		// Check all owners BEFORE source selection; never erase competing claims.
-		match, err := p.snapshot.LookupUnique(q.Claim.Namespace, q.Claim.Value)
-		if err != nil {
-			return Result{}, err
-		}
+		match := p.snapshot.LookupUniqueKey(claimKey)
 		if match.Ambiguous {
 			result.Outcome = Ambiguous
 			return result, nil
@@ -254,7 +252,7 @@ func (r *Registry) Resolve(ctx context.Context, q Query, priorities []string) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := q.validate(); err != nil {
+	if _, _, err := q.lookupKeys(); err != nil {
 		return nil, err
 	}
 	if len(priorities) > MaxProviders {
