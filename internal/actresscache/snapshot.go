@@ -122,15 +122,35 @@ type UniqueLookupResult struct {
 	Ambiguous bool
 }
 
+// ExternalIDLookupKey carries a checked, exact external claim for a snapshot
+// lookup. It is not evidence that the claim is true or belongs to a local actor.
+// The zero value matches no record.
+type ExternalIDLookupKey struct{ claim ExternalID }
+
+// NewExternalIDLookupKey checks claim syntax without accessing any snapshot.
+func NewExternalIDLookupKey(namespace, value string) (ExternalIDLookupKey, error) {
+	if _, err := SourceKey(namespace, value); err != nil {
+		return ExternalIDLookupKey{}, err
+	}
+	return ExternalIDLookupKey{claim: ExternalID{namespace, value}}, nil
+}
+
 // LookupUnique returns an owned record only when exactly one source key claims
 // this exact external ID. It does not infer or verify a local actor's identity.
 // Ambiguity is checked before freshness/source preference, so filtering cannot
 // turn contradictory evidence into permission to choose an identity.
 func (s *Snapshot) LookupUnique(namespace, value string) (UniqueLookupResult, error) {
-	if _, err := SourceKey(namespace, value); err != nil {
+	key, err := NewExternalIDLookupKey(namespace, value)
+	if err != nil {
 		return UniqueLookupResult{}, err
 	}
-	return s.lookupUnique(ExternalID{namespace, value}), nil
+	return s.LookupUniqueKey(key), nil
+}
+
+// LookupUniqueKey applies the same ambiguity and ownership rules to a previously
+// checked claim. Callers that already checked input need not validate it again.
+func (s *Snapshot) LookupUniqueKey(key ExternalIDLookupKey) UniqueLookupResult {
+	return s.lookupUnique(key.claim)
 }
 
 // LookupDMMID returns unique evidence for a positive numeric DMM identifier.
