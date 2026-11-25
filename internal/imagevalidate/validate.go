@@ -91,7 +91,12 @@ func Validate(ctx context.Context, input io.Reader, limits Limits) (image.Config
 	if err != nil {
 		return image.Config{}, "", fmt.Errorf("decode image: %w", err)
 	}
-	bounds := decoded.Bounds()
+	return confirmDecodedDimensions(config, format, decoded.Bounds())
+}
+
+// confirmDecodedDimensions checks the decoder postcondition before returning
+// the probed metadata to callers.
+func confirmDecodedDimensions(config image.Config, format string, bounds image.Rectangle) (image.Config, string, error) {
 	if bounds.Dx() != config.Width || bounds.Dy() != config.Height {
 		return image.Config{}, "", fmt.Errorf("decoded image differs from configuration")
 	}
